@@ -23,6 +23,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - Login OAuth no navegador com retorno ao próprio computador e PKCE, página de conclusão própria
   em pt-BR/inglês, renovação automática do acesso e guarda dos tokens no chaveiro do sistema.
 - Guia para criar o próprio Client ID no Google Cloud (`docs/guia-client-id.md`).
+- Cliente da Drive API v3: listagem paginada, metadados, download por intervalo, pastas, atalhos,
+  lixeira, mudanças e upload multipart ou retomável (continua de onde parou após queda ou
+  reinício), com recuo exponencial nas falhas passageiras e renovação do acesso após um 401.
 
 ## [0.0.1] - 2026-10-25
 

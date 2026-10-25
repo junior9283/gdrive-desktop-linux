@@ -647,6 +647,7 @@ version = "0.1.0-dev"
 name = "gdl-common"
 version = "0.1.0-dev"
 dependencies = [
+ "chrono",
  "fluent-bundle",
  "serde",
  "sha2 0.11.1",
@@ -668,6 +669,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "bytes",
  "gdl-common",
  "gdl-fake-drive",
  "oo7",
@@ -693,7 +695,6 @@ version = "0.1.0-dev"
 dependencies = [
  "axum",
  "base64 0.22.1",
- "chrono",
  "futures-util",
  "gdl-common",
  "md-5 0.11.0",

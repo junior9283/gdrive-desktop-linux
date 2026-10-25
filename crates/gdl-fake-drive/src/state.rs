@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use axum::body::Bytes;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::{DateTime, SecondsFormat};
 use md5::{Digest, Md5};
 use rand::Rng;
 use rand::distr::Alphanumeric;
@@ -28,19 +27,7 @@ pub(crate) fn random_id(len: usize) -> String {
         .collect()
 }
 
-pub(crate) use gdl_common::time::now_ms;
-
-pub(crate) fn rfc3339(ms: i64) -> String {
-    DateTime::from_timestamp_millis(ms)
-        .unwrap_or_default()
-        .to_rfc3339_opts(SecondsFormat::Millis, true)
-}
-
-pub(crate) fn parse_rfc3339(text: &str) -> Option<i64> {
-    DateTime::parse_from_rfc3339(text)
-        .ok()
-        .map(|d| d.timestamp_millis())
-}
+pub(crate) use gdl_common::time::{now_ms, parse_rfc3339, rfc3339};
 
 fn md5_hex(bytes: &[u8]) -> String {
     Md5::digest(bytes)

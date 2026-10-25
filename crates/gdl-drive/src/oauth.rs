@@ -31,8 +31,7 @@ const REFRESH_MARGIN_MS: i64 = 60_000;
 
 /// Cliente HTTP do login, com prazos para uma conexão pendurada não travar o app.
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
+    crate::http_builder()
         .timeout(Duration::from_secs(30))
         .build()
         .expect("configuração fixa do cliente HTTP")

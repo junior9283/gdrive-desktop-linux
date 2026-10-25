@@ -38,6 +38,7 @@ impl axum::serve::Listener for FaultyListener {
                             inner,
                             shared: self.shared.clone(),
                             dead: false,
+                            stalled: false,
                         },
                         addr,
                     );
@@ -58,6 +59,8 @@ pub(crate) struct FaultyIo {
     shared: Arc<Shared>,
     /// Depois de cair, a conexão não volta: nem a resposta de erro chega ao cliente.
     dead: bool,
+    /// Parada: nada mais trafega, e ninguém é acordado.
+    stalled: bool,
 }
 
 fn cut() -> io::Error {
@@ -69,7 +72,14 @@ fn cut() -> io::Error {
 
 impl FaultyIo {
     fn check(&mut self, transferred: usize) -> io::Result<()> {
-        self.dead |= self.shared.offline.load(Ordering::SeqCst) || self.shared.consume(transferred);
+        if self.shared.consume(transferred) {
+            if self.shared.stall.load(Ordering::SeqCst) {
+                self.stalled = true;
+            } else {
+                self.dead = true;
+            }
+        }
+        self.dead |= self.shared.offline.load(Ordering::SeqCst);
         if self.dead { Err(cut()) } else { Ok(()) }
     }
 }
@@ -80,6 +90,9 @@ impl AsyncRead for FaultyIo {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
+        if self.stalled {
+            return Poll::Pending;
+        }
         self.check(0)?;
         let before = buf.filled().len();
         let poll = Pin::new(&mut self.inner).poll_read(cx, buf);
@@ -96,6 +109,12 @@ impl AsyncWrite for FaultyIo {
         cx: &mut Context<'_>,
         data: &[u8],
     ) -> Poll<io::Result<usize>> {
+        if self.stalled {
+            return Poll::Pending;
+        }
+        if self.shared.cut_next_write.swap(false, Ordering::SeqCst) {
+            self.dead = true;
+        }
         self.check(0)?;
         let poll = Pin::new(&mut self.inner).poll_write(cx, data);
         if let Poll::Ready(Ok(n)) = poll {

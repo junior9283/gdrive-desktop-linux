@@ -29,6 +29,12 @@ pub enum Fault {
     QuotaExceeded { times: u32 },
     /// A conexão cai depois de trafegar mais `n` bytes (uma vez só).
     DropConnectionAfterBytes(u64),
+    /// As próximas `times` criações (POST na API) são processadas, mas a resposta se perde (a
+    /// conexão cai antes de ela chegar ao cliente).
+    LoseCreateResponses { times: u32 },
+    /// A conexão para de andar, sem cair, depois de trafegar mais `n` bytes (uma vez só): o
+    /// envio fica no meio, como quando o serviço morre durante a transferência.
+    StallConnectionAfterBytes(u64),
     /// Toda conexão cai até `clear_faults`.
     Offline,
 }
@@ -195,17 +201,29 @@ impl FakeDrive {
                     times,
                 });
             }
-            Fault::DropConnectionAfterBytes(n) => {
-                self.shared.drop_budget.store(n as i64, Ordering::SeqCst)
-            }
+            Fault::DropConnectionAfterBytes(n) => self.limit_bytes(n, false),
+            Fault::StallConnectionAfterBytes(n) => self.limit_bytes(n, true),
+            Fault::LoseCreateResponses { times } => self.shared.state().lose_responses = times,
             Fault::Offline => self.shared.offline.store(true, Ordering::SeqCst),
         }
     }
 
     pub fn clear_faults(&self) {
-        self.shared.state().fault = None;
+        {
+            let mut state = self.shared.state();
+            state.fault = None;
+            state.lose_responses = 0;
+        }
         self.shared.drop_budget.store(-1, Ordering::SeqCst);
+        self.shared.stall.store(false, Ordering::SeqCst);
+        self.shared.cut_next_write.store(false, Ordering::SeqCst);
         self.shared.offline.store(false, Ordering::SeqCst);
+    }
+
+    /// Depois de `n` bytes, a conexão cai (ou, com `stall`, empaca).
+    fn limit_bytes(&self, n: u64, stall: bool) {
+        self.shared.stall.store(stall, Ordering::SeqCst);
+        self.shared.drop_budget.store(n as i64, Ordering::SeqCst);
     }
 
     /// Bytes de conteúdo entregues por `alt=media`.

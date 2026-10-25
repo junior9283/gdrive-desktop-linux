@@ -279,6 +279,17 @@ async fn closing_a_duplicated_pointer_descriptor_makes_one_shortcut() {
     assert!(m.fake.find_live("Copia.gdoc").is_empty());
 }
 
+/// Bug: sem a resposta da criação, a pasta era criada duas vezes no Drive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mkdir_with_lost_response_creates_one_folder() {
+    let m = Mounted::new(FakeDrive::start().await).await;
+    m.fake.inject(Fault::LoseCreateResponses { times: 1 });
+
+    std::fs::create_dir(m.drive().join("Viagem")).unwrap();
+
+    assert_eq!(m.fake.find_live("Viagem").len(), 1);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mkdir_offline_is_created_later() {
     let m = Mounted::new(FakeDrive::start().await).await;

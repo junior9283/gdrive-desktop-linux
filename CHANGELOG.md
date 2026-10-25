@@ -7,6 +7,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.1.0] - 2026-10-25
+
 ### Adicionado
 - Documento de design com o catálogo de funcionalidades, a arquitetura, o roteiro e os testes
   (`docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md`).
@@ -70,9 +72,16 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   navegador pelo duplo clique (tipos MIME e atalho `.desktop`); o endereço vem do ID validado,
   nunca do campo `url` do arquivo.
 
+- Suíte "nunca perder dados" (queda no meio do envio, rede instável, disco cheio e tempestade de
+  conflitos) e guia dos testes em `docs/testes/`.
+
 ### Corrigido
 - Um arquivo ou pasta criado aqui podia ser criado duas vezes no Drive quando a consulta de
   mudanças o via antes do fim do envio.
+- Um arquivo ou pasta podia ser criado duas vezes no Drive quando a rede caía na hora da resposta:
+  toda criação agora usa um ID reservado, e a repetição não duplica.
+- Com a rede de volta, ou depois de reiniciar, os envios que esperavam a rede ficavam até 30 s
+  parados; agora saem na hora.
 
 ## [0.0.1] - 2026-10-25
 
@@ -82,5 +91,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.0.1...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/junior9283/gdrive-desktop-linux/releases/tag/v0.0.1

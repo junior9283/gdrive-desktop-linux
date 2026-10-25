@@ -142,6 +142,8 @@ pub struct UploadJob {
     pub next_try_ms: i64,
     /// Sessão de upload retomável, quando já aberta.
     pub session_url: Option<String>,
+    /// ID reservado no Drive para criar o item (`files.generateIds`).
+    pub file_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,4 +151,6 @@ pub struct NewUploadJob {
     pub item: ItemId,
     pub kind: UploadKind,
     pub next_try_ms: i64,
+    /// ID já reservado no Drive para a criação, se houver.
+    pub file_id: Option<String>,
 }

@@ -20,7 +20,7 @@ use crate::events::{EngineEvent, SyncSummary};
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, initial_index};
 use crate::lost_found::LostAndFound;
 use crate::pins::PinManager;
-use crate::uploads::{UploadWorker, recover_on_start};
+use crate::uploads::{UploadOutcome, UploadWorker, recover_on_start};
 
 /// De quanto em quanto tempo cada laço do serviço roda.
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +49,7 @@ pub struct Engine {
     pub(crate) client: Arc<DriveClient>,
     pub(crate) cache: BlockCache,
     pins: PinManager,
-    uploads: UploadWorker,
+    pub(crate) uploads: UploadWorker,
     poller: ChangePoller,
     lost: LostAndFound,
     data_dir: PathBuf,
@@ -233,6 +233,8 @@ impl Engine {
         loop {
             if !self.is_paused() {
                 match self.uploads.run_once().await {
+                    // O envio é o primeiro a ver a rede cair; a consulta de mudanças vê a volta.
+                    Ok(Some(UploadOutcome::Offline)) => self.poller.report_offline(),
                     // Tinha trabalho: tenta o próximo sem esperar.
                     Ok(Some(_)) => continue,
                     Ok(None) => {}

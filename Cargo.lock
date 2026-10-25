@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-cli"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "clap",
  "futures-util",
@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-common"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "fluent-bundle",
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-daemon"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "fuser",
  "futures-util",
@@ -832,7 +832,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-drive"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-engine"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-fake-drive"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -893,7 +893,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-fs"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-store"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "gdl-common",
  "rusqlite",

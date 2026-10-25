@@ -140,6 +140,24 @@ impl ChangePoller {
         self.offline.load(Ordering::Relaxed)
     }
 
+    /// Um envio deu com o Drive inacessível: sem internet até a próxima consulta bem-sucedida,
+    /// que libera os envios que ficaram esperando a rede.
+    pub fn report_offline(&self) {
+        self.set_offline(true);
+    }
+
+    /// Avisa quando a rede cai e volta; na volta, libera os envios que esperavam por ela.
+    fn set_offline(&self, now_offline: bool) {
+        if self.offline.swap(now_offline, Ordering::Relaxed) == now_offline {
+            return;
+        }
+        if !now_offline && let Err(e) = self.store.wake_network_waiters(now_ms()) {
+            tracing::warn!(erro = %e, "falha ao retomar os envios que esperavam a rede");
+        }
+        // Sem ninguém ouvindo, o aviso pode se perder.
+        let _ = self.events.send(EngineEvent::Offline(now_offline));
+    }
+
     pub fn last_sync_ms(&self) -> Option<i64> {
         Some(self.last_sync_ms.load(Ordering::Relaxed)).filter(|&ms| ms != 0)
     }
@@ -162,10 +180,7 @@ impl ChangePoller {
     pub async fn poll(&self) {
         let result = self.run_once().await;
         let now_offline = matches!(result, Err(EngineError::Drive(DriveError::Offline)));
-        if self.offline.swap(now_offline, Ordering::Relaxed) != now_offline {
-            // Sem ninguém ouvindo, o aviso pode se perder.
-            let _ = self.events.send(EngineEvent::Offline(now_offline));
-        }
+        self.set_offline(now_offline);
         match result {
             Ok(_) => self.last_sync_ms.store(now_ms(), Ordering::Relaxed),
             Err(_) if now_offline => {}
@@ -301,5 +316,32 @@ mod tests {
         poller.poll().await;
         assert_eq!(rx.try_recv().unwrap(), EngineEvent::Offline(false));
         assert!(!poller.is_offline() && poller.last_sync_ms().is_some());
+    }
+
+    /// Bug: um envio que dava sem rede logo depois de a consulta ver a rede voltar ficava 30 s
+    /// parado; o aviso do envio faz a próxima consulta bem-sucedida liberá-lo.
+    #[tokio::test]
+    async fn upload_reporting_offline_is_woken_by_the_next_good_poll() {
+        let env = Env::new().await;
+        initial_index(&env.store, &env.client).await.unwrap();
+        let (poller, mut rx) = env.poller();
+        poller.poll().await;
+        let job = env
+            .store
+            .enqueue(gdl_store::NewUploadJob {
+                item: env.root(),
+                kind: gdl_store::UploadKind::Update,
+                next_try_ms: 0,
+                file_id: None,
+            })
+            .unwrap();
+        env.store.wait_for_network(job, i64::MAX).unwrap();
+
+        poller.report_offline();
+        poller.poll().await;
+
+        assert!(env.store.next_job(now_ms()).unwrap().is_some());
+        assert_eq!(rx.try_recv().unwrap(), EngineEvent::Offline(true));
+        assert_eq!(rx.try_recv().unwrap(), EngineEvent::Offline(false));
     }
 }

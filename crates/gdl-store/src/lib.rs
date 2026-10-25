@@ -271,8 +271,8 @@ impl Store {
     pub fn enqueue(&self, job: NewUploadJob) -> Result<i64> {
         let conn = self.conn();
         conn.execute(
-            "INSERT INTO upload_queue (item_id, kind, next_try_ms) VALUES (?1, ?2, ?3)",
-            params![job.item.0, job.kind, job.next_try_ms],
+            "INSERT INTO upload_queue (item_id, kind, next_try_ms, file_id) VALUES (?1, ?2, ?3, ?4)",
+            params![job.item.0, job.kind, job.next_try_ms, job.file_id],
         )?;
         Ok(conn.last_insert_rowid())
     }
@@ -281,7 +281,8 @@ impl Store {
     pub fn next_job(&self, now_ms: i64) -> Result<Option<UploadJob>> {
         let conn = self.conn();
         let mut stmt = conn.prepare_cached(
-            "SELECT job_id, item_id, kind, attempts, next_try_ms, session_url FROM upload_queue \
+            "SELECT job_id, item_id, kind, attempts, next_try_ms, session_url, file_id \
+             FROM upload_queue \
              WHERE next_try_ms <= ?1 ORDER BY next_try_ms, job_id LIMIT 1",
         )?;
         let job = stmt
@@ -293,6 +294,7 @@ impl Store {
                     attempts: r.get(3)?,
                     next_try_ms: r.get(4)?,
                     session_url: r.get(5)?,
+                    file_id: r.get(6)?,
                 })
             })
             .optional()?;
@@ -307,7 +309,8 @@ impl Store {
 
     pub fn retry_job(&self, job_id: i64, next_try_ms: i64) -> Result<()> {
         self.conn().execute(
-            "UPDATE upload_queue SET attempts = attempts + 1, next_try_ms = ?2 WHERE job_id = ?1",
+            "UPDATE upload_queue SET attempts = attempts + 1, next_try_ms = ?2, waiting_network = 0 \
+             WHERE job_id = ?1",
             [job_id, next_try_ms],
         )?;
         Ok(())
@@ -335,10 +338,28 @@ impl Store {
         Ok(changed == 1)
     }
 
-    /// Adia o envio sem contar tentativa (sem internet, por exemplo).
+    /// Adia o envio por falta de rede até `next_try_ms` ou até `wake_network_waiters`.
+    pub fn wait_for_network(&self, job_id: i64, next_try_ms: i64) -> Result<()> {
+        self.conn().execute(
+            "UPDATE upload_queue SET next_try_ms = ?2, waiting_network = 1 WHERE job_id = ?1",
+            [job_id, next_try_ms],
+        )?;
+        Ok(())
+    }
+
+    /// A rede voltou (ou o serviço reiniciou): os envios que esperavam por ela ficam para já.
+    pub fn wake_network_waiters(&self, now_ms: i64) -> Result<usize> {
+        Ok(self.conn().execute(
+            "UPDATE upload_queue SET next_try_ms = MIN(next_try_ms, ?1), waiting_network = 0
+             WHERE waiting_network = 1",
+            [now_ms],
+        )?)
+    }
+
+    /// Adia o envio sem contar tentativa (a pasta-mãe ainda não subiu, por exemplo).
     pub fn postpone_job(&self, job_id: i64, next_try_ms: i64) -> Result<()> {
         self.conn().execute(
-            "UPDATE upload_queue SET next_try_ms = ?2 WHERE job_id = ?1",
+            "UPDATE upload_queue SET next_try_ms = ?2, waiting_network = 0 WHERE job_id = ?1",
             [job_id, next_try_ms],
         )?;
         Ok(())
@@ -408,6 +429,14 @@ impl Store {
             params![inode, dst.0],
         )?;
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn set_job_file_id(&self, job_id: i64, file_id: &str) -> Result<()> {
+        self.conn().execute(
+            "UPDATE upload_queue SET file_id = ?2 WHERE job_id = ?1",
+            params![job_id, file_id],
+        )?;
         Ok(())
     }
 
@@ -746,6 +775,7 @@ mod tests {
                 item: id("a"),
                 kind: UploadKind::Update,
                 next_try_ms: 0,
+                file_id: None,
             })
             .unwrap();
         let b = store
@@ -753,6 +783,7 @@ mod tests {
                 item: id("b"),
                 kind: UploadKind::Create,
                 next_try_ms: 1000,
+                file_id: None,
             })
             .unwrap();
         store
@@ -810,6 +841,7 @@ mod tests {
                 item: id("b"),
                 kind: UploadKind::Update,
                 next_try_ms: 0,
+                file_id: None,
             })
             .unwrap();
 
@@ -863,6 +895,7 @@ mod tests {
                 item: id("local:1"),
                 kind: UploadKind::Update,
                 next_try_ms: 0,
+                file_id: None,
             })
             .unwrap();
 
@@ -889,6 +922,7 @@ mod tests {
                 item: id("a"),
                 kind: UploadKind::Create,
                 next_try_ms: 0,
+                file_id: None,
             })
             .unwrap();
 
@@ -910,11 +944,52 @@ mod tests {
                 item: id("a"),
                 kind: UploadKind::Update,
                 next_try_ms: 0,
+                file_id: None,
             })
             .unwrap();
         store.postpone_job(job, 100).unwrap();
         assert!(store.next_job(50).unwrap().is_none());
         assert_eq!(store.next_job(100).unwrap().unwrap().attempts, 0);
+    }
+
+    /// Um envio que esperou a rede e depois foi adiado por outro motivo mantém o novo prazo
+    /// quando a rede volta de novo.
+    #[test]
+    fn rescheduled_job_no_longer_waits_for_network() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let new_job = || NewUploadJob {
+            item: id("a"),
+            kind: UploadKind::Update,
+            next_try_ms: 0,
+            file_id: None,
+        };
+        let retried = store.enqueue(new_job()).unwrap();
+        let postponed = store.enqueue(new_job()).unwrap();
+        for job in [retried, postponed] {
+            store.wait_for_network(job, 100).unwrap();
+        }
+        store.retry_job(retried, 500).unwrap();
+        store.postpone_job(postponed, 500).unwrap();
+
+        assert_eq!(store.wake_network_waiters(0).unwrap(), 0);
+        assert!(store.next_job(499).unwrap().is_none());
+    }
+
+    #[test]
+    fn enqueue_keeps_the_reserved_file_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .enqueue(NewUploadJob {
+                item: id("local-a"),
+                kind: UploadKind::Create,
+                next_try_ms: 0,
+                file_id: Some("reservado".into()),
+            })
+            .unwrap();
+        let job = store.next_job(0).unwrap().unwrap();
+        assert_eq!(job.file_id.as_deref(), Some("reservado"));
     }
 
     #[test]
@@ -935,6 +1010,7 @@ mod tests {
                 item: id("queued"),
                 kind: UploadKind::Update,
                 next_try_ms: 0,
+                file_id: None,
             })
             .unwrap();
         assert_eq!(store.dirty_items_without_job().unwrap(), [id("orphan")]);

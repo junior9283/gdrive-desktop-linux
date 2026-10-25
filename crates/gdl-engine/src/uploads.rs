@@ -16,6 +16,7 @@ use tokio::sync::broadcast;
 use crate::cache::BlockCache;
 use crate::changes::merge;
 use crate::events::{EngineEvent, LostReason};
+use crate::ids::IdPool;
 use crate::indexer::{ACCOUNT_EMAIL, item_from_remote};
 use crate::lost_found::LostAndFound;
 use crate::{EngineError, Result};
@@ -33,7 +34,9 @@ pub enum UploadOutcome {
     Uploaded(ItemId),
     /// A edição não pôde subir e foi guardada no `Lost and Found`.
     Preserved { path: PathBuf, reason: LostReason },
-    /// Sem internet, ou pasta-mãe ainda local: tenta depois, sem contar tentativa.
+    /// Sem internet: tenta quando a rede voltar, sem contar tentativa.
+    Offline,
+    /// Pasta-mãe ainda local: tenta depois, sem contar tentativa.
     Waiting,
     /// Falha passageira: tenta depois, pelo recuo.
     Retrying,
@@ -50,7 +53,13 @@ pub fn is_local_id(id: &ItemId) -> bool {
 pub const UPLOAD_DELAY_MS: i64 = 2_000;
 
 /// Enfileira o envio do conteúdo local: `Create` para item só local, `Update` para os do Drive.
-pub(crate) fn enqueue_upload(store: &Store, id: &ItemId, next_try_ms: i64) -> Result<()> {
+/// `file_id`: ID já reservado para a criação.
+pub(crate) fn enqueue_upload(
+    store: &Store,
+    id: &ItemId,
+    next_try_ms: i64,
+    file_id: Option<String>,
+) -> Result<()> {
     let kind = if is_local_id(id) {
         UploadKind::Create
     } else {
@@ -60,6 +69,7 @@ pub(crate) fn enqueue_upload(store: &Store, id: &ItemId, next_try_ms: i64) -> Re
         item: id.clone(),
         kind,
         next_try_ms,
+        file_id,
     })?;
     Ok(())
 }
@@ -129,21 +139,23 @@ pub fn commit_local_write_at(
         store.ranges_add(id, 0, size)?;
     }
     if !local_only {
-        enqueue_upload(store, id, next_try_ms)?;
+        enqueue_upload(store, id, next_try_ms, None)?;
     }
     Ok(())
 }
 
-/// Na partida do serviço: toda edição pendente sem envio na fila (o serviço caiu entre gravar e
-/// enfileirar) ganha um envio. Devolve quantos foram enfileirados.
+/// Na partida do serviço: os envios que esperavam a rede tentam de novo na hora, e toda edição
+/// pendente sem envio na fila (o serviço caiu entre gravar e enfileirar) ganha um envio. Devolve
+/// quantos foram enfileirados.
 pub fn recover_on_start(store: &Store, cache: &BlockCache) -> Result<usize> {
+    store.wake_network_waiters(now_ms())?;
     let mut queued = 0;
     for id in store.dirty_items_without_job()? {
         if !cache.local_path(&id).exists() {
             tracing::warn!(item = %id.0, "edição pendente sem conteúdo local; nada a enviar");
             continue;
         }
-        enqueue_upload(store, &id, 0)?;
+        enqueue_upload(store, &id, 0, None)?;
         queued += 1;
     }
     Ok(queued)
@@ -176,6 +188,7 @@ pub struct UploadWorker {
     lost: LostAndFound,
     events: broadcast::Sender<EngineEvent>,
     retry: Backoff,
+    ids: IdPool,
 }
 
 impl UploadWorker {
@@ -193,6 +206,7 @@ impl UploadWorker {
             lost,
             events,
             retry: Backoff::default(),
+            ids: IdPool::default(),
         }
     }
 
@@ -243,12 +257,17 @@ impl UploadWorker {
                 .postpone_job(job.job_id, now_ms() + PARENT_WAIT_MS)?;
             return Ok(UploadOutcome::Waiting);
         }
+        let file_id = match self.file_id(job).await {
+            Ok(id) => id,
+            Err(EngineError::Drive(e)) => return self.failed(job, item, e).await,
+            Err(e) => return Err(e),
+        };
         self.store
             .set_local_state(&item.id, LocalState::Uploading)?;
         let result = match item.kind {
             ItemKind::Folder => {
                 self.client
-                    .create_folder(&parent.0, &item.remote_name)
+                    .create_folder(&parent.0, &item.remote_name, Some(&file_id))
                     .await
             }
             _ => {
@@ -261,6 +280,7 @@ impl UploadWorker {
                         &src,
                         item.modified_ms,
                         &session,
+                        Some(&file_id),
                     )
                     .await
             }
@@ -274,6 +294,22 @@ impl UploadWorker {
             }
             Err(e) => self.failed(job, item, e).await,
         }
+    }
+
+    /// ID reservado no Drive para um item novo.
+    pub async fn reserve_id(&self) -> std::result::Result<String, DriveError> {
+        self.ids.take(&self.client).await
+    }
+
+    /// O ID reservado do job; o primeiro fica guardado na fila, para a criação repetida (mesmo
+    /// depois de reiniciar) não duplicar o item.
+    async fn file_id(&self, job: &UploadJob) -> Result<String> {
+        if let Some(id) = &job.file_id {
+            return Ok(id.clone());
+        }
+        let id = self.reserve_id().await?;
+        self.store.set_job_file_id(job.job_id, &id)?;
+        Ok(id)
     }
 
     async fn update(&self, job: &UploadJob, item: Item) -> Result<UploadOutcome> {
@@ -336,8 +372,9 @@ impl UploadWorker {
             .transition_local_state(&item.id, LocalState::Uploading, LocalState::Dirty)?;
         let now = now_ms();
         if matches!(e, DriveError::Offline) {
-            self.store.postpone_job(job.job_id, now + OFFLINE_WAIT_MS)?;
-            return Ok(UploadOutcome::Waiting);
+            self.store
+                .wait_for_network(job.job_id, now + OFFLINE_WAIT_MS)?;
+            return Ok(UploadOutcome::Offline);
         }
         let delay = self.retry.delay(job.attempts).as_millis() as i64;
         self.store.retry_job(job.job_id, now + delay)?;
@@ -707,7 +744,7 @@ mod tests {
         s.edit(&id, b"novo").await;
         s.env.fake.inject(Fault::Offline);
 
-        assert_eq!(s.run().await, Some(UploadOutcome::Waiting));
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
 
         let job = s.env.store.next_job(i64::MAX).unwrap().unwrap();
         assert_eq!(job.attempts, 0);
@@ -720,6 +757,81 @@ mod tests {
         assert_eq!(s.env.fake.content(&id.0), b"novo");
     }
 
+    /// Bug: a resposta da criação se perdia, a nova tentativa criava o arquivo de novo e o Drive
+    /// ficava com duas cópias.
+    #[tokio::test]
+    async fn lost_create_response_does_not_duplicate_the_file() {
+        let s = setup(Env::new().await).await;
+        s.write_new(&s.env.root(), "novo.txt", b"uma vez");
+        s.env.fake.inject(Fault::LoseCreateResponses { times: 1 });
+
+        let Some(UploadOutcome::Uploaded(id)) = s.run().await else {
+            panic!("esperava envio");
+        };
+
+        assert_eq!(s.env.fake.find_live("novo.txt"), vec![id.0.clone()]);
+        assert_eq!(s.env.fake.content(&id.0), b"uma vez");
+    }
+
+    /// O ID reservado fica no job: a criação que perdeu a resposta e só é repetida depois (rede
+    /// fora, serviço reiniciado) também não duplica.
+    #[tokio::test]
+    async fn reserved_id_survives_in_the_queue_between_attempts() {
+        let s = setup(Env::with_tries(1).await).await;
+        s.write_new(&s.env.root(), "novo.txt", b"uma vez");
+        s.env.fake.inject(Fault::LoseCreateResponses { times: 1 });
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
+        let job = s.env.store.next_job(i64::MAX).unwrap().unwrap();
+        s.env.store.postpone_job(job.job_id, 0).unwrap();
+
+        let Some(UploadOutcome::Uploaded(id)) = s.run().await else {
+            panic!("esperava envio");
+        };
+
+        assert_eq!(s.env.fake.find_live("novo.txt"), vec![id.0]);
+    }
+
+    /// Bug: com a rede de volta, o envio ainda esperava até 30 s.
+    #[tokio::test]
+    async fn network_return_wakes_uploads_waiting_for_it() {
+        let env = Env::new().await;
+        let id = ItemId(
+            env.fake
+                .add_file(&env.fake.root_id(), "a.txt", b"velho".to_vec()),
+        );
+        let s = setup(env).await;
+        let (poller, _events) = s.env.poller();
+        s.edit(&id, b"novo").await;
+        s.env.fake.inject(Fault::Offline);
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
+        poller.poll().await;
+
+        s.env.fake.clear_faults();
+        poller.poll().await;
+
+        assert_eq!(s.run().await, Some(UploadOutcome::Uploaded(id.clone())));
+        assert_eq!(s.env.fake.content(&id.0), b"novo");
+    }
+
+    /// Bug: depois de reiniciar, o envio que esperava a rede ainda esperava até 30 s.
+    #[tokio::test]
+    async fn restart_wakes_uploads_waiting_for_network() {
+        let env = Env::new().await;
+        let id = ItemId(
+            env.fake
+                .add_file(&env.fake.root_id(), "a.txt", b"velho".to_vec()),
+        );
+        let s = setup(env).await;
+        s.edit(&id, b"novo").await;
+        s.env.fake.inject(Fault::Offline);
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
+        s.env.fake.clear_faults();
+
+        recover_on_start(&s.env.store, &s.cache).unwrap();
+
+        assert_eq!(s.run().await, Some(UploadOutcome::Uploaded(id.clone())));
+    }
+
     #[tokio::test]
     async fn drop_during_resumable_upload_resumes() {
         let s = setup(Env::with_tries(1).await).await;
@@ -729,7 +841,7 @@ mod tests {
             .fake
             .inject(Fault::DropConnectionAfterBytes(10 * MIB as u64));
 
-        assert_eq!(s.run().await, Some(UploadOutcome::Waiting));
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
         let job = s.env.store.next_job(i64::MAX).unwrap().unwrap();
         assert!(job.session_url.is_some(), "a sessão ficou guardada na fila");
 

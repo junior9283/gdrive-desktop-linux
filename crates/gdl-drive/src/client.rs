@@ -87,7 +87,15 @@ async fn error_from(resp: reqwest::Response) -> DriveError {
         (403, _) => DriveError::PermissionDenied,
         // 410: sessão de upload expirada.
         (404 | 410, _) => DriveError::NotFound,
+        (409, _) => DriveError::AlreadyExists,
         (s, _) => DriveError::Http(s),
+    }
+}
+
+/// Pede o `id` reservado na criação.
+fn with_id(meta: &mut Value, id: Option<&str>) {
+    if let Some(id) = id {
+        meta["id"] = id.into();
     }
 }
 
@@ -289,11 +297,47 @@ impl DriveClient {
         .await
     }
 
-    pub async fn create_folder(&self, parent: &str, name: &str) -> Result<RemoteFile> {
-        self.create(&json!({ "name": name, "mimeType": FOLDER_MIME, "parents": [parent] }))
-            .await
+    /// IDs reservados para criar itens: com um deles, repetir a criação não duplica o item.
+    pub async fn generate_ids(&self, count: u32) -> Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Raw {
+            ids: Vec<String>,
+        }
+        let count = count.to_string();
+        let raw: Raw = self
+            .json(|| {
+                self.http
+                    .get(self.api("files/generateIds"))
+                    .query(&[("count", count.as_str()), ("space", "drive")])
+            })
+            .await?;
+        Ok(raw.ids)
     }
 
+    /// `id`: reservado com `generate_ids`, para a nova tentativa não duplicar a pasta.
+    pub async fn create_folder(
+        &self,
+        parent: &str,
+        name: &str,
+        id: Option<&str>,
+    ) -> Result<RemoteFile> {
+        let mut meta = json!({ "name": name, "mimeType": FOLDER_MIME, "parents": [parent] });
+        with_id(&mut meta, id);
+        let result = self.create(&meta).await;
+        self.created(id, result).await
+    }
+
+    /// Uma criação com ID reservado que dá 409 já tinha dado certo antes (a resposta é que se
+    /// perdeu): o item é o que está no Drive com esse ID.
+    async fn created(&self, id: Option<&str>, result: Result<RemoteFile>) -> Result<RemoteFile> {
+        match (result, id) {
+            (Err(DriveError::AlreadyExists), Some(id)) => self.get(id).await,
+            (result, _) => result,
+        }
+    }
+
+    /// Sem ID reservado: o `files.generateIds` não serve para atalhos (só para arquivos comuns e
+    /// pastas).
     pub async fn create_shortcut(
         &self,
         parent: &str,
@@ -422,11 +466,15 @@ impl DriveClient {
         src: &Path,
         modified_ms: i64,
         session: &dyn SessionSlot,
+        id: Option<&str>,
     ) -> Result<RemoteFile> {
-        let meta =
+        let mut meta =
             json!({ "name": name, "parents": [parent], "modifiedTime": rfc3339(modified_ms) });
-        self.upload(Method::POST, self.upload_api("files"), meta, src, session)
-            .await
+        with_id(&mut meta, id);
+        let result = self
+            .upload(Method::POST, self.upload_api("files"), meta, src, session)
+            .await;
+        self.created(id, result).await
     }
 
     /// Troca o conteúdo de um arquivo existente; o ID continua o mesmo.
@@ -688,8 +736,16 @@ mod tests {
         spawnable_call!(download_range("x", 0, 1));
         spawnable_call!(changes("1"));
         spawnable_call!(set_trashed("x", true));
-        spawnable_call!(create_folder("p", "n"));
-        spawnable_call!(upload_new("p", "n", Path::new("/nada"), 0, &NoSession));
+        spawnable_call!(create_folder("p", "n", None));
+        spawnable_call!(upload_new(
+            "p",
+            "n",
+            Path::new("/nada"),
+            0,
+            &NoSession,
+            None
+        ));
+        spawnable_call!(generate_ids(1));
     }
 
     #[tokio::test]
@@ -779,11 +835,25 @@ mod tests {
         let c = client(&fake);
         let root = fake.root_id();
         let a = c
-            .upload_new(&root, "pequeno.bin", &small, 1_700_000_000_000, &NoSession)
+            .upload_new(
+                &root,
+                "pequeno.bin",
+                &small,
+                1_700_000_000_000,
+                &NoSession,
+                None,
+            )
             .await
             .unwrap();
         let b = c
-            .upload_new(&root, "grande.bin", &large, 1_700_000_000_000, &NoSession)
+            .upload_new(
+                &root,
+                "grande.bin",
+                &large,
+                1_700_000_000_000,
+                &NoSession,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -800,6 +870,38 @@ mod tests {
             (a.name.as_str(), a.modified_ms, a.parents.clone()),
             ("pequeno.bin", 1_700_000_000_000, vec![root])
         );
+    }
+
+    /// Bug: com a resposta da criação perdida, a nova tentativa criava o item de novo.
+    #[tokio::test]
+    async fn create_with_reserved_id_is_not_duplicated_when_the_response_is_lost() {
+        let fake = FakeDrive::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (small, data) = temp_file(&dir, "pequeno", 1000);
+        let c = client(&fake);
+        let root = fake.root_id();
+        let ids = c.generate_ids(2).await.unwrap();
+
+        fake.inject(Fault::LoseCreateResponses { times: 1 });
+        let folder = c
+            .create_folder(&root, "Pasta", Some(&ids[0]))
+            .await
+            .unwrap();
+        fake.inject(Fault::LoseCreateResponses { times: 1 });
+        let file = c
+            .upload_new(&root, "a.bin", &small, 0, &NoSession, Some(&ids[1]))
+            .await
+            .unwrap();
+
+        assert_eq!(folder.id, ids[0]);
+        assert_eq!(fake.find_live("Pasta"), vec![ids[0].clone()]);
+        assert_eq!(file.id, ids[1]);
+        assert_eq!(fake.find_live("a.bin"), vec![ids[1].clone()]);
+        assert_eq!(fake.content(&file.id), data);
+        assert!(matches!(
+            c.create_folder(&root, "Outra", Some("inventado")).await,
+            Err(DriveError::Http(400))
+        ));
     }
 
     #[tokio::test]
@@ -827,7 +929,7 @@ mod tests {
         let session = Mutex::new(None::<String>);
         fake.inject(Fault::DropConnectionAfterBytes(3 * MIB as u64));
         let f = client(&fake)
-            .upload_new(&fake.root_id(), "grande.bin", &path, 0, &session)
+            .upload_new(&fake.root_id(), "grande.bin", &path, 0, &session, None)
             .await
             .unwrap();
         assert_eq!(fake.content(&f.id), data);
@@ -852,7 +954,7 @@ mod tests {
         fake.inject(Fault::Offline);
         let c = client(&fake);
         assert!(matches!(
-            c.upload_new(&fake.root_id(), "g.bin", &path, 0, &session)
+            c.upload_new(&fake.root_id(), "g.bin", &path, 0, &session, None)
                 .await,
             Err(DriveError::Offline)
         ));
@@ -868,7 +970,7 @@ mod tests {
         });
         assert!(
             no_retry
-                .upload_new(&fake.root_id(), "g.bin", &path, 0, &session)
+                .upload_new(&fake.root_id(), "g.bin", &path, 0, &session, None)
                 .await
                 .is_err()
         );
@@ -879,7 +981,7 @@ mod tests {
         );
 
         let f = c
-            .upload_new(&fake.root_id(), "g.bin", &path, 0, &session)
+            .upload_new(&fake.root_id(), "g.bin", &path, 0, &session, None)
             .await
             .unwrap();
         assert_eq!(fake.content(&f.id), data);
@@ -894,7 +996,7 @@ mod tests {
         let fake = FakeDrive::start().await;
         let root = fake.root_id();
         let c = client(&fake);
-        let folder = c.create_folder(&root, "Pasta").await.unwrap();
+        let folder = c.create_folder(&root, "Pasta", None).await.unwrap();
         assert_eq!(folder.mime_type, FOLDER_MIME);
         let file = fake.add_file(&root, "a.txt", vec![]);
         let moved = c

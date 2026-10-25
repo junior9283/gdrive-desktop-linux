@@ -2,7 +2,7 @@
 //! simulado e um serviço de notificações falso do outro lado do mesmo socket.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -63,7 +63,7 @@ pub(crate) struct Harness {
     notes: Arc<Mutex<Vec<Note>>>,
     _client: Connection,
     _server: Connection,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 impl Harness {
@@ -75,59 +75,13 @@ impl Harness {
     pub async fn with_policy(policy: &str) -> Harness {
         let fake = FakeDrive::start().await;
         let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::for_test(dir.path());
-        std::fs::create_dir_all(&paths.etc_dir).unwrap();
-        std::fs::write(paths.etc_dir.join("policies.toml"), policy).unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir_all(&home).unwrap();
         let tokens = Arc::new(MemoryStore::default());
-        let config = Config {
-            paths,
-            lang: "pt_BR.UTF-8".into(),
-            home: home.clone(),
-            oauth: OAuthEndpoints {
-                auth: fake.auth_url(),
-                token: fake.token_url(),
-                userinfo: fake.userinfo_url(),
-            },
-            api: Api {
-                base: fake.base_url(),
-                upload: fake.upload_url(),
-            },
-            tokens: tokens.clone() as Arc<dyn TokenStore>,
-            // Nada abre na tela: o "navegador" é o `true`.
-            browser: Some("true".into()),
-            backoff: Backoff {
-                base: Duration::from_millis(1),
-                max: Duration::from_millis(2),
-                tries: 2,
-            },
-            intervals: Intervals {
-                changes: Duration::from_millis(50),
-                uploads_idle: Duration::from_millis(20),
-                maintenance: Duration::from_millis(50),
-                eviction: Duration::from_millis(200),
-            },
-        };
-        let daemon = Daemon::new(config).unwrap();
         let notes = Arc::new(Mutex::new(Vec::new()));
-        let (a, b) = tokio::net::UnixStream::pair().unwrap();
-        let server = Builder::unix_stream(a)
-            .server(Guid::generate())
-            .unwrap()
-            .p2p()
-            .serve_at(OBJECT_PATH, Service::new(daemon.clone()))
-            .unwrap()
-            .build();
-        let client = Builder::unix_stream(b)
-            .p2p()
-            .serve_at(NOTIFICATIONS_PATH, FakeNotifications(notes.clone()))
-            .unwrap()
-            .build();
-        let (server, client) = tokio::join!(server, client);
-        let (server, client) = (server.unwrap(), client.unwrap());
-        daemon.attach(server.clone()).await.unwrap();
-        let proxy = ServiceProxy::new(&client).await.unwrap();
+        write_policy(dir.path(), policy);
+        let (daemon, proxy, client, server) =
+            serve(config(&fake, dir.path(), &tokens), &notes).await;
         Harness {
             fake,
             daemon,
@@ -137,8 +91,25 @@ impl Harness {
             notes,
             _client: client,
             _server: server,
-            _dir: dir,
+            dir,
         }
+    }
+
+    /// Para o serviço (pela saída normal, que cancela o que estiver em andamento) e sobe outro
+    /// sobre os mesmos dados, que reconecta a conta. `policy` troca a política.
+    pub async fn restart(&mut self, policy: Option<&str>) {
+        self.daemon.shutdown().await;
+        if let Some(policy) = policy {
+            write_policy(self.dir.path(), policy);
+        }
+        let (daemon, proxy, client, server) = serve(
+            config(&self.fake, self.dir.path(), &self.tokens),
+            &self.notes,
+        )
+        .await;
+        (self.daemon, self.proxy) = (daemon, proxy);
+        (self._client, self._server) = (client, server);
+        self.daemon.resume_saved_account().await.unwrap();
     }
 
     /// Login pelo D-Bus, com o teste fazendo o papel do navegador. Devolve `LoginFinished`.
@@ -199,4 +170,69 @@ pub(crate) async fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 /// Operação de arquivo bloqueante na montagem, fora das threads do runtime.
 pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     tokio::task::spawn_blocking(f).await.unwrap()
+}
+
+fn write_policy(root: &Path, policy: &str) {
+    let paths = Paths::for_test(root);
+    std::fs::create_dir_all(&paths.etc_dir).unwrap();
+    std::fs::write(paths.etc_dir.join("policies.toml"), policy).unwrap();
+}
+
+/// Configuração do serviço sobre o Drive simulado e a pasta `root` do teste.
+fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
+    Config {
+        paths: Paths::for_test(root),
+        lang: "pt_BR.UTF-8".into(),
+        home: root.join("home"),
+        oauth: OAuthEndpoints {
+            auth: fake.auth_url(),
+            token: fake.token_url(),
+            userinfo: fake.userinfo_url(),
+        },
+        api: Api {
+            base: fake.base_url(),
+            upload: fake.upload_url(),
+        },
+        tokens: tokens.clone() as Arc<dyn TokenStore>,
+        // Nada abre na tela: o "navegador" é o `true`.
+        browser: Some("true".into()),
+        backoff: Backoff {
+            base: Duration::from_millis(1),
+            max: Duration::from_millis(2),
+            tries: 2,
+        },
+        intervals: Intervals {
+            changes: Duration::from_millis(50),
+            uploads_idle: Duration::from_millis(20),
+            maintenance: Duration::from_millis(50),
+            eviction: Duration::from_millis(200),
+        },
+    }
+}
+
+/// Publica o serviço num lado de um par de sockets; o outro lado é o cliente, que também serve
+/// as notificações falsas.
+async fn serve(
+    config: Config,
+    notes: &Arc<Mutex<Vec<Note>>>,
+) -> (Arc<Daemon>, ServiceProxy<'static>, Connection, Connection) {
+    let daemon = Daemon::new(config).unwrap();
+    let (a, b) = tokio::net::UnixStream::pair().unwrap();
+    let server = Builder::unix_stream(a)
+        .server(Guid::generate())
+        .unwrap()
+        .p2p()
+        .serve_at(OBJECT_PATH, Service::new(daemon.clone()))
+        .unwrap()
+        .build();
+    let client = Builder::unix_stream(b)
+        .p2p()
+        .serve_at(NOTIFICATIONS_PATH, FakeNotifications(notes.clone()))
+        .unwrap()
+        .build();
+    let (server, client) = tokio::join!(server, client);
+    let (server, client) = (server.unwrap(), client.unwrap());
+    daemon.attach(server.clone()).await.unwrap();
+    let proxy = ServiceProxy::new(&client).await.unwrap();
+    (daemon, proxy, client, server)
 }

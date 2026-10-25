@@ -3,7 +3,8 @@
 use rusqlite::Connection;
 
 /// Cada posição é uma migração; a versão do banco é quantas já foram aplicadas.
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE items (
         id            TEXT PRIMARY KEY,
         inode         INTEGER NOT NULL UNIQUE,
@@ -55,7 +56,14 @@ const MIGRATIONS: &[&str] = &["
     CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
 
     CREATE TABLE access (item_id TEXT PRIMARY KEY, last_access_ms INTEGER NOT NULL) WITHOUT ROWID;
-"];
+",
+    "
+    -- Envios adiados por falta de rede: voltam na hora em que ela volta.
+    ALTER TABLE upload_queue ADD COLUMN waiting_network INTEGER NOT NULL DEFAULT 0;
+    -- ID reservado no Drive para a criação: repetida, ela não duplica o item.
+    ALTER TABLE upload_queue ADD COLUMN file_id TEXT;
+",
+];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.
 pub(crate) fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {

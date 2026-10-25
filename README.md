@@ -1,7 +1,7 @@
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.0.1-blue)
-![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-design-orange)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.1.0-blue)
+![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-motor%20(pr%C3%A9via)-orange)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
 
@@ -76,14 +76,57 @@ especificação em [`docs/`](docs/).
 A especificação completa está em
 [`docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md`](docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md).
 
+## Como experimentar a 0.1
+
+A 0.1 é o motor, sem a bandeja: o login e o resto são feitos pela linha de comando provisória
+`gdrive-desktop-linux`. É uma prévia para testes; mantenha cópia do que for importante.
+
+**1. Compilar** (Rust 1.99 ou mais novo e FUSE 3):
+
+```bash
+sudo dnf install fuse3            # Fedora/Nobara (no Debian/Ubuntu: sudo apt install fuse3)
+cargo build --release
+```
+
+**2. Instalar** os dois programas, o serviço do usuário e a abertura dos ponteiros `.gdoc`:
+
+```bash
+sudo install -Dm755 target/release/gdrive-desktop-linuxd target/release/gdrive-desktop-linux -t /usr/bin
+sudo install -Dm644 packaging/systemd/gdrive-desktop-linuxd.service -t /usr/lib/systemd/user
+sudo install -Dm644 packaging/dbus/io.github.junior9283.GDriveDesktopLinux1.service -t /usr/share/dbus-1/services
+sudo install -Dm644 packaging/mime/gdrive-desktop-linux.xml -t /usr/share/mime/packages
+sudo install -Dm644 packaging/desktop/io.github.junior9283.GDriveDesktopLinux.OpenPointer.desktop -t /usr/share/applications
+sudo update-mime-database /usr/share/mime && sudo update-desktop-database
+systemctl --user daemon-reload && systemctl --user enable --now gdrive-desktop-linuxd
+```
+
+**3. Entrar na conta** com o seu próprio Client ID (veja o [guia](docs/guia-client-id.md)):
+
+```bash
+gdrive-desktop-linux login        # pede o Client ID e o segredo e abre o navegador
+gdrive-desktop-linux status       # conta, pasta, envios pendentes
+```
+
+A pasta aparece em `~/Google Drive/Meu Drive`. Outros comandos:
+
+| Comando | O que faz |
+|---|---|
+| `pin <caminho>` / `unpin <caminho>` | deixa disponível off-line / só on-line |
+| `pause` / `resume` | pausa e retoma a sincronização |
+| `lost-and-found` | lista as edições guardadas por conflito |
+| `logout [--finish \| --move <pasta> \| --discard]` | sai da conta, decidindo o que fazer com envios pendentes |
+| `open-pointer <arquivo>` | abre um `.gdoc`, `.gsheet`… no navegador (usado pelo duplo clique) |
+
+Roteiro de teste da 0.1 (e o que já foi conferido): [docs/testes](docs/testes/README.md).
+
 ## Roteiro
 
 Cada etapa sai funcionando antes da próxima.
 
 | Versão | Etapa |
 |---|---|
-| 0.0.x | Design e especificação ← **estamos aqui** |
-| 0.1 | Motor: pasta virtual, cache, sincronização e modo off-line |
+| 0.0.x | Design e especificação |
+| 0.1 | Motor: pasta virtual, cache, sincronização e modo off-line ← **estamos aqui** |
 | 0.2 | Bandeja, login e preferências |
 | 0.3 | Integração com o gerenciador de arquivos (Dolphin) |
 | 0.4 | Backup de pastas e Google Fotos |

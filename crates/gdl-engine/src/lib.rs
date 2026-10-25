@@ -5,6 +5,7 @@ pub mod changes;
 pub mod engine;
 pub mod events;
 pub mod gdocs;
+pub mod ids;
 pub mod indexer;
 pub mod lost_found;
 pub mod ops;

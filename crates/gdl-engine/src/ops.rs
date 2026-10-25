@@ -52,15 +52,25 @@ impl Engine {
     /// Cria a pasta no Drive na hora; sem internet (ou dentro de uma pasta que ainda não subiu),
     /// cria só aqui e enfileira.
     pub async fn create_folder(&self, parent: &ItemId, name: &str) -> Result<Item> {
+        // Com o ID reservado, a pasta cuja resposta se perdeu não é criada de novo pela fila.
+        let mut file_id = None;
         if !is_local_id(parent) {
-            match self.client.create_folder(&parent.0, &to_remote(name)).await {
+            let created = match self.uploads.reserve_id().await {
+                Ok(id) => {
+                    self.client
+                        .create_folder(&parent.0, &to_remote(name), Some(file_id.insert(id)))
+                        .await
+                }
+                Err(e) => Err(e),
+            };
+            match created {
                 Ok(remote) => return self.applied(remote),
                 Err(DriveError::Offline) => {}
                 Err(e) => return Err(e.into()),
             }
         }
         let item = create_local_item(&self.store, parent, name, ItemKind::Folder)?;
-        enqueue_upload(&self.store, &item.id, 0)?;
+        enqueue_upload(&self.store, &item.id, 0, file_id)?;
         Ok(item)
     }
 

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -13,7 +14,7 @@ use axum::routing::{get, patch, post, put};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 
-use crate::state::{self, Session, Shared, parse_query, random_id};
+use crate::state::{self, IdRefused, Session, Shared, parse_query, random_id};
 
 type Shr = State<Arc<Shared>>;
 type Params = Query<HashMap<String, String>>;
@@ -24,6 +25,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
     Router::new()
         .route("/drive/v3/about", get(about))
         .route("/drive/v3/files", get(list).post(create))
+        .route("/drive/v3/files/generateIds", get(generate_ids))
         .route("/drive/v3/files/{id}", get(get_file).patch(update))
         .route("/drive/v3/changes/startPageToken", get(start_page_token))
         .route("/drive/v3/changes", get(changes))
@@ -52,6 +54,17 @@ fn api_error(code: u16, reason: &str, message: &str) -> Response {
     (status, Json(body)).into_response()
 }
 
+fn refused(e: IdRefused) -> Response {
+    match e {
+        IdRefused::Duplicate => api_error(
+            409,
+            "duplicate",
+            "A file already exists with the provided ID.",
+        ),
+        IdRefused::NotUsable => api_error(400, "invalid", "The provided file ID is not usable."),
+    }
+}
+
 fn not_found(id: &str) -> Response {
     api_error(404, "notFound", &format!("File not found: {id}."))
 }
@@ -73,7 +86,8 @@ async fn log_request(State(shared): Shr, req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
-/// Devolve o erro injetado com `Fault::RateLimit403`/`Fault::Status`, enquanto durar.
+/// Devolve o erro injetado com `Fault::RateLimit403`/`Fault::Status`, enquanto durar, e perde
+/// a resposta das criações com `Fault::LoseCreateResponses`.
 async fn injected_status(State(shared): Shr, req: Request, next: Next) -> Response {
     let injected = {
         let mut state = shared.state();
@@ -86,10 +100,20 @@ async fn injected_status(State(shared): Shr, req: Request, next: Next) -> Respon
         }
         fault
     };
-    match injected {
-        Some(resp) => resp,
-        None => next.run(req).await,
+    if let Some(resp) = injected {
+        return resp;
     }
+    let create = req.method() == axum::http::Method::POST;
+    let resp = next.run(req).await;
+    if create {
+        let mut state = shared.state();
+        if state.lose_responses > 0 {
+            state.lose_responses -= 1;
+            // O pedido foi processado; a conexão cai antes de a resposta sair.
+            shared.cut_next_write.store(true, Ordering::SeqCst);
+        }
+    }
+    resp
 }
 
 async fn require_token(State(shared): Shr, req: Request, next: Next) -> Response {
@@ -241,8 +265,20 @@ async fn create(State(shared): Shr, body: Bytes) -> Response {
         return bad_json();
     };
     let mut state = shared.state();
-    let id = state.create(&meta, Vec::new());
-    Json(state.to_json(&state.files[&id])).into_response()
+    match state.create(&meta, Vec::new()) {
+        Ok(id) => Json(state.to_json(&state.files[&id])).into_response(),
+        Err(e) => refused(e),
+    }
+}
+
+async fn generate_ids(State(shared): Shr, Query(params): Params) -> Response {
+    let count = params
+        .get("count")
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(10usize)
+        .min(1000);
+    Json(json!({ "kind": "drive#generatedIds", "space": "drive", "ids": shared.state().generate_ids(count) }))
+        .into_response()
 }
 
 async fn update(
@@ -363,6 +399,11 @@ fn start_resumable(shared: &Shared, target: Option<String>, meta: Value) -> Resp
     {
         return not_found(id);
     }
+    if target.is_none()
+        && let Err(e) = state.check_requested_id(&meta)
+    {
+        return refused(e);
+    }
     let sid = random_id(32);
     let location = shared
         .origin
@@ -393,7 +434,10 @@ fn finish_upload(
             state.apply_meta(&id, meta);
             id
         }
-        None => state.create(meta, content),
+        None => match state.create(meta, content) {
+            Ok(id) => id,
+            Err(e) => return refused(e),
+        },
     };
     Json(state.to_json(&state.files[&id])).into_response()
 }

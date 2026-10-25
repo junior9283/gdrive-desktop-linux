@@ -11,4 +11,6 @@ pub use dbus::{BUS_NAME, OBJECT_PATH, Service, ServiceError, ServiceProxy};
 #[cfg(test)]
 mod dbus_tests;
 #[cfg(test)]
+mod no_data_loss_tests;
+#[cfg(test)]
 mod testutil;

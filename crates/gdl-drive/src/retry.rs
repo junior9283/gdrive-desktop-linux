@@ -22,6 +22,9 @@ pub enum DriveError {
     DownloadQuotaExceeded,
     #[error("o Google pediu para diminuir o ritmo")]
     RateLimited,
+    /// 409 na criação com ID reservado: o item já foi criado.
+    #[error("já existe um item com este ID no Drive")]
+    AlreadyExists,
     #[error("o Google não aceitou o acesso da conta")]
     Unauthorized,
     #[error("o Google Drive respondeu {0}")]

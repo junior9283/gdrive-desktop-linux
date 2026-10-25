@@ -43,6 +43,10 @@ pub(crate) struct Shared {
     pub(crate) offline: AtomicBool,
     /// Bytes que ainda podem trafegar antes da queda; negativo = desligado.
     pub(crate) drop_budget: AtomicI64,
+    /// Esgotado o limite, a conexão para de andar em vez de cair.
+    pub(crate) stall: AtomicBool,
+    /// A próxima escrita (a resposta que acabou de ser montada) derruba a conexão antes de sair.
+    pub(crate) cut_next_write: AtomicBool,
 }
 
 impl Shared {
@@ -52,6 +56,8 @@ impl Shared {
             origin,
             offline: AtomicBool::new(false),
             drop_budget: AtomicI64::new(-1),
+            stall: AtomicBool::new(false),
+            cut_next_write: AtomicBool::new(false),
         }
     }
 
@@ -131,6 +137,18 @@ pub(crate) struct State {
     pub(crate) downloaded: u64,
     /// Edição a aplicar depois de servir tantas páginas de `files.list`: (páginas, ID, conteúdo).
     pub(crate) edit_during_listing: Option<(u32, String, Vec<u8>)>,
+    /// IDs entregues por `files.generateIds` e ainda não usados.
+    pub(crate) generated_ids: HashSet<String>,
+    /// Quantas das próximas respostas de criação se perdem depois de processado o pedido.
+    pub(crate) lose_responses: u32,
+}
+
+/// Por que um `id` pedido na criação não serve.
+pub(crate) enum IdRefused {
+    /// Já existe um item com ele: a criação anterior deu certo.
+    Duplicate,
+    /// Não veio de `files.generateIds`.
+    NotUsable,
 }
 
 impl State {
@@ -152,6 +170,8 @@ impl State {
             method_log: vec![],
             downloaded: 0,
             edit_during_listing: None,
+            generated_ids: HashSet::new(),
+            lose_responses: 0,
         };
         state.root_id = state.add("", "My Drive", FOLDER_MIME, Vec::new(), None);
         state.file_mut(&state.root_id.clone()).parents.clear();
@@ -187,7 +207,18 @@ impl State {
         content: Vec<u8>,
         target: Option<String>,
     ) -> String {
-        let id = random_id(28);
+        self.insert(random_id(28), parent, name, mime, content, target)
+    }
+
+    fn insert(
+        &mut self,
+        id: String,
+        parent: &str,
+        name: &str,
+        mime: &str,
+        content: Vec<u8>,
+        target: Option<String>,
+    ) -> String {
         let now = self.tick();
         let md5 = md5_hex(&content);
         self.files.insert(
@@ -237,8 +268,35 @@ impl State {
         self.record_change(id);
     }
 
+    /// Confere o `id` pedido na criação, se houver; como no Drive, só servem os gerados.
+    pub(crate) fn check_requested_id(&self, meta: &Value) -> Result<Option<String>, IdRefused> {
+        let Some(id) = meta["id"].as_str() else {
+            return Ok(None);
+        };
+        if self.files.contains_key(id) {
+            Err(IdRefused::Duplicate)
+        } else if !self.generated_ids.contains(id) {
+            Err(IdRefused::NotUsable)
+        } else {
+            Ok(Some(id.into()))
+        }
+    }
+
+    pub(crate) fn generate_ids(&mut self, count: usize) -> Vec<String> {
+        let ids: Vec<String> = (0..count).map(|_| random_id(28)).collect();
+        self.generated_ids.extend(ids.iter().cloned());
+        ids
+    }
+
     /// Cria um arquivo a partir dos metadados de `files.create` ou de um upload.
-    pub(crate) fn create(&mut self, meta: &Value, content: Vec<u8>) -> String {
+    pub(crate) fn create(&mut self, meta: &Value, content: Vec<u8>) -> Result<String, IdRefused> {
+        let id = match self.check_requested_id(meta)? {
+            Some(id) => {
+                self.generated_ids.remove(&id);
+                id
+            }
+            None => random_id(28),
+        };
         let parent = meta["parents"][0]
             .as_str()
             .unwrap_or(&self.root_id)
@@ -251,9 +309,9 @@ impl State {
             .as_str()
             .map(String::from);
         let name = meta["name"].as_str().unwrap_or("Sem título").to_string();
-        let id = self.add(&parent, &name, &mime, content, target);
+        let id = self.insert(id, &parent, &name, &mime, content, target);
         self.apply_meta(&id, meta);
-        id
+        Ok(id)
     }
 
     pub(crate) fn to_json(&self, f: &FileRec) -> Value {

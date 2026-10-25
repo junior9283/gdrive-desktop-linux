@@ -1,32 +1,118 @@
 # gdrive-desktop-linux
 
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.0.1-blue)
+![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-design-orange)
+![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
+![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
+
 Cliente **não oficial** do Google Drive para Linux, escrito em Rust, com o mesmo comportamento,
-aparência e funcionalidades do Google Drive para computador (Windows): pasta com arquivos sob
-demanda, "Disponível off-line", backup de pastas, várias contas, Drives compartilhados, ícone na
-bandeja e integração com o gerenciador de arquivos.
+aparência e funcionalidades do Google Drive para computador (versão Windows).
 
-> *Unofficial Google Drive desktop client for Linux, written in Rust, aiming at feature and
-> behavior parity with Google Drive for desktop on Windows. Contributions are welcome.*
+> **English:** unofficial Google Drive desktop client for Linux, written in Rust, aiming at full
+> feature and behavior parity with Google Drive for desktop on Windows. Contributions are welcome.
 
-## Situação
+---
 
-Em fase de **design**. A especificação ficará em [`docs/`](docs/) antes de qualquer código.
+## Por que este projeto existe
 
-## Princípios
+O Google oferece o Google Drive para computador só para Windows e macOS. No Linux, as opções atuais
+são montar o Drive com ferramentas genéricas de linha de comando ou usar só o navegador. Nenhuma
+delas oferece a experiência do app oficial: instalar, entrar na conta e ter uma pasta em que os
+arquivos ficam na nuvem até você abrir, com ícone na bandeja, "Disponível off-line" e backup de
+pastas.
 
-- **Código 100% próprio.** O app original foi estudado apenas para entender o comportamento
-  (o que faz e como reage). Nenhum código, texto, ícone, fonte ou outro arquivo do Google é
-  copiado para este repositório, e contribuições não devem incluir esse tipo de material.
-- **Só APIs públicas.** O acesso usa a Google Drive API pública com OAuth; o app nunca se passa
-  pelo cliente oficial do Google.
-- **Nativo de Linux.** Pasta virtual via FUSE, motor em Rust, interface com a aparência do app
-  original e integração com o ambiente de desktop (KDE primeiro).
+Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do zero.
+
+## Funcionalidades previstas
+
+O objetivo é ter tudo o que a versão Windows oferece. A lista completa e detalhada fica na
+especificação em [`docs/`](docs/).
+
+| Área | O que o app vai fazer |
+|---|---|
+| **Pasta do Drive** | Uma pasta com todo o seu Drive, em que os arquivos são baixados só quando você abre (arquivos sob demanda). Também haverá o modo espelho, com cópia completa no computador. |
+| **Off-line** | Marcar arquivos e pastas como "Disponível off-line" e trabalhar sem internet. As alterações sobem quando a conexão voltar. |
+| **Sincronização** | Envio e recebimento automáticos, resolução de conflitos, lixeira, limites de banda e pausa. |
+| **Backup** | Fazer backup de pastas do computador para o Drive e para o Google Fotos. |
+| **Contas** | Várias contas Google ao mesmo tempo, além de Drives compartilhados e "Compartilhados comigo". |
+| **Bandeja** | Ícone com atividade, notificações, erros, pesquisa e acesso rápido às preferências. |
+| **Gerenciador de arquivos** | Ícones de status (na nuvem, off-line, sincronizando) e menu de botão direito: disponível off-line, compartilhar, copiar link, abrir no navegador. O KDE/Dolphin vem primeiro. |
+| **Documentos Google** | Docs, Planilhas e Apresentações aparecem na pasta e abrem no navegador. |
+
+## Como vai funcionar
+
+```
+┌──────────────────────────┐      ┌───────────────────────────────┐
+│ Interface (Tauri)        │      │ Gerenciador de arquivos       │
+│ bandeja, login,          │      │ (plugin do Dolphin: ícones de │
+│ preferências, atividade  │      │  status e menu de contexto)   │
+└────────────┬─────────────┘      └───────────────┬───────────────┘
+             │              D-Bus                 │
+┌────────────┴────────────────────────────────────┴───────────────┐
+│ Motor (serviço em Rust)                                          │
+│  • pasta virtual via FUSE (arquivos sob demanda)                 │
+│  • banco SQLite com os metadados de todo o Drive                 │
+│  • cache em blocos (só os trechos lidos são baixados)            │
+│  • fila de envios que sobrevive a reinícios e quedas de rede     │
+│  • sincronização de mudanças e resolução de conflitos            │
+└────────────────────────────────┬─────────────────────────────────┘
+                                 │ HTTPS + OAuth 2.0
+                        Google Drive API (pública)
+```
+
+### Diferenças inevitáveis em relação ao app oficial
+
+- **Atualizações vindas da nuvem:** chegam em segundos, mas não na hora. O app oficial usa um canal
+  de notificação interno do Google que não está disponível para terceiros.
+- **Login:** é feito com um aplicativo OAuth próprio do projeto, nunca com a identidade do app
+  oficial.
+
+## Roteiro
+
+Cada etapa sai funcionando antes da próxima.
+
+| Versão | Etapa |
+|---|---|
+| 0.0.x | Design e especificação ← **estamos aqui** |
+| 0.1 | Motor: pasta virtual, cache, sincronização e modo off-line |
+| 0.2 | Bandeja, login e preferências |
+| 0.3 | Integração com o gerenciador de arquivos (Dolphin) |
+| 0.4 | Backup de pastas e Google Fotos |
+| 0.5 | Várias contas e recursos extras |
+| 1.0 | Paridade com a versão Windows |
+
+## Versionamento
+
+O projeto segue o [Versionamento Semântico](https://semver.org/lang/pt-BR/) (`MAIOR.MENOR.CORREÇÃO`).
+Toda mudança é registrada no [CHANGELOG](CHANGELOG.md), e cada versão publicada ganha uma tag
+`vX.Y.Z`.
+
+## Como contribuir
+
+Contribuições são bem-vindas, seja em código, testes, tradução, documentação ou relatos de uso.
+Enquanto o projeto está na fase de design, a melhor forma de ajudar é abrir uma *issue* com
+sugestões para a especificação.
+
+Uma regra vale para todos: **nenhum código, texto, ícone, fonte ou outro arquivo do Google** pode
+entrar no repositório. O comportamento do app oficial pode ser estudado e descrito, mas a
+implementação tem que ser própria.
+
+## Perguntas frequentes
+
+**É oficial?** Não. O projeto não tem vínculo com o Google.
+
+**É seguro?** O app só acessa a sua conta pela API pública do Google, com a sua autorização
+(OAuth), e o código é aberto para qualquer um conferir.
+
+**Por que Rust?** Pela segurança de memória e pelo desempenho num serviço que fica rodando o tempo
+todo e lida com os seus arquivos.
 
 ## Aviso legal
 
-Este projeto não tem vínculo com o Google LLC nem é endossado por ele. "Google Drive" é marca
-registrada do Google LLC e é citada aqui apenas para indicar compatibilidade.
+Este projeto não tem vínculo com o Google LLC nem é endossado por ele. "Google Drive" e "Google
+Fotos" são marcas registradas do Google LLC e são citadas aqui apenas para indicar compatibilidade.
 
 ## Licença
 
-[GNU GPL v3.0](LICENSE).
+[GNU GPL v3.0](LICENSE): você pode usar, estudar, modificar e redistribuir o app. Versões
+modificadas distribuídas também precisam ter o código aberto.

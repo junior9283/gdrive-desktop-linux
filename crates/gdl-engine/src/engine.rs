@@ -8,6 +8,7 @@ use std::time::Duration;
 use gdl_common::config::Preferences;
 use gdl_common::paths::Paths;
 use gdl_drive::client::DriveClient;
+use gdl_drive::model::About;
 use gdl_store::Store;
 use tokio::sync::{broadcast, watch};
 use tokio_util::sync::CancellationToken;
@@ -16,7 +17,7 @@ use crate::Result;
 use crate::cache::BlockCache;
 use crate::changes::ChangePoller;
 use crate::events::{EngineEvent, SyncSummary};
-use crate::indexer::{START_PAGE_TOKEN, initial_index};
+use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, initial_index};
 use crate::lost_found::LostAndFound;
 use crate::pins::PinManager;
 use crate::uploads::{UploadWorker, recover_on_start};
@@ -50,6 +51,7 @@ pub struct Engine {
     pins: PinManager,
     uploads: UploadWorker,
     poller: ChangePoller,
+    lost: LostAndFound,
     events: broadcast::Sender<EngineEvent>,
     intervals: Intervals,
     paused: watch::Sender<bool>,
@@ -90,10 +92,11 @@ impl Engine {
                 store.clone(),
                 client.clone(),
                 cache.clone(),
-                lost,
+                lost.clone(),
                 events.clone(),
             ),
             poller: ChangePoller::new(store.clone(), client.clone(), events.clone()),
+            lost,
             store,
             client,
             cache,
@@ -126,6 +129,19 @@ impl Engine {
 
     pub fn store(&self) -> &Arc<Store> {
         &self.store
+    }
+
+    pub fn lost_and_found(&self) -> &LostAndFound {
+        &self.lost
+    }
+
+    pub fn account_email(&self) -> Result<String> {
+        Ok(self.store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default())
+    }
+
+    /// Conta e cota de armazenamento, direto do Drive.
+    pub async fn about(&self) -> Result<About> {
+        Ok(self.client.about().await?)
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {

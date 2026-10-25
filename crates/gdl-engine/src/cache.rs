@@ -183,6 +183,18 @@ impl BlockCache {
 
     /// Lê até `len` bytes a partir de `offset`, baixando só os blocos que faltam.
     pub async fn read(&self, id: &ItemId, offset: u64, len: u32) -> Result<Bytes> {
+        self.read_hinted(id, offset, len, None).await
+    }
+
+    /// Como `read`, com a leitura sequencial já decidida por quem lê (o FUSE acompanha cada
+    /// arquivo aberto); `None` deixa o cache decidir pelo item.
+    pub async fn read_hinted(
+        &self,
+        id: &ItemId,
+        offset: u64,
+        len: u32,
+        sequential: Option<bool>,
+    ) -> Result<Bytes> {
         let size = self.size_of(id)?;
         let end = size.min(offset.saturating_add(len.into()));
         if offset >= end {
@@ -192,7 +204,8 @@ impl BlockCache {
         let (prefetch, touch) = {
             let mut items = self.items();
             let state = items.entry(id.clone()).or_default();
-            let sequential = state.last_end.replace(end) == Some(offset);
+            let follows = state.last_end.replace(end) == Some(offset);
+            let sequential = sequential.unwrap_or(follows);
             // Pede a próxima janela quando a anterior está na metade.
             let prefetch = (sequential && end + READ_AHEAD / 2 > state.ahead_until).then(|| {
                 state.ahead_until = size.min(end + READ_AHEAD);

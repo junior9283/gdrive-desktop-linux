@@ -148,6 +148,14 @@ impl Store {
         self.query_items(select_items!("WHERE trashed = 1 ORDER BY local_name"), [])
     }
 
+    /// Item da lixeira pelo nome local.
+    pub fn lookup_trashed(&self, local_name: &str) -> Result<Option<Item>> {
+        self.query_item(
+            select_items!("WHERE trashed = 1 AND local_name = ?1"),
+            [local_name],
+        )
+    }
+
     pub fn lookup(&self, parent: &ItemId, local_name: &str) -> Result<Option<Item>> {
         self.query_item(
             select_items!("WHERE parent = ?1 AND local_name = ?2 AND trashed = 0"),

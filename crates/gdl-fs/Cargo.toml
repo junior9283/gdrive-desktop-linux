@@ -8,6 +8,24 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+bytes.workspace = true
+fuser.workspace = true
+gdl-common.workspace = true
+gdl-drive.workspace = true
+gdl-engine.workspace = true
+gdl-store.workspace = true
+libc = "0.2"
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+gdl-fake-drive.workspace = true
+rustix = { workspace = true, features = ["fs", "process"] }
+serde_json.workspace = true
+tempfile.workspace = true
+walkdir.workspace = true
 
 [lints]
 workspace = true

@@ -3,6 +3,11 @@
 
 pub use gdl_common::gdocs::pointer_extension;
 
+/// Endereço que abre o documento no navegador.
+pub fn open_url(id: &str) -> String {
+    format!("https://docs.google.com/open?id={id}")
+}
+
 /// Conteúdo do ponteiro: JSON de uma linha com o endereço do documento e a conta. Montado à mão
 /// (só os valores passam pelo serde) para manter a ordem documentada das chaves, que o `json!`
 /// trocaria pela alfabética.
@@ -10,7 +15,7 @@ pub fn pointer_json(id: &str, mime: &str, email: &str) -> String {
     let quoted = |text: &str| serde_json::Value::from(text).to_string();
     format!(
         r#"{{"url":{},"doc_id":{},"email":{},"mime":{},"app":"gdrive-desktop-linux"}}"#,
-        quoted(&format!("https://docs.google.com/open?id={id}")),
+        quoted(&open_url(id)),
         quoted(id),
         quoted(email),
         quoted(mime),

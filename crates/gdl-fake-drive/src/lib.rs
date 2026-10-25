@@ -130,6 +130,13 @@ impl FakeDrive {
         self.shared.state().edit_during_listing = Some((pages, id.into(), bytes));
     }
 
+    /// O dono tira a permissão de edição da conta do app.
+    pub fn make_read_only(&self, id: &str) {
+        let mut state = self.shared.state();
+        state.file_mut(id).can_edit = false;
+        state.record_change(id);
+    }
+
     /// Simula outra pessoa movendo o item para outra pasta.
     pub fn move_remote(&self, id: &str, new_parent: &str) {
         let mut state = self.shared.state();

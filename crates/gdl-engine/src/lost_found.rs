@@ -54,6 +54,10 @@ impl LostAndFound {
         }
     }
 
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     /// Cópias guardadas, da mais antiga à mais nova.
     pub fn list(&self) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {

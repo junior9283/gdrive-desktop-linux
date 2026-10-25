@@ -44,6 +44,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - Serviço do motor com pausa: pausado, não consulta mudanças, não envia e não baixa fixados (abrir
   arquivos continua funcionando); ao retomar, volta na hora. Resumo com envios pendentes, falhas,
   pausa, conexão e hora da última sincronização.
+- Montagem FUSE (leitura): a raiz mostra `Meu Drive` (ou `My Drive`), a lixeira do Drive somente
+  leitura, `.Lost and Found` e `.shortcut-targets-by-id`. Listar pastas e ver tamanhos nunca baixa
+  conteúdo; abrir um arquivo baixa só os trechos lidos; Documentos Google abrem como ponteiros JSON;
+  atalhos do Drive viram links simbólicos; itens sem permissão de edição ficam somente leitura; sem
+  internet, o que não foi baixado dá erro de E/S, mas as pastas continuam navegáveis. Atributos
+  estendidos `user.gdl.id`, `user.gdl.state` e `user.gdl.web_url`; `df` mostra a cota do Drive.
 
 ## [0.0.1] - 2026-10-25
 

@@ -32,6 +32,8 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 bytes = "1"
 rustix = { version = "1.1", features = ["fs"] }
 futures-util = "0.3"
+fuser = "0.18"
+walkdir = "2"
 oo7 = { version = "0.6", default-features = false, features = ["tokio", "native_crypto"] }
 async-trait = "0.1"
 toml = "1"

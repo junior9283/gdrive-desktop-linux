@@ -5,6 +5,7 @@ use std::ffi::OsStr;
 
 use gdl_common::i18n::I18n;
 use gdl_engine::gdocs::open_url;
+use gdl_engine::kept::KeptFolder;
 use gdl_engine::uploads::is_local_id;
 use gdl_store::{Inode, Item, ItemKind, LocalState, PinState};
 
@@ -24,6 +25,7 @@ pub(crate) struct Layout {
     pub my_drive: String,
     pub trash: String,
     pub lost_found: String,
+    pub canceled_uploads: String,
     pub shortcut_targets: String,
 }
 
@@ -33,15 +35,20 @@ impl Layout {
             my_drive: i18n.tr("folder-my-drive", &[]),
             trash: i18n.tr("folder-trash", &[]),
             lost_found: i18n.tr("folder-lost-found", &[]),
+            canceled_uploads: i18n.tr("folder-canceled-uploads", &[]),
             shortcut_targets: i18n.tr("folder-shortcut-targets", &[]),
         }
     }
 
-    pub fn root_entries(&self) -> [(&str, Node); 4] {
+    pub fn root_entries(&self) -> [(&str, Node); 5] {
         [
             (&self.my_drive, Node::Item(Inode::ROOT)),
             (&self.trash, Node::Trash),
-            (&self.lost_found, Node::LostFound),
+            (&self.lost_found, Node::Kept(KeptFolder::LostAndFound)),
+            (
+                &self.canceled_uploads,
+                Node::Kept(KeptFolder::CanceledUploads),
+            ),
             (&self.shortcut_targets, Node::ShortcutTargets),
         ]
     }

@@ -101,6 +101,8 @@ pub trait Service {
     fn account_info(&self) -> Result<AccountInfo, ServiceError>;
     /// A atividade de sincronização, a mais recente primeiro (até 500 itens).
     fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError>;
+    /// `canceled` ou `too-late`.
+    fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError>;
     fn pin(&self, path: &str) -> Result<(), ServiceError>;
     fn unpin(&self, path: &str) -> Result<(), ServiceError>;
     fn pause(&self) -> Result<(), ServiceError>;

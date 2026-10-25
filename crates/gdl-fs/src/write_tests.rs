@@ -5,9 +5,11 @@ use std::io::Write;
 use std::time::{Duration, SystemTime};
 
 use gdl_common::time::rfc3339;
+use gdl_engine::uploads::CancelOutcome;
 use gdl_fake_drive::{FakeDrive, Fault};
+use gdl_store::ItemId;
 
-use crate::testutil::{Mounted, names, uid, wait_until};
+use crate::testutil::{Mounted, mode, names, uid, wait_until, xattr};
 
 fn only(ids: Vec<String>) -> String {
     assert_eq!(ids.len(), 1, "esperava um item só: {ids:?}");
@@ -396,4 +398,31 @@ async fn trashing_a_file_not_yet_uploaded_can_be_restored() {
     });
     let id = only(m.fake.find_live("rascunho.txt"));
     assert_eq!(m.fake.content(&id), b"ainda nao subiu");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn canceled_uploads_folder_is_hidden_and_read_only() {
+    let m = Mounted::new(FakeDrive::start().await).await;
+    m.fake.inject(Fault::Offline);
+    let file = m.drive().join("novo.txt");
+    std::fs::write(&file, b"rascunho").unwrap();
+    let id = ItemId(xattr(&file, "user.gdl.id"));
+
+    assert_eq!(
+        m.engine.cancel_upload(&id).await.unwrap(),
+        CancelOutcome::Canceled
+    );
+
+    assert!(!file.exists(), "o arquivo que nunca subiu sai do Meu Drive");
+    assert!(names(&m.mnt).contains(&".Uploads cancelados".to_string()));
+    let dir = m.mnt.join(".Uploads cancelados");
+    let saved = names(&dir);
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    assert!(saved[0].starts_with("novo (local "), "{saved:?}");
+    let copy = dir.join(&saved[0]);
+    assert_eq!(std::fs::read(&copy).unwrap(), b"rascunho");
+    assert_eq!(mode(&copy) & 0o777, 0o444);
+    assert!(std::fs::write(&copy, b"outra coisa").is_err());
+    assert!(std::fs::write(dir.join("outro.txt"), b"x").is_err());
+    assert_eq!(names(&m.mnt.join(".Lost and Found")), Vec::<String>::new());
 }

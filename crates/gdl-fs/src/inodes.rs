@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::sync::Mutex;
 
+use gdl_engine::kept::KeptFolder;
 use gdl_store::{Inode, ItemId};
 
 use crate::fs::lock;
@@ -16,10 +17,11 @@ const SHORTCUT_TARGETS: u64 = 4;
 const KIO_TRASH: u64 = 5;
 const KIO_FILES: u64 = 6;
 const KIO_INFO: u64 = 7;
+const CANCELED_UPLOADS: u64 = 8;
 /// Item do banco com inode `n` aparece como `n + ITEM_BASE`; o intervalo abaixo fica para os
 /// nós fixos.
 const ITEM_BASE: u64 = 16;
-/// Nós sob demanda (pastas de alvo de atalho, arquivos do Lost and Found) começam aqui, longe
+/// Nós sob demanda (pastas de alvo de atalho, cópias guardadas) começam aqui, longe
 /// de qualquer inode do banco.
 const DYNAMIC_BASE: u64 = 1 << 56;
 
@@ -27,12 +29,13 @@ const DYNAMIC_BASE: u64 = 1 << 56;
 pub(crate) enum Node {
     MountRoot,
     Trash,
-    LostFound,
+    /// `.Lost and Found` ou `.Uploads cancelados`.
+    Kept(KeptFolder),
     ShortcutTargets,
     /// `.shortcut-targets-by-id/<id>`: contém só o item alvo.
     TargetDir(ItemId),
-    /// Arquivo dentro de `.Lost and Found`, pelo nome.
-    LostFile(OsString),
+    /// Cópia dentro de uma pasta de cópias guardadas, pelo nome.
+    KeptFile(KeptFolder, OsString),
     /// `.Trash-<uid>`, a lixeira do KIO na raiz da montagem, e as pastas `files/` e `info/`.
     KioTrash,
     KioFiles,
@@ -58,7 +61,8 @@ impl Inodes {
         Some(match ino {
             MOUNT_ROOT => Node::MountRoot,
             TRASH => Node::Trash,
-            LOST_FOUND => Node::LostFound,
+            LOST_FOUND => Node::Kept(KeptFolder::LostAndFound),
+            CANCELED_UPLOADS => Node::Kept(KeptFolder::CanceledUploads),
             SHORTCUT_TARGETS => Node::ShortcutTargets,
             KIO_TRASH => Node::KioTrash,
             KIO_FILES => Node::KioFiles,
@@ -77,13 +81,14 @@ impl Inodes {
         match node {
             Node::MountRoot => MOUNT_ROOT,
             Node::Trash => TRASH,
-            Node::LostFound => LOST_FOUND,
+            Node::Kept(KeptFolder::LostAndFound) => LOST_FOUND,
+            Node::Kept(KeptFolder::CanceledUploads) => CANCELED_UPLOADS,
             Node::ShortcutTargets => SHORTCUT_TARGETS,
             Node::KioTrash => KIO_TRASH,
             Node::KioFiles => KIO_FILES,
             Node::KioInfo => KIO_INFO,
             Node::Item(inode) => inode.0 + ITEM_BASE,
-            Node::TargetDir(_) | Node::LostFile(_) | Node::KioInfoFile(_) => {
+            Node::TargetDir(_) | Node::KeptFile(..) | Node::KioInfoFile(_) => {
                 let mut dynamic = lock(&self.dynamic);
                 if let Some(&n) = dynamic.numbers.get(node) {
                     return n;
@@ -107,12 +112,14 @@ mod tests {
         let nodes = [
             Node::MountRoot,
             Node::Trash,
-            Node::LostFound,
+            Node::Kept(KeptFolder::LostAndFound),
+            Node::Kept(KeptFolder::CanceledUploads),
             Node::ShortcutTargets,
             Node::Item(Inode::ROOT),
             Node::Item(Inode(2)),
             Node::TargetDir(ItemId("alvo".into())),
-            Node::LostFile("a.txt".into()),
+            Node::KeptFile(KeptFolder::LostAndFound, "a.txt".into()),
+            Node::KeptFile(KeptFolder::CanceledUploads, "a.txt".into()),
             Node::KioTrash,
             Node::KioFiles,
             Node::KioInfo,
@@ -128,7 +135,7 @@ mod tests {
         assert_eq!(unique.len(), numbers.len());
         assert_eq!(
             inodes.ino(&Node::TargetDir(ItemId("alvo".into()))),
-            numbers[6]
+            numbers[7]
         );
         assert_eq!(inodes.node(0), None);
     }

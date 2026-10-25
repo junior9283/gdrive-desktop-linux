@@ -17,6 +17,7 @@ async fn root_shows_localized_my_drive() {
         [
             ".Lixeira do Drive",
             ".Lost and Found",
+            ".Uploads cancelados",
             ".shortcut-targets-by-id",
             "Meu Drive"
         ]

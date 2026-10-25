@@ -435,10 +435,10 @@ impl Inner {
                 std::fs::rename(self.kio.info_path(name), self.kio.info_path(new_name))
                     .map_err(Errno::from)
             }
-            // Tirar do Lost and Found é um arquivo novo no Drive.
-            (Node::LostFound, Node::Item(_)) => {
+            // Tirar uma cópia guardada da pasta dela é um arquivo novo no Drive.
+            (Node::Kept(folder), Node::Item(_)) => {
                 let dir = self.writable_folder(to)?;
-                let path = self.lost_path(name);
+                let path = self.kept_path(*folder, name);
                 self.block(
                     self.engine
                         .restore_lost(&path, &dir.id, name_str(new_name)?),

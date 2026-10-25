@@ -2,6 +2,7 @@
 folder-my-drive = My Drive
 folder-trash = .Drive Trash
 folder-lost-found = .Lost and Found
+folder-canceled-uploads = .Canceled uploads
 folder-shortcut-targets = .shortcut-targets-by-id
 
 # Mount

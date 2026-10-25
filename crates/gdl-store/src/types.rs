@@ -115,6 +115,8 @@ pub struct Item {
     pub local_name: String,
     pub kind: ItemKind,
     pub size: u64,
+    /// Tamanho da versão da nuvem (a do `md5` e da `head_revision`).
+    pub remote_size: u64,
     pub md5: Option<String>,
     pub head_revision: Option<String>,
     /// Revisão e md5 da última sincronização, para detectar conflitos.

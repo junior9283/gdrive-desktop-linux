@@ -22,6 +22,7 @@ use gdl_engine::EngineError;
 use gdl_engine::cache::CacheError;
 use gdl_engine::engine::Engine;
 use gdl_engine::gdocs::pointer_json;
+use gdl_engine::kept::KeptFolder;
 use gdl_store::{Inode, Item, ItemId, ItemKind};
 
 use crate::inodes::{Inodes, Node};
@@ -68,7 +69,7 @@ pub(crate) enum OpenFile {
     Drive { id: ItemId, last_end: Option<u64> },
     /// Documento Google: o JSON do ponteiro, montado na abertura.
     Pointer(Bytes),
-    /// Arquivo que só existe neste computador (`Lost and Found`, `.trashinfo` do KIO).
+    /// Arquivo que só existe neste computador (cópias guardadas, `.trashinfo` do KIO).
     Local(Arc<File>),
     /// Item do Drive aberto para escrita: o conteúdo inteiro está no arquivo local do cache.
     Write { inode: Inode, file: Arc<File> },
@@ -220,14 +221,14 @@ impl Inner {
         Ok(self.attr(ino, kind, size, item_perm(item), time_of(item.modified_ms)))
     }
 
-    pub(crate) fn lost_path(&self, name: &OsStr) -> PathBuf {
-        self.engine.lost_and_found().dir().join(name)
+    pub(crate) fn kept_path(&self, folder: KeptFolder, name: &OsStr) -> PathBuf {
+        self.engine.kept().get(folder).dir().join(name)
     }
 
     /// Caminho de um nó que é arquivo só local, com o modo dele.
     pub(crate) fn local_file(&self, node: &Node) -> Option<(PathBuf, u16)> {
         match node {
-            Node::LostFile(name) => Some((self.lost_path(name), 0o444)),
+            Node::KeptFile(folder, name) => Some((self.kept_path(*folder, name), 0o444)),
             Node::KioInfoFile(name) => Some((self.kio.info_path(name), 0o600)),
             _ => None,
         }
@@ -255,7 +256,7 @@ impl Inner {
     pub(crate) fn node_attr(&self, node: &Node) -> Res<FileAttr> {
         match node {
             Node::Item(inode) => self.item_attr(&self.item(*inode)?),
-            Node::LostFile(_) | Node::KioInfoFile(_) => self.local_attr(node),
+            Node::KeptFile(..) | Node::KioInfoFile(_) => self.local_attr(node),
             _ => Ok(self.virtual_dir(node)),
         }
     }
@@ -312,7 +313,7 @@ impl Inner {
                 let node = self.layout.lookup_root(name).ok_or(Errno::ENOENT)?;
                 return self.node_attr(&node);
             }
-            Node::LostFound => return self.local_attr(&Node::LostFile(name.into())),
+            Node::Kept(folder) => return self.local_attr(&Node::KeptFile(*folder, name.into())),
             Node::KioTrash => {
                 let node = match name.to_str() {
                     Some("files") => Node::KioFiles,
@@ -340,7 +341,7 @@ impl Inner {
                     .lookup(&dir.id, name.to_str().ok_or(Errno::ENOENT)?)
                     .map_err(errno)?
             }
-            Node::LostFile(_) | Node::KioInfoFile(_) => return Err(Errno::ENOTDIR),
+            Node::KeptFile(..) | Node::KioInfoFile(_) => return Err(Errno::ENOTDIR),
         };
         self.item_attr(&item.ok_or(Errno::ENOENT)?)
     }
@@ -390,9 +391,9 @@ impl Inner {
                 .into_iter()
                 .map(|i| self.item_entry(i))
                 .collect(),
-            Node::LostFound => {
-                self.local_entries(self.engine.lost_and_found().list(), Node::LostFile)
-            }
+            Node::Kept(folder) => self.local_entries(self.engine.kept().get(*folder).list(), |n| {
+                Node::KeptFile(*folder, n)
+            }),
             Node::KioTrash => [("files", Node::KioFiles), ("info", Node::KioInfo)]
                 .map(|(name, node)| Entry {
                     ino: self.inodes.ino(&node),
@@ -434,11 +435,11 @@ impl Inner {
                 let children = self.engine.store().children(&dir.id).map_err(errno)?;
                 children.into_iter().map(|i| self.item_entry(i)).collect()
             }
-            Node::LostFile(_) | Node::KioInfoFile(_) => return Err(Errno::ENOTDIR),
+            Node::KeptFile(..) | Node::KioInfoFile(_) => return Err(Errno::ENOTDIR),
         })
     }
 
-    fn local_entries(&self, paths: Vec<PathBuf>, node: fn(OsString) -> Node) -> Vec<Entry> {
+    fn local_entries(&self, paths: Vec<PathBuf>, node: impl Fn(OsString) -> Node) -> Vec<Entry> {
         paths
             .into_iter()
             .filter_map(|path| {

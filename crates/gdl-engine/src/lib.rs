@@ -8,7 +8,7 @@ pub mod events;
 pub mod gdocs;
 pub mod ids;
 pub mod indexer;
-pub mod lost_found;
+pub mod kept;
 pub mod ops;
 pub mod pins;
 #[cfg(test)]

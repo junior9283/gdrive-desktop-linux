@@ -48,6 +48,10 @@ impl Service {
         self.daemon.activity().await
     }
 
+    async fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError> {
+        self.daemon.cancel_upload(item_id).await
+    }
+
     async fn pin(&self, path: &str) -> Result<(), ServiceError> {
         self.daemon.set_pinned(path, true).await
     }

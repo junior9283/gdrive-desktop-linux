@@ -21,9 +21,9 @@ use crate::cache::BlockCache;
 use crate::changes::ChangePoller;
 use crate::events::{EngineEvent, SyncSummary};
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, initial_index};
-use crate::lost_found::LostAndFound;
+use crate::kept::{Kept, KeptCopies, KeptFolder};
 use crate::pins::PinManager;
-use crate::uploads::{UploadOutcome, UploadWorker, recover_on_start};
+use crate::uploads::{CancelOutcome, UploadOutcome, UploadWorker, recover_on_start};
 
 /// De quanto em quanto tempo cada laço do serviço roda.
 #[derive(Debug, Clone, Copy)]
@@ -54,7 +54,7 @@ pub struct Engine {
     pins: PinManager,
     pub(crate) uploads: UploadWorker,
     pub(crate) poller: ChangePoller,
-    lost: LostAndFound,
+    kept: Kept,
     data_dir: PathBuf,
     pub(crate) events: broadcast::Sender<EngineEvent>,
     intervals: Intervals,
@@ -91,7 +91,7 @@ impl Engine {
             events.clone(),
         );
         recover_on_start(&store, &cache)?;
-        let lost = LostAndFound::new(data_dir.join("lost_and_found"));
+        let kept = Kept::in_dir(&data_dir);
         let activity = Arc::new(ActivityLog::default());
         Ok(Engine {
             pins: PinManager::new(store.clone(), cache.clone()).with_activity(activity.clone()),
@@ -99,13 +99,13 @@ impl Engine {
                 store.clone(),
                 client.clone(),
                 cache.clone(),
-                lost.clone(),
+                kept.clone(),
                 events.clone(),
             )
             .with_activity(activity.clone()),
             activity,
             poller: ChangePoller::new(store.clone(), client.clone(), cache.clone(), events.clone()),
-            lost,
+            kept,
             data_dir,
             store,
             client,
@@ -141,18 +141,28 @@ impl Engine {
         &self.store
     }
 
-    /// Pasta de dados da conta (banco, `Lost and Found`, arquivos só locais).
+    /// Pasta de dados da conta (banco, cópias guardadas, arquivos só locais).
     pub fn data_dir(&self) -> &std::path::Path {
         &self.data_dir
     }
 
-    /// Pastas com os dados locais da conta: banco e `Lost and Found`, e o cache.
+    /// Pastas com os dados locais da conta: banco e cópias guardadas, e o cache.
     pub fn local_dirs(&self) -> [PathBuf; 2] {
         [self.data_dir.clone(), self.cache.dir().to_path_buf()]
     }
 
-    pub fn lost_and_found(&self) -> &LostAndFound {
-        &self.lost
+    pub fn lost_and_found(&self) -> &KeptCopies {
+        self.kept.get(KeptFolder::LostAndFound)
+    }
+
+    /// As pastas de cópias guardadas (`Lost and Found` e `Uploads cancelados`).
+    pub fn kept(&self) -> &Kept {
+        &self.kept
+    }
+
+    /// Cancela o envio do arquivo (ver `UploadWorker::cancel`).
+    pub async fn cancel_upload(&self, id: &gdl_store::ItemId) -> Result<CancelOutcome> {
+        self.uploads.cancel(id).await
     }
 
     pub fn account_email(&self) -> Result<String> {
@@ -351,12 +361,8 @@ mod tests {
         let id = gdl_store::ItemId(id);
         engine.cache.ensure_full(&id).await.unwrap();
         engine
-            .lost
-            .preserve(
-                &engine.cache.local_path(&id),
-                "a.txt",
-                crate::events::LostReason::RemoteChanged,
-            )
+            .lost_and_found()
+            .preserve(&engine.cache.local_path(&id), "a.txt")
             .unwrap();
 
         let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;

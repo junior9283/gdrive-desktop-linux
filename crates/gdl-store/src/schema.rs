@@ -63,6 +63,11 @@ const MIGRATIONS: &[&str] = &[
     -- ID reservado no Drive para a criação: repetida, ela não duplica o item.
     ALTER TABLE upload_queue ADD COLUMN file_id TEXT;
 ",
+    "
+    -- Tamanho da versão da nuvem: durante uma edição local, `size` é o da edição.
+    ALTER TABLE items ADD COLUMN remote_size INTEGER NOT NULL DEFAULT 0;
+    UPDATE items SET remote_size = size;
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.
@@ -75,4 +80,32 @@ pub(crate) fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
         tx.commit()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrade_fills_remote_size_from_size() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..2] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        conn.execute(
+            "INSERT INTO items (id, inode, remote_name, local_name, kind, size, modified_ms, \
+             created_ms, trashed, can_edit, local_state, pin) \
+             VALUES ('a', 2, 'a', 'a', 'file', 7, 0, 0, 0, 1, 0, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let remote_size: u64 = conn
+            .query_row("SELECT remote_size FROM items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remote_size, 7);
+    }
 }

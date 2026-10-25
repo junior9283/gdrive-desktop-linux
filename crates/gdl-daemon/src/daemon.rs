@@ -493,6 +493,18 @@ impl Daemon {
         self.i18n.tr("folder-my-drive", &[])
     }
 
+    /// Cancela o envio do arquivo: `canceled` (a versão local foi para `Uploads cancelados`) ou
+    /// `too-late` (o envio já terminou).
+    pub async fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError> {
+        let engine = self.connected_engine().await?;
+        let outcome = engine
+            .cancel_upload(&ItemId(item_id.into()))
+            .await
+            .map_err(failed)?;
+        self.emit_status_changed().await;
+        Ok(outcome.as_str().into())
+    }
+
     /// `f` sobre a conta conectada, soltando a trava antes de o chamador consultar o banco.
     async fn with_account<T>(&self, f: impl FnOnce(&Account) -> T) -> Option<T> {
         self.account.lock().await.as_ref().map(f)
@@ -608,15 +620,20 @@ impl Daemon {
         }
     }
 
-    /// Desmonta, esquece os tokens e apaga os dados locais da conta (banco e cache). O Lost and
-    /// Found fica: é a única cópia das edições guardadas nele.
+    /// Desmonta, esquece os tokens e apaga os dados locais da conta (banco e cache). As cópias
+    /// guardadas (Lost and Found e Uploads cancelados) ficam: são a única cópia dessas versões.
     async fn sign_out(&self, engine: &Engine, email: &str) -> Result<(), ServiceError> {
         self.stop_account().await;
         self.config.tokens.delete(email).await.map_err(failed)?;
         let _ = std::fs::remove_file(self.current_account_file());
         let dirs = engine.local_dirs();
-        let keep = engine.lost_and_found().dir().to_path_buf();
+        let keep = engine.kept().dirs();
         tokio::task::spawn_blocking(move || {
+            // Só as pastas com alguma cópia; as vazias vão embora com o resto.
+            let keep: Vec<PathBuf> = keep
+                .into_iter()
+                .filter(|k| std::fs::read_dir(k).is_ok_and(|mut d| d.next().is_some()))
+                .collect();
             for dir in dirs {
                 remove_all_but(&dir, &keep)?;
             }
@@ -674,16 +691,14 @@ fn relative_to_mount(path: &Path, mount_point: &Path) -> Option<PathBuf> {
 }
 
 /// Quantos itens ainda não estão no Drive: os pendentes (o que `copy_pending` copia) e as
-/// cópias no Lost and Found.
+/// cópias guardadas.
 fn unsynced(engine: &Engine) -> gdl_engine::Result<usize> {
-    Ok(engine.store().pending_items()?.len() + engine.lost_and_found().list().len())
+    Ok(engine.store().pending_items()?.len() + engine.kept().list().len())
 }
 
-/// Apaga `dir` inteira, menos `keep` (e as pastas no caminho até ela) se `keep` tiver algo.
-fn remove_all_but(dir: &Path, keep: &Path) -> std::io::Result<()> {
-    let keep_it =
-        keep.starts_with(dir) && std::fs::read_dir(keep).is_ok_and(|mut d| d.next().is_some());
-    if !keep_it {
+/// Apaga `dir` inteira, menos as pastas de `keep` (e as pastas no caminho até elas).
+fn remove_all_but(dir: &Path, keep: &[PathBuf]) -> std::io::Result<()> {
+    if !keep.iter().any(|k| k.starts_with(dir)) {
         return match std::fs::remove_dir_all(dir) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             result => result,
@@ -691,10 +706,10 @@ fn remove_all_but(dir: &Path, keep: &Path) -> std::io::Result<()> {
     }
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
-        if path == keep {
+        if keep.contains(&path) {
             continue;
         }
-        if keep.starts_with(&path) {
+        if keep.iter().any(|k| k.starts_with(&path)) {
             remove_all_but(&path, keep)?;
         } else if path.is_dir() {
             std::fs::remove_dir_all(&path)?;
@@ -705,8 +720,8 @@ fn remove_all_but(dir: &Path, keep: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Copia o conteúdo local dos arquivos pendentes e o Lost and Found para `dir`, sem sobrescrever
-/// nada.
+/// Copia o conteúdo local dos arquivos pendentes e as cópias guardadas para `dir`, sem
+/// sobrescrever nada.
 fn copy_pending(engine: &Engine, dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let pending = engine
@@ -721,7 +736,7 @@ fn copy_pending(engine: &Engine, dir: &Path) -> std::io::Result<()> {
         };
         copy_unique(&mut src, dir, &item.local_name)?;
     }
-    for saved in engine.lost_and_found().list() {
+    for saved in engine.kept().list() {
         let name = saved.file_name().unwrap_or_default().to_string_lossy();
         copy_unique(&mut std::fs::File::open(&saved)?, dir, &name)?;
     }

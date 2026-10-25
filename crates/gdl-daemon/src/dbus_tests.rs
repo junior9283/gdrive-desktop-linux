@@ -325,3 +325,48 @@ async fn upload_progress_reaches_activity() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancel_upload_over_dbus() {
+    const MIB: usize = 1024 * 1024;
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.fake
+        .inject(gdl_fake_drive::Fault::StallConnectionAfterBytes(
+            10 * MIB as u64,
+        ));
+    let path = h.drive().join("grande.bin");
+    let file = path.clone();
+    blocking(move || std::fs::write(file, vec![7u8; 20 * MIB]).unwrap()).await;
+    wait_until("envio empacado na metade", || h.fake.byte_limit_reached()).await;
+    let rows = h.proxy.activity().await.unwrap();
+    let id = rows
+        .iter()
+        .find(|r| r.name == "grande.bin")
+        .unwrap()
+        .item_id
+        .clone();
+
+    assert_eq!(h.proxy.cancel_upload(&id).await.unwrap(), "canceled");
+
+    assert!(!blocking(move || path.exists()).await);
+    let rows = h.proxy.activity().await.unwrap();
+    assert_eq!(rows[0].name, "grande.bin");
+    assert_eq!(rows[0].state, "upload-canceled");
+    assert_eq!(h.proxy.cancel_upload(&id).await.unwrap(), "too-late");
+    let engine = h.daemon.engine().await.unwrap();
+    let canceled = engine
+        .kept()
+        .get(gdl_engine::kept::KeptFolder::CanceledUploads);
+    assert_eq!(canceled.list().len(), 1);
+    drop(engine);
+    // A cópia cancelada só existe aqui: sair da conta não a apaga sem perguntar.
+    let err = h.proxy.logout("", "").await.unwrap_err();
+    assert!(err.to_string().contains("PendingUploads"), "{err}");
+    let copies = h.home.join("Copias");
+    h.proxy
+        .logout("move", copies.to_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_dir(&copies).unwrap().count(), 1);
+}

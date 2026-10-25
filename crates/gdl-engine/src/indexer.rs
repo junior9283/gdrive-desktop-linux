@@ -44,6 +44,7 @@ pub(crate) fn item_from_remote(r: RemoteFile, email: &str) -> Item {
         remote_name: r.name,
         kind,
         size,
+        remote_size: size,
         base_revision: r.head_revision.clone(),
         base_md5: r.md5.clone(),
         md5: r.md5,

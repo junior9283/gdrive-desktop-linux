@@ -2,6 +2,7 @@
 folder-my-drive = Meu Drive
 folder-trash = .Lixeira do Drive
 folder-lost-found = .Lost and Found
+folder-canceled-uploads = .Uploads cancelados
 folder-shortcut-targets = .shortcut-targets-by-id
 
 # Montagem

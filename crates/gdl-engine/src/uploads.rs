@@ -1,7 +1,7 @@
-//! Fila de envio persistente: sobe as edições locais, detecta conflitos e guarda no
-//! `Lost and Found` o que não pode subir.
+//! Fila de envio persistente: sobe as edições locais, detecta conflitos, guarda no
+//! `Lost and Found` o que não pode subir e cancela envios a pedido do usuário.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,14 +14,15 @@ use gdl_store::{
     Inode, Item, ItemId, ItemKind, LocalState, NewUploadJob, PinState, Store, UploadJob, UploadKind,
 };
 use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
-use crate::activity::{ActivityLog, ActivityState};
+use crate::activity::{Activity, ActivityLog, ActivityState};
 use crate::cache::BlockCache;
 use crate::changes::merge;
 use crate::events::{EngineEvent, LostReason};
 use crate::ids::IdPool;
 use crate::indexer::{ACCOUNT_EMAIL, item_from_remote};
-use crate::lost_found::LostAndFound;
+use crate::kept::{Kept, KeptFolder};
 use crate::{EngineError, Result};
 
 /// Prefixo dos IDs de itens criados no computador que ainda não existem no Drive.
@@ -95,6 +96,25 @@ pub enum UploadOutcome {
     Retrying,
     /// Nada a enviar (item já sincronizado, só local ou removido).
     Skipped,
+    /// O usuário cancelou no meio do envio; quem cancelou cuida do resto (`UploadWorker::cancel`).
+    Canceled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelOutcome {
+    /// A versão local foi para `Uploads cancelados`.
+    Canceled,
+    /// Nada a cancelar: o envio já terminou (ou o item não existe mais).
+    TooLate,
+}
+
+impl CancelOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CancelOutcome::Canceled => "canceled",
+            CancelOutcome::TooLate => "too-late",
+        }
+    }
 }
 
 pub fn is_local_id(id: &ItemId) -> bool {
@@ -145,6 +165,7 @@ pub fn create_local_item(
         local_name: name.into(),
         kind,
         size: 0,
+        remote_size: 0,
         md5: None,
         head_revision: None,
         base_revision: None,
@@ -249,12 +270,17 @@ pub struct UploadWorker {
     store: Arc<Store>,
     client: Arc<DriveClient>,
     cache: BlockCache,
-    lost: LostAndFound,
+    kept: Kept,
     events: broadcast::Sender<EngineEvent>,
     retry: Backoff,
     ids: IdPool,
     pub(crate) stats: Arc<UploadStats>,
     activity: Arc<ActivityLog>,
+    /// A vez de cada item, por inode (o ID temporário muda no fim da criação, o inode não): o
+    /// envio e o cancelamento do mesmo item não rodam juntos.
+    turns: Mutex<HashMap<Inode, Arc<tokio::sync::Mutex<()>>>>,
+    /// Cancelamentos pedidos (e envios de arquivo em andamento), por inode.
+    cancels: Mutex<HashMap<Inode, CancellationToken>>,
 }
 
 impl UploadWorker {
@@ -262,19 +288,21 @@ impl UploadWorker {
         store: Arc<Store>,
         client: Arc<DriveClient>,
         cache: BlockCache,
-        lost: LostAndFound,
+        kept: Kept,
         events: broadcast::Sender<EngineEvent>,
     ) -> UploadWorker {
         UploadWorker {
             store,
             client,
             cache,
-            lost,
+            kept,
             events,
             retry: Backoff::default(),
             ids: IdPool::default(),
             stats: Arc::default(),
             activity: Arc::default(),
+            turns: Mutex::default(),
+            cancels: Mutex::default(),
         }
     }
 
@@ -292,6 +320,12 @@ impl UploadWorker {
         let Some(job) = self.store.next_job(now_ms())? else {
             return Ok(None);
         };
+        let Some(inode) = self.store.get(&job.item)?.map(|i| i.inode) else {
+            return self.skip(&job).map(Some);
+        };
+        let turn = self.turn(inode);
+        let _turn = turn.lock().await;
+        // Um cancelamento pode ter descartado o item enquanto este envio esperava a vez.
         let item = self.store.get(&job.item)?;
         let result = match item {
             // Na lixeira daqui antes de subir: restaurar enfileira de novo.
@@ -369,16 +403,18 @@ impl UploadWorker {
             _ => {
                 let src = self.cache.local_path(&item.id);
                 let session = self.session(job, &item);
-                self.client
-                    .upload_new(
-                        &parent.0,
-                        &item.remote_name,
-                        &src,
-                        item.modified_ms,
-                        &session,
-                        Some(&file_id),
-                    )
-                    .await
+                let upload = self.client.upload_new(
+                    &parent.0,
+                    &item.remote_name,
+                    &src,
+                    item.modified_ms,
+                    &session,
+                    Some(&file_id),
+                );
+                let Some(result) = self.unless_canceled(item.inode, upload).await else {
+                    return Ok(UploadOutcome::Canceled);
+                };
+                result
             }
         };
         match result {
@@ -419,12 +455,12 @@ impl UploadWorker {
         };
         if remote.trashed {
             return self
-                .preserve(job, item, LostReason::RemoteDeleted, Some(remote))
+                .preserve(item, LostReason::RemoteDeleted, Some(remote))
                 .await;
         }
         if remote.head_revision != item.base_revision && remote.md5 != item.base_md5 {
             return self
-                .preserve(job, item, LostReason::RemoteChanged, Some(remote))
+                .preserve(item, LostReason::RemoteChanged, Some(remote))
                 .await;
         }
         self.store
@@ -432,11 +468,13 @@ impl UploadWorker {
         self.note(&item, ActivityState::Uploading, Some(0));
         let src = self.cache.local_path(&item.id);
         let session = self.session(job, &item);
-        match self
+        let upload = self
             .client
-            .upload_update(&item.id.0, &src, item.modified_ms, &session)
-            .await
-        {
+            .upload_update(&item.id.0, &src, item.modified_ms, &session);
+        let Some(result) = self.unless_canceled(item.inode, upload).await else {
+            return Ok(UploadOutcome::Canceled);
+        };
+        match result {
             Ok(remote) => self.uploaded(job, &item.id, remote),
             Err(e) => self.failed(job, item, e).await,
         }
@@ -446,6 +484,7 @@ impl UploadWorker {
     fn uploaded(&self, job: &UploadJob, id: &ItemId, remote: RemoteFile) -> Result<UploadOutcome> {
         let item = self.store.modify(|batch| -> Result<Item> {
             let mut item = batch.get(id)?.ok_or(EngineError::NotFound)?;
+            item.remote_size = remote.size.unwrap_or(item.size);
             item.md5 = remote.md5.clone();
             item.base_md5 = remote.md5;
             item.head_revision = remote.head_revision.clone();
@@ -471,7 +510,7 @@ impl UploadWorker {
             _ => None,
         };
         if let Some(reason) = lost {
-            return self.preserve(job, item, reason, None).await;
+            return self.preserve(item, reason, None).await;
         }
         self.store
             .transition_local_state(&item.id, LocalState::Uploading, LocalState::Dirty)?;
@@ -508,25 +547,20 @@ impl UploadWorker {
     /// Guarda a edição local no `Lost and Found`, descarta-a e deixa o item como está na nuvem.
     async fn preserve(
         &self,
-        job: &UploadJob,
         item: Item,
         reason: LostReason,
         remote: Option<RemoteFile>,
     ) -> Result<UploadOutcome> {
         self.note(&item, ActivityState::UploadFailed, None);
-        let (lost, src) = (self.lost.clone(), self.cache.local_path(&item.id));
-        let name = item.local_name.clone();
-        let path = tokio::task::spawn_blocking(move || lost.preserve(&src, &name, reason))
-            .await
-            .map_err(std::io::Error::other)??;
-        self.store.finish_job(job.job_id)?;
-        self.cache.discard(&item.id).await?;
-        if is_local_id(&item.id) {
-            // Nunca chegou ao Drive: some do computador (a cópia está no Lost and Found).
-            self.store.remove_item(&item.id)?;
-        } else {
-            self.restore(item, reason, remote).await?;
-        }
+        let path = self.keep(KeptFolder::LostAndFound, &item).await?;
+        tracing::info!(caminho = %path.display(), motivo = ?reason, "edição local guardada no Lost and Found");
+        // Sem permissão, a versão da nuvem ainda é legível; apagado, não há o que buscar.
+        let remote = match remote {
+            None if reason == LostReason::NoPermission => self.client.get(&item.id.0).await.ok(),
+            remote => remote,
+        };
+        self.drop_local_version(item, remote, reason == LostReason::RemoteDeleted)
+            .await?;
         // Sem ninguém ouvindo, o aviso pode se perder.
         let _ = self.events.send(EngineEvent::LostAndFound {
             path: path.clone(),
@@ -535,21 +569,33 @@ impl UploadWorker {
         Ok(UploadOutcome::Preserved { path, reason })
     }
 
-    /// Deixa o item como está na nuvem, sem a edição local descartada.
-    async fn restore(
+    /// Copia o conteúdo local do item para `folder`.
+    async fn keep(&self, folder: KeptFolder, item: &Item) -> std::io::Result<PathBuf> {
+        let kept = self.kept.get(folder).clone();
+        let (src, name) = (self.cache.local_path(&item.id), item.local_name.clone());
+        tokio::task::spawn_blocking(move || kept.preserve(&src, &name))
+            .await
+            .map_err(std::io::Error::other)?
+    }
+
+    /// Descarta a edição local (já guardada) e os envios dela: o item que nunca subiu sai do
+    /// computador e o do Drive volta à versão da nuvem (`remote`, ou a que o banco conhece).
+    async fn drop_local_version(
         &self,
         item: Item,
-        reason: LostReason,
         remote: Option<RemoteFile>,
+        deleted: bool,
     ) -> Result<()> {
-        // Sem permissão, a versão da nuvem ainda é legível; apagado, não há o que buscar.
-        let remote = match remote {
-            None if reason == LostReason::NoPermission => self.client.get(&item.id.0).await.ok(),
-            remote => remote,
-        };
+        self.store.drop_jobs(&item.id)?;
+        self.cache.discard(&item.id).await?;
+        if is_local_id(&item.id) {
+            self.store.remove_item(&item.id)?;
+            return Ok(());
+        }
         let old_parent = item.parent.clone();
         let clean = Item {
             local_state: LocalState::Clean,
+            size: item.remote_size,
             ..item
         };
         let mut restored = match remote {
@@ -559,11 +605,88 @@ impl UploadWorker {
             }
             None => clean,
         };
-        restored.trashed |= reason == LostReason::RemoteDeleted;
+        restored.trashed |= deleted;
         self.store.upsert_item(&restored)?;
         self.store
             .recompute_local_names(restored.parent.iter().chain(old_parent.iter()))?;
         Ok(())
+    }
+
+    fn turn(&self, inode: Inode) -> Arc<tokio::sync::Mutex<()>> {
+        let mut turns = self.turns.lock().unwrap_or_else(|e| e.into_inner());
+        turns.entry(inode).or_default().clone()
+    }
+
+    fn cancels(&self) -> std::sync::MutexGuard<'_, HashMap<Inode, CancellationToken>> {
+        self.cancels.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn cancel_token(&self, inode: Inode) -> CancellationToken {
+        self.cancels().entry(inode).or_default().clone()
+    }
+
+    /// Roda o envio do arquivo `inode` até ele terminar ou ser cancelado (`None`).
+    async fn unless_canceled<T>(&self, inode: Inode, upload: impl Future<Output = T>) -> Option<T> {
+        let token = self.cancel_token(inode);
+        let result = tokio::select! {
+            // Envio que já terminou vale mais que um cancelamento que chegou junto.
+            biased;
+            result = upload => Some(result),
+            () = token.cancelled() => None,
+        };
+        if !token.is_cancelled() {
+            self.cancels().remove(&inode);
+        }
+        result
+    }
+
+    /// Cancela o envio do arquivo `id`: a versão local vai para `Uploads cancelados`, o arquivo
+    /// que nunca subiu sai do computador e o que já estava no Drive volta à versão da nuvem. O
+    /// envio em andamento é interrompido e a sessão retomável, esquecida.
+    pub async fn cancel(&self, id: &ItemId) -> Result<CancelOutcome> {
+        let Some(item) = self.store.get(id)? else {
+            return Ok(CancelOutcome::TooLate);
+        };
+        self.cancel_token(item.inode).cancel();
+        let result = self.cancel_in_turn(item.inode).await;
+        self.cancels().remove(&item.inode);
+        result
+    }
+
+    async fn cancel_in_turn(&self, inode: Inode) -> Result<CancelOutcome> {
+        let turn = self.turn(inode);
+        let _turn = turn.lock().await;
+        // O envio pode ter terminado (e trocado o ID) enquanto esperava.
+        let Some(item) = self.store.by_inode(inode)?.filter(|i| {
+            i.kind == ItemKind::File
+                && matches!(
+                    i.local_state,
+                    LocalState::Dirty | LocalState::Uploading | LocalState::Conflict
+                )
+        }) else {
+            return Ok(CancelOutcome::TooLate);
+        };
+        let activity = Activity::of(&self.store, &item, ActivityState::UploadCanceling, None);
+        self.activity.record(activity.clone());
+        match self.keep(KeptFolder::CanceledUploads, &item).await {
+            Ok(path) => {
+                tracing::info!(caminho = %path.display(), "envio cancelado; versão local guardada")
+            }
+            // Sem conteúdo local, não há versão a guardar.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        let remote = match is_local_id(&item.id) {
+            true => None,
+            // Sem rede, fica a versão da nuvem que o banco conhece.
+            false => self.client.get(&item.id.0).await.ok(),
+        };
+        self.drop_local_version(item, remote, false).await?;
+        self.activity.record(Activity {
+            state: ActivityState::UploadCanceled,
+            ..activity
+        });
+        Ok(CancelOutcome::Canceled)
     }
 }
 
@@ -581,8 +704,8 @@ mod tests {
     use crate::cache::BlockCache;
     use crate::events::{EngineEvent, LostReason};
     use crate::indexer::initial_index;
-    use crate::lost_found::LostAndFound;
-    use crate::testutil::Env;
+    use crate::kept::{Kept, KeptFolder};
+    use crate::testutil::{Env, wait_until};
 
     const MIB: usize = 1024 * 1024;
 
@@ -590,7 +713,7 @@ mod tests {
         env: Env,
         cache: BlockCache,
         worker: UploadWorker,
-        lost: LostAndFound,
+        kept: Kept,
         events: broadcast::Receiver<EngineEvent>,
     }
 
@@ -598,11 +721,16 @@ mod tests {
         env: &Env,
         store: Arc<Store>,
         cache: BlockCache,
-        lost: LostAndFound,
     ) -> (UploadWorker, broadcast::Receiver<EngineEvent>) {
         let (tx, events) = broadcast::channel(16);
         (
-            UploadWorker::new(store, env.client.clone(), cache, lost, tx),
+            UploadWorker::new(
+                store,
+                env.client.clone(),
+                cache,
+                Kept::in_dir(env.dir()),
+                tx,
+            ),
             events,
         )
     }
@@ -611,13 +739,12 @@ mod tests {
     async fn setup(env: Env) -> Setup {
         initial_index(&env.store, &env.client).await.unwrap();
         let cache = env.cache_for(env.store.clone());
-        let lost = LostAndFound::new(env.dir().join("lost_and_found"));
-        let (worker, events) = worker_for(&env, env.store.clone(), cache.clone(), lost.clone());
+        let (worker, events) = worker_for(&env, env.store.clone(), cache.clone());
         Setup {
+            kept: Kept::in_dir(env.dir()),
             env,
             cache,
             worker,
-            lost,
             events,
         }
     }
@@ -648,7 +775,16 @@ mod tests {
         }
 
         fn preserved(&self) -> Vec<(PathBuf, Vec<u8>)> {
-            self.lost
+            self.kept_in(KeptFolder::LostAndFound)
+        }
+
+        fn canceled(&self) -> Vec<(PathBuf, Vec<u8>)> {
+            self.kept_in(KeptFolder::CanceledUploads)
+        }
+
+        fn kept_in(&self, folder: KeptFolder) -> Vec<(PathBuf, Vec<u8>)> {
+            self.kept
+                .get(folder)
                 .list()
                 .into_iter()
                 .map(|p| {
@@ -726,8 +862,7 @@ mod tests {
         let store = Arc::new(Store::open(&env.db_path()).unwrap());
         let cache = env.cache_for(store.clone());
         assert_eq!(recover_on_start(&store, &cache).unwrap(), 1);
-        let lost = LostAndFound::new(env.dir().join("lost_and_found"));
-        let (worker, _events) = worker_for(&env, store, cache, lost);
+        let (worker, _events) = worker_for(&env, store, cache);
 
         assert_eq!(
             worker.run_once().await.unwrap(),
@@ -1051,6 +1186,104 @@ mod tests {
             assert_eq!(s.env.item(&id.0).local_state, LocalState::LocalOnly);
         }
         assert!(s.env.store.lookup(&root, "foo.swp").unwrap().is_some());
+    }
+
+    /// O nome da cópia guardada, sem a data.
+    fn kept_name(path: &std::path::Path) -> String {
+        let name = path.file_name().unwrap().to_string_lossy();
+        name.split(" (local ").next().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn cancel_new_file_moves_it_to_canceled_uploads() {
+        let s = setup(Env::new().await).await;
+        s.env.fake.inject(Fault::Offline);
+        let local = s.write_new(&s.env.root(), "novo.txt", b"rascunho");
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
+
+        assert_eq!(
+            s.worker.cancel(&local).await.unwrap(),
+            CancelOutcome::Canceled
+        );
+
+        assert!(s.env.store.get(&local).unwrap().is_none());
+        let canceled = s.canceled();
+        assert_eq!(canceled.len(), 1);
+        assert_eq!(kept_name(&canceled[0].0), "novo");
+        assert_eq!(canceled[0].1, b"rascunho");
+        assert!(s.preserved().is_empty(), "não é Lost and Found");
+        s.env.fake.clear_faults();
+        s.env.store.wake_network_waiters(i64::MAX).unwrap();
+        while s.run().await.is_some() {}
+        assert!(s.env.fake.find_live("novo.txt").is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancel_edit_restores_cloud_version() {
+        let env = Env::new().await;
+        let id = ItemId(
+            env.fake
+                .add_file(&env.fake.root_id(), "a.txt", b"da nuvem".to_vec()),
+        );
+        let s = setup(env).await;
+        s.edit(&id, b"edicao local mais longa").await;
+        s.env.fake.inject(Fault::Offline);
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
+
+        assert_eq!(s.worker.cancel(&id).await.unwrap(), CancelOutcome::Canceled);
+
+        let item = s.env.item(&id.0);
+        assert_eq!((item.local_state, item.size), (LocalState::Clean, 8));
+        assert!(s.env.store.next_job(i64::MAX).unwrap().is_none());
+        assert_eq!(s.canceled()[0].1, b"edicao local mais longa");
+        s.env.fake.clear_faults();
+        assert_eq!(
+            s.cache.read(&id, 0, 100).await.unwrap().as_ref(),
+            b"da nuvem"
+        );
+        assert_eq!(s.env.fake.content(&id.0), b"da nuvem");
+    }
+
+    #[tokio::test]
+    async fn cancel_mid_resumable_upload_stops_it() {
+        let s = setup(Env::with_tries(1).await).await;
+        let data: Vec<u8> = (0..20 * MIB).map(|n| (n % 251) as u8).collect();
+        let local = s.write_new(&s.env.root(), "grande.bin", &data);
+        s.env
+            .fake
+            .inject(Fault::StallConnectionAfterBytes(10 * MIB as u64));
+
+        let (outcome, canceled) = tokio::join!(s.run(), async {
+            wait_until("envio empacado", || s.env.fake.byte_limit_reached()).await;
+            s.worker.cancel(&local).await.unwrap()
+        });
+
+        assert_eq!(outcome, Some(UploadOutcome::Canceled));
+        assert_eq!(canceled, CancelOutcome::Canceled);
+        assert!(s.env.fake.find_live("grande.bin").is_empty());
+        assert!(s.env.store.get(&local).unwrap().is_none());
+        assert!(s.env.store.next_job(i64::MAX).unwrap().is_none());
+        assert!(s.canceled()[0].1 == data, "a cópia local está íntegra");
+    }
+
+    #[tokio::test]
+    async fn cancel_after_finish_is_too_late() {
+        let s = setup(Env::new().await).await;
+        let local = s.write_new(&s.env.root(), "pronto.txt", b"ok");
+        let Some(UploadOutcome::Uploaded(id)) = s.run().await else {
+            panic!("esperava envio");
+        };
+
+        assert_eq!(s.worker.cancel(&id).await.unwrap(), CancelOutcome::TooLate);
+        // O ID temporário que a tela ainda mostrava também já não tem o que cancelar.
+        assert_eq!(
+            s.worker.cancel(&local).await.unwrap(),
+            CancelOutcome::TooLate
+        );
+
+        assert!(s.canceled().is_empty());
+        assert_eq!(s.env.fake.content(&id.0), b"ok");
+        assert_eq!(s.env.item(&id.0).local_state, LocalState::Clean);
     }
 
     #[test]

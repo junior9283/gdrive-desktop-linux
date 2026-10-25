@@ -29,7 +29,7 @@ macro_rules! select_items {
         concat!(
             "SELECT id, inode, parent, remote_name, local_name, kind, mime, target_id, size, md5, \
              head_revision, base_revision, base_md5, modified_ms, created_ms, trashed, can_edit, \
-             local_state, pin FROM items ",
+             local_state, pin, remote_size FROM items ",
             $filter
         )
     };
@@ -266,6 +266,13 @@ impl Store {
     pub fn finish_job(&self, job_id: i64) -> Result<()> {
         self.conn()
             .execute("DELETE FROM upload_queue WHERE job_id = ?1", [job_id])?;
+        Ok(())
+    }
+
+    /// Tira da fila todos os envios do item.
+    pub fn drop_jobs(&self, id: &ItemId) -> Result<()> {
+        self.conn()
+            .execute("DELETE FROM upload_queue WHERE item_id = ?1", [&id.0])?;
         Ok(())
     }
 
@@ -600,9 +607,10 @@ impl Batch<'_> {
         let mut upsert = self.conn.prepare_cached(
             "INSERT INTO items (id, inode, parent, remote_name, local_name, kind, mime, target_id, \
              size, md5, head_revision, base_revision, base_md5, modified_ms, created_ms, trashed, \
-             can_edit, local_state, pin) VALUES (:id, :inode, :parent, :remote_name, :local_name, \
-             :kind, :mime, :target_id, :size, :md5, :head_revision, :base_revision, :base_md5, \
-             :modified_ms, :created_ms, :trashed, :can_edit, :local_state, :pin) \
+             can_edit, local_state, pin, remote_size) VALUES (:id, :inode, :parent, :remote_name, \
+             :local_name, :kind, :mime, :target_id, :size, :md5, :head_revision, :base_revision, \
+             :base_md5, :modified_ms, :created_ms, :trashed, :can_edit, :local_state, :pin, \
+             :remote_size) \
              ON CONFLICT(id) DO UPDATE SET parent = excluded.parent, \
              remote_name = excluded.remote_name, local_name = excluded.local_name, \
              kind = excluded.kind, mime = excluded.mime, target_id = excluded.target_id, \
@@ -610,7 +618,8 @@ impl Batch<'_> {
              base_revision = excluded.base_revision, base_md5 = excluded.base_md5, \
              modified_ms = excluded.modified_ms, created_ms = excluded.created_ms, \
              trashed = excluded.trashed, can_edit = excluded.can_edit, \
-             local_state = excluded.local_state, pin = excluded.pin",
+             local_state = excluded.local_state, pin = excluded.pin, \
+             remote_size = excluded.remote_size",
         )?;
         for item in items {
             let wanted = (item.inode != Inode::UNASSIGNED).then_some(item.inode.0);
@@ -636,6 +645,7 @@ impl Batch<'_> {
                 ":can_edit": item.can_edit,
                 ":local_state": item.local_state,
                 ":pin": item.pin,
+                ":remote_size": item.remote_size,
             })?;
         }
         Ok(())
@@ -704,6 +714,7 @@ fn item_from_row(r: &Row) -> Result<Item> {
         can_edit: r.get(16)?,
         local_state: r.get(17)?,
         pin: r.get(18)?,
+        remote_size: r.get(19)?,
     })
 }
 
@@ -738,6 +749,7 @@ mod tests {
             local_name: name.into(),
             kind: ItemKind::File,
             size: 0,
+            remote_size: 0,
             md5: None,
             head_revision: None,
             base_revision: None,

@@ -47,10 +47,20 @@ impl I18n {
 
     /// Texto traduzido de `key`; se a chave não existir, devolve a própria chave.
     pub fn tr(&self, key: &str, args: &[(&str, &str)]) -> String {
+        self.format(key, args.iter().copied().collect())
+    }
+
+    /// `tr` com `$count` como número, para os plurais (`[1]`, `*[other]`) escolherem a forma.
+    pub fn tr_count(&self, key: &str, count: u64) -> String {
+        let mut args = FluentArgs::new();
+        args.set("count", count);
+        self.format(key, args)
+    }
+
+    fn format(&self, key: &str, fargs: FluentArgs) -> String {
         let Some(pattern) = self.bundle.get_message(key).and_then(|m| m.value()) else {
             return key.to_string();
         };
-        let fargs: FluentArgs = args.iter().copied().collect();
         let mut errors = vec![];
         self.bundle
             .format_pattern(pattern, Some(&fargs), &mut errors)
@@ -77,6 +87,14 @@ mod tests {
     fn arguments_are_interpolated_without_isolation_marks() {
         let t = I18n::new("pt_BR").tr("mount-moved", &[("path", "/x")]);
         assert_eq!(t, "A pasta do Drive foi aberta em /x");
+    }
+
+    #[test]
+    fn count_chooses_the_plural_form() {
+        let i18n = I18n::new("pt_BR");
+        assert_eq!(i18n.tr_count("tray-syncing", 1), "Sincronizando 1 arquivo");
+        assert_eq!(i18n.tr_count("tray-syncing", 3), "Sincronizando 3 arquivos");
+        assert_eq!(i18n.tr_count("tray-paused", 0), "Pausado");
     }
 
     #[test]

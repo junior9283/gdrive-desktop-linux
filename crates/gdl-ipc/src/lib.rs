@@ -6,6 +6,22 @@ use zbus::zvariant::Type;
 
 pub const BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1";
 pub const OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1";
+/// A janela (`gdrive-desktop-linux-ui`), que fica com este nome enquanto está aberta.
+pub const UI_BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1.Ui";
+pub const UI_OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1/Ui";
+
+/// A janela: a bandeja e o atalho pedem uma tela por aqui.
+#[zbus::proxy(
+    interface = "io.github.junior9283.GDriveDesktopLinux1.Ui",
+    default_service = "io.github.junior9283.GDriveDesktopLinux1.Ui",
+    default_path = "/io/github/junior9283/GDriveDesktopLinux1/Ui",
+    gen_blocking = false
+)]
+pub trait Ui {
+    /// Mostra a janela na tela `screen` (`home`, `onboarding`, `search`, `offline`, `errors`,
+    /// `preferences`, `about`).
+    fn open(&self, screen: &str) -> zbus::Result<()>;
+}
 
 /// Resposta de `Status`; sem conta conectada, tudo vazio.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]

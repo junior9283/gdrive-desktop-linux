@@ -69,3 +69,39 @@ notify-cache-moving-title = Mudando o cache de lugar
 notify-cache-moving-body = Os arquivos baixados estão indo para { $path }. O Drive abre quando terminar.
 notify-cache-moved-title = Cache no lugar novo
 notify-cache-moved-body = Os arquivos baixados agora ficam em { $path }.
+tray-synced = Tudo sincronizado
+tray-syncing = { $count ->
+    [1] Sincronizando 1 arquivo
+   *[other] Sincronizando { $count } arquivos
+}
+tray-offline = { $count ->
+    [0] Sem internet
+   *[other] Sem internet ({ $count } para sincronizar)
+}
+tray-paused = { $count ->
+    [0] Pausado
+   *[other] Pausado ({ $count } para sincronizar)
+}
+tray-quota-full = Armazenamento cheio
+tray-error = { $count ->
+    [1] 1 arquivo não foi sincronizado
+   *[other] { $count } arquivos não foram sincronizados
+}
+tray-signed-out = Você não fez login
+tray-accounts = Conectado com { $count } contas
+tray-no-service = O serviço do Google Drive não está rodando
+tray-open-folder = Abrir a pasta do Google Drive
+tray-open-web = Abrir o Google Drive no navegador
+tray-search = Pesquisar
+tray-pause = Pausar a sincronização
+tray-resume = Retomar a sincronização
+tray-offline-files = Arquivos off-line
+tray-errors = { $count ->
+    [0] Lista de erros
+   *[other] Lista de erros ({ $count })
+}
+tray-preferences = Preferências
+tray-about = Sobre
+tray-quit = Sair
+tray-sign-in = Fazer login
+tray-start-service = Iniciar o serviço

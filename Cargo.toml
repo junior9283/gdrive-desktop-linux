@@ -18,6 +18,7 @@ gdl-engine = { path = "crates/gdl-engine" }
 gdl-fs = { path = "crates/gdl-fs" }
 gdl-daemon = { path = "crates/gdl-daemon" }
 gdl-ipc = { path = "crates/gdl-ipc" }
+gdl-tray = { path = "crates/gdl-tray" }
 sha2 = "0.11"
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint", "functions"] }
 serde = { version = "1", features = ["derive"] }
@@ -48,6 +49,7 @@ zbus = { version = "5.19", default-features = false, features = ["tokio", "p2p"]
 clap = { version = "4.6", features = ["derive"] }
 regex = "1.12"
 tracing-subscriber = "0.3"
+ksni = "0.3.7"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -125,6 +125,18 @@ impl Env {
     }
 }
 
+/// Motor completo sobre o Drive simulado, já indexado, com as preferências padrão.
+pub(crate) async fn indexed_engine(fake: &FakeDrive) -> (crate::engine::Engine, tempfile::TempDir) {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = gdl_common::paths::Paths::for_test(tmp.path());
+    let (prefs, _) = gdl_common::config::load_preferences(&paths).unwrap();
+    let engine =
+        crate::engine::Engine::open(&paths, &prefs, "teste@example.com", fast_client(fake, 3))
+            .unwrap();
+    engine.ensure_indexed().await.unwrap();
+    (engine, tmp)
+}
+
 /// Espera até `done` ficar verdadeiro, falhando o teste depois de 10 s.
 pub(crate) async fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     tokio::time::timeout(Duration::from_secs(10), async {

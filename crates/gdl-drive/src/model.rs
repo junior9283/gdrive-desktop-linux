@@ -30,6 +30,16 @@ pub struct RemoteFile {
     pub web_view_link: Option<String>,
 }
 
+/// Item de "Compartilhados comigo", com quem compartilhou e quando.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "RawShared")]
+pub struct SharedFile {
+    pub file: RemoteFile,
+    /// Nome de quem é o dono.
+    pub owner: String,
+    pub shared_ms: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
     Upsert(Box<RemoteFile>),
@@ -78,6 +88,38 @@ struct RawFile {
     capabilities: Option<Capabilities>,
     shortcut_details: Option<ShortcutDetails>,
     web_view_link: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawShared {
+    #[serde(flatten)]
+    file: RemoteFile,
+    shared_with_me_time: Option<String>,
+    #[serde(default)]
+    owners: Vec<Owner>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Owner {
+    #[serde(default)]
+    display_name: String,
+}
+
+impl From<RawShared> for SharedFile {
+    fn from(raw: RawShared) -> SharedFile {
+        SharedFile {
+            file: raw.file,
+            owner: raw
+                .owners
+                .into_iter()
+                .next()
+                .map(|o| o.display_name)
+                .unwrap_or_default(),
+            shared_ms: parse_ms(raw.shared_with_me_time.as_deref()),
+        }
+    }
 }
 
 #[derive(Deserialize)]

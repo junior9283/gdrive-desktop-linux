@@ -6,7 +6,8 @@ pub mod types;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
-use gdl_common::names::{self, Sibling};
+use gdl_common::names::{self, Sibling, fold};
+use rusqlite::functions::FunctionFlags;
 use rusqlite::{
     Connection, OptionalExtension, Row, TransactionBehavior, named_params, params, params_from_iter,
 };
@@ -43,6 +44,11 @@ const INCOMPLETE_PINNED: &str = "FROM items i \
      AND i.size > (SELECT COALESCE(SUM(r.end - r.start), 0) FROM ranges r \
                    WHERE r.item_id = i.id)";
 
+/// `WHERE` (de `items`) dos fixados mais altos, sem pasta fixada acima (`?1` =
+/// `PinState::Pinned`, `?2` = `PinState::None`).
+const TOP_PINNED: &str = "WHERE pin = ?1 AND trashed = 0 AND NOT EXISTS ( \
+     SELECT 1 FROM items p WHERE p.id = items.parent AND p.pin != ?2)";
+
 /// Resumo da fila de envio (`Store::queue_stats`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct QueueStats {
@@ -63,6 +69,13 @@ impl Store {
         let mut conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "FULL")?;
+        // Comparação da pesquisa (`search_names`): sem maiúsculas nem acentos.
+        conn.create_scalar_function(
+            "gdl_fold",
+            1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| Ok(fold(ctx.get_raw(0).as_str()?)),
+        )?;
         schema::migrate(&mut conn)?;
         Ok(Store {
             conn: Mutex::new(conn),
@@ -517,6 +530,92 @@ impl Store {
             params![PinState::None, LocalState::Clean],
             |r| r.get(0),
         )?)
+    }
+
+    /// Arquivos off-line para a lista de Preferências. Sem `folder`, os fixados mais altos (sem
+    /// pasta fixada acima), de qualquer lugar; numa pasta, os filhos fixados e as pastas sem
+    /// fixação própria com algo fixado dentro (`pin == PinState::None`, "misto").
+    pub fn pinned_children(&self, folder: Option<&ItemId>) -> Result<Vec<Item>> {
+        let Some(folder) = folder else {
+            return self.query_items(
+                &format!("{} {TOP_PINNED} ORDER BY local_name", select_items!("")),
+                params![PinState::Pinned, PinState::None],
+            );
+        };
+        // `up`: as pastas acima de algum item fixado.
+        self.query_items(
+            concat!(
+                "WITH RECURSIVE up(id) AS ( \
+                     SELECT parent FROM items WHERE pin = ?2 AND trashed = 0 \
+                     UNION SELECT i.parent FROM items i JOIN up ON i.id = up.id \
+                     WHERE i.parent IS NOT NULL) ",
+                select_items!(
+                    "WHERE parent = ?1 AND trashed = 0 AND (pin != ?3 OR id IN up) \
+                     ORDER BY local_name"
+                )
+            ),
+            params![folder.0, PinState::Pinned, PinState::None],
+        )
+    }
+
+    /// Quantos são os fixados mais altos (`pinned_children(None)`), sem carregá-los.
+    pub fn count_top_pinned(&self) -> Result<u32> {
+        Ok(self.conn().query_row(
+            &format!("SELECT COUNT(*) FROM items {TOP_PINNED}"),
+            params![PinState::Pinned, PinState::None],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Bytes dos arquivos off-line (fixados por conta própria ou por herança).
+    pub fn pinned_bytes(&self) -> Result<u64> {
+        Ok(self.conn().query_row(
+            "SELECT COALESCE(SUM(size), 0) FROM items \
+             WHERE pin != ?1 AND kind = 'file' AND trashed = 0",
+            params![PinState::None],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Desfixa tudo ("Remover arquivos off-line"); o conteúdo fica como cache comum.
+    pub fn unpin_all(&self) -> Result<()> {
+        self.conn().execute(
+            "UPDATE items SET pin = ?1 WHERE pin != ?1",
+            params![PinState::None],
+        )?;
+        Ok(())
+    }
+
+    /// Até `limit` itens fora da lixeira cujo nome contém `query`, sem diferenciar maiúsculas
+    /// nem acentos (`fold`). A raiz não conta.
+    pub fn search_names(&self, query: &str, limit: usize) -> Result<Vec<Item>> {
+        let mut pattern = String::from("%");
+        for c in fold(query).chars() {
+            if matches!(c, '%' | '_' | '\\') {
+                pattern.push('\\');
+            }
+            pattern.push(c);
+        }
+        pattern.push('%');
+        self.query_items(
+            select_items!(
+                "WHERE trashed = 0 AND parent IS NOT NULL \
+                 AND gdl_fold(local_name) LIKE ?1 ESCAPE '\\' ORDER BY local_name LIMIT ?2"
+            ),
+            params![pattern, limit],
+        )
+    }
+
+    /// Os `limit` arquivos abertos por último (pela tabela `access`), o mais recente primeiro.
+    pub fn recent(&self, limit: usize) -> Result<Vec<Item>> {
+        self.query_items(
+            select_items!(
+                "JOIN access a ON a.item_id = items.id \
+                 WHERE trashed = 0 AND kind != 'folder' \
+                 ORDER BY a.last_access_ms DESC LIMIT ?1"
+            ),
+            params![limit],
+        )
     }
 
     /// Itens que ainda não estão no Drive como estão aqui (com envio na fila ou edição local),
@@ -1207,6 +1306,123 @@ mod tests {
             })
             .unwrap();
         assert_eq!(store.dirty_items_without_job().unwrap(), [id("orphan")]);
+    }
+
+    /// Raiz, `Pasta` (não fixada) com `fixo.txt` (fixado) e `solto.txt`, e `Toda` (fixada) com
+    /// `dentro.txt` (herda).
+    fn pinned_tree(store: &Store) {
+        let folder = |name: &str, parent| Item {
+            kind: ItemKind::Folder,
+            ..item(name, parent)
+        };
+        store
+            .upsert_items(&[
+                Item {
+                    inode: Inode::ROOT,
+                    ..folder("root", None)
+                },
+                folder("Pasta", Some("root")),
+                Item {
+                    size: 10,
+                    pin: PinState::Pinned,
+                    ..item("fixo.txt", Some("Pasta"))
+                },
+                item("solto.txt", Some("Pasta")),
+                Item {
+                    pin: PinState::Pinned,
+                    ..folder("Toda", Some("root"))
+                },
+                Item {
+                    size: 5,
+                    pin: PinState::Inherited,
+                    ..item("dentro.txt", Some("Toda"))
+                },
+            ])
+            .unwrap();
+    }
+
+    #[test]
+    fn pinned_children_reports_mixed_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        pinned_tree(&store);
+        let names = |items: Vec<Item>| -> Vec<(String, PinState)> {
+            items.into_iter().map(|i| (i.local_name, i.pin)).collect()
+        };
+
+        // No topo, os fixados mais altos, de qualquer pasta.
+        assert_eq!(
+            names(store.pinned_children(None).unwrap()),
+            [
+                ("Toda".to_string(), PinState::Pinned),
+                ("fixo.txt".to_string(), PinState::Pinned)
+            ]
+        );
+        // Numa pasta, os filhos fixados e as pastas com algo fixado dentro (sem fixação própria).
+        assert_eq!(
+            names(store.pinned_children(Some(&id("root"))).unwrap()),
+            [
+                ("Pasta".to_string(), PinState::None),
+                ("Toda".to_string(), PinState::Pinned)
+            ]
+        );
+        assert_eq!(
+            names(store.pinned_children(Some(&id("Toda"))).unwrap()),
+            [("dentro.txt".to_string(), PinState::Inherited)]
+        );
+        assert_eq!(store.pinned_bytes().unwrap(), 15);
+        assert_eq!(store.count_top_pinned().unwrap(), 2);
+
+        store.unpin_all().unwrap();
+        assert!(store.pinned_children(None).unwrap().is_empty());
+        assert_eq!(store.pinned_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn search_names_ignores_case_and_accents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        pinned_tree(&store);
+        store
+            .upsert_items(&[
+                item("Relatório Anual.pdf", Some("Pasta")),
+                item("100%_pronto.txt", Some("Pasta")),
+                Item {
+                    trashed: true,
+                    ..item("relatorio velho.pdf", Some("Pasta"))
+                },
+            ])
+            .unwrap();
+        let found = |q: &str| -> Vec<String> {
+            let items = store.search_names(q, 50).unwrap();
+            items.into_iter().map(|i| i.local_name).collect()
+        };
+
+        assert_eq!(found("RELATORIO"), ["Relatório Anual.pdf"]);
+        assert_eq!(found("relatório"), ["Relatório Anual.pdf"]);
+        assert_eq!(found("%"), ["100%_pronto.txt"], "% é texto, não curinga");
+        assert_eq!(found("_p"), ["100%_pronto.txt"]);
+        assert!(found("root").is_empty(), "a raiz não é resultado");
+        assert_eq!(store.search_names("o", 2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn recent_lists_last_opened_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        pinned_tree(&store);
+        store.touch_access(&id("solto.txt"), 1).unwrap();
+        store.touch_access(&id("dentro.txt"), 3).unwrap();
+        store.touch_access(&id("fixo.txt"), 2).unwrap();
+        store.touch_access(&id("Pasta"), 4).unwrap();
+
+        let recent: Vec<_> = store
+            .recent(2)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.local_name)
+            .collect();
+        assert_eq!(recent, ["dentro.txt", "fixo.txt"]);
     }
 
     #[test]

@@ -153,6 +153,15 @@ impl Harness {
         self.home.join("Google Drive").join("Meu Drive")
     }
 
+    /// O que o serviço mandou abrir no navegador ou no gerenciador de arquivos, em ordem.
+    pub fn opened(&self) -> Vec<String> {
+        std::fs::read_to_string(self.dir.path().join("opened.txt"))
+            .unwrap_or_default()
+            .lines()
+            .map(String::from)
+            .collect()
+    }
+
     /// As pastas do serviço deste teste.
     pub fn paths(&self) -> Paths {
         Paths::for_test(self.dir.path())
@@ -211,6 +220,21 @@ fn write_policy(root: &Path, policy: &str) {
     std::fs::write(paths.etc_dir.join("policies.toml"), policy).unwrap();
 }
 
+/// Script que faz o papel do navegador e do gerenciador de arquivos: anota o argumento em
+/// `opened.txt` (ver `Harness::opened`).
+fn launcher(root: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let script = root.join("abrir.sh");
+    let log = root.join("opened.txt");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n", log.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
 /// Configuração do serviço sobre o Drive simulado e a pasta `root` do teste.
 fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
     Config {
@@ -227,8 +251,8 @@ fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
             upload: fake.upload_url(),
         },
         tokens: tokens.clone() as Arc<dyn TokenStore>,
-        // Nada abre na tela: o "navegador" é o `true`.
-        browser: Some("true".into()),
+        // Nada abre na tela: o "navegador" só anota o que pediram para abrir.
+        browser: Some(launcher(root)),
         backoff: Backoff {
             base: Duration::from_millis(1),
             max: Duration::from_millis(2),

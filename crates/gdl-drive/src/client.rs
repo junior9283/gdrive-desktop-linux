@@ -26,6 +26,8 @@ pub type Result<T> = std::result::Result<T, DriveError>;
 pub const RESUMABLE_THRESHOLD: u64 = 8 * 1024 * 1024;
 /// Tamanho de cada trecho do upload retomável (múltiplo de 256 KiB, como a API exige).
 const CHUNK: usize = 8 * 1024 * 1024;
+/// Quantos resultados a pesquisa do Drive traz.
+pub const SEARCH_LIMIT: usize = 50;
 
 /// Onde o upload retomável guarda a URL da sessão, para continuar depois de uma queda ou reinício.
 pub trait SessionSlot: Send + Sync {
@@ -93,6 +95,12 @@ async fn error_from(resp: reqwest::Response) -> DriveError {
         (409, _) => DriveError::AlreadyExists,
         (s, _) => DriveError::Http(s),
     }
+}
+
+/// `q` da pesquisa por nome e conteúdo, com aspas e barras escapadas como a API pede.
+fn search_query(text: &str) -> String {
+    let escaped = text.replace('\\', "\\\\").replace('\'', "\\'");
+    format!("fullText contains '{escaped}' and trashed = false")
 }
 
 /// Pede o `id` reservado na criação.
@@ -247,31 +255,78 @@ impl DriveClient {
         &self,
         mut page: impl FnMut(Vec<RemoteFile>) -> std::result::Result<(), E>,
     ) -> std::result::Result<(), E> {
+        self.list("trashed = false", FILE_FIELDS, 1000, |files| {
+            page(files).map(|()| true)
+        })
+        .await
+    }
+
+    /// IDs de até `SEARCH_LIMIT` itens com `text` no nome ou no conteúdo (pesquisa do próprio
+    /// Drive; os metadados já estão no banco).
+    pub async fn search(&self, text: &str) -> Result<Vec<String>> {
         #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Page {
+        struct Hit {
+            id: String,
+        }
+        let mut found = Vec::new();
+        self.list(&search_query(text), "id", SEARCH_LIMIT, |hits: Vec<Hit>| {
+            found = hits.into_iter().map(|h| h.id).collect();
+            Ok::<_, DriveError>(false)
+        })
+        .await?;
+        Ok(found)
+    }
+
+    /// "Compartilhados comigo": os itens de outras pessoas, com o dono e a data.
+    pub async fn shared_with_me(&self) -> Result<Vec<SharedFile>> {
+        let fields = format!("{FILE_FIELDS},sharedWithMeTime,owners(displayName)");
+        let mut shared = Vec::new();
+        self.list(
+            "sharedWithMe = true and trashed = false",
+            &fields,
+            1000,
+            |files| {
+                shared.extend(files);
+                Ok::<_, DriveError>(true)
+            },
+        )
+        .await?;
+        Ok(shared)
+    }
+
+    /// `files.list` com `q`, página a página, enquanto `page` devolver `true`.
+    async fn list<T: DeserializeOwned, E: From<DriveError>>(
+        &self,
+        q: &str,
+        file_fields: &str,
+        page_size: usize,
+        mut page: impl FnMut(Vec<T>) -> std::result::Result<bool, E>,
+    ) -> std::result::Result<(), E> {
+        #[derive(Deserialize)]
+        // Sem o `bound`, o `default` do campo faria o derive pedir `T: Default`.
+        #[serde(rename_all = "camelCase", bound(deserialize = "T: DeserializeOwned"))]
+        struct Page<T> {
             #[serde(default)]
-            files: Vec<RemoteFile>,
+            files: Vec<T>,
             next_page_token: Option<String>,
         }
-        let fields = format!("nextPageToken,files({FILE_FIELDS})");
+        let fields = format!("nextPageToken,files({file_fields})");
+        let page_size = page_size.to_string();
         let mut token: Option<String> = None;
         loop {
-            let p: Page = self
+            let p: Page<T> = self
                 .json(|| {
                     let req = self.http.get(self.api("files"));
-                    let req = req.query(&[
-                        ("q", "trashed = false"),
-                        ("pageSize", "1000"),
-                        ("fields", &fields),
-                    ]);
+                    let req = req.query(&[("q", q), ("pageSize", &page_size), ("fields", &fields)]);
                     match &token {
                         Some(t) => req.query(&[("pageToken", t)]),
                         None => req,
                     }
                 })
                 .await?;
-            page(p.files)?;
+            if !page(p.files)? {
+                return Ok(());
+            }
             match p.next_page_token {
                 Some(t) => token = Some(t),
                 None => return Ok(()),
@@ -736,6 +791,42 @@ mod tests {
 
     fn client(fake: &FakeDrive) -> DriveClient {
         client_with_token(fake, TEST_ACCESS_TOKEN)
+    }
+
+    #[test]
+    fn search_query_is_escaped() {
+        assert_eq!(
+            search_query(r"o'brien\"),
+            r"fullText contains 'o\'brien\\' and trashed = false"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_finds_content_and_shared_with_me_lists_only_shared() {
+        let fake = FakeDrive::start().await;
+        let root = fake.root_id();
+        let report = fake.add_file(&root, "relatorio.txt", b"faturamento de outubro".to_vec());
+        fake.add_file(&root, "outro.txt", b"nada".to_vec());
+        let shared = fake.add_shared_file("Orçamento.xlsx", "Ana Souza", b"x".to_vec());
+        let c = client(&fake);
+
+        let found = c.search("faturamento").await.unwrap();
+        assert_eq!(found, [report]);
+
+        let items = c.shared_with_me().await.unwrap();
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].file.id, shared);
+        assert_eq!(items[0].file.name, "Orçamento.xlsx");
+        assert_eq!(items[0].owner, "Ana Souza");
+        assert!(items[0].shared_ms > 0);
+        let mut all = Vec::new();
+        c.list_all(|page| -> Result<()> {
+            all.extend(page);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(all.iter().all(|f| f.id != shared), "não está no Meu Drive");
     }
 
     fn temp_file(dir: &tempfile::TempDir, name: &str, len: usize) -> (std::path::PathBuf, Vec<u8>) {

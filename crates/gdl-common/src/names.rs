@@ -124,9 +124,33 @@ fn short_hash(original: &str) -> String {
     )
 }
 
+/// Forma de comparar nomes na pesquisa: minúsculas e sem os acentos do português e do espanhol
+/// (`Relatório` e `RELATORIO` dão `relatorio`).
+pub fn fold(text: &str) -> String {
+    text.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            c => c,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fold_ignores_case_and_accents() {
+        assert_eq!(fold("Relatório AÇÃO Ñandú"), "relatorio acao nandu");
+        assert_eq!(fold("日本 Straße"), "日本 straße");
+    }
 
     fn sib(id: &str, name: &str, created: i64) -> Sibling {
         Sibling {

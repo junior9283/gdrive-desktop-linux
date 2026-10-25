@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
-    AccountInfo, ActivityItem, NotificationItem, NotificationSetting, ServiceError, Status,
-    SyncErrorItem,
+    AccountInfo, ActivityItem, NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary,
+    SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -109,6 +109,57 @@ impl Service {
 
     async fn list_lost_and_found(&self) -> Result<Vec<String>, ServiceError> {
         self.daemon.lost_and_found().await
+    }
+
+    async fn offline_summary(&self) -> Result<OfflineSummary, ServiceError> {
+        self.daemon.offline_summary().await
+    }
+
+    /// Os arquivos off-line: com `folder_id` vazio, os fixados mais altos; numa pasta, o que
+    /// está off-line dentro dela.
+    async fn offline_items(&self, folder_id: &str) -> Result<Vec<OfflineEntry>, ServiceError> {
+        self.daemon.offline_items(folder_id).await
+    }
+
+    async fn unpin_item(&self, item_id: &str) -> Result<(), ServiceError> {
+        self.daemon.unpin_item(item_id).await
+    }
+
+    /// Libera o cache (menos off-line e envios pendentes) e devolve os bytes liberados.
+    async fn clear_cache(&self) -> Result<u64, ServiceError> {
+        self.daemon.clear_cache().await
+    }
+
+    async fn clear_offline_files(&self) -> Result<(), ServiceError> {
+        self.daemon.clear_offline_files().await
+    }
+
+    /// Nome (sem diferenciar maiúsculas e acentos) e, com internet, conteúdo; até 50.
+    async fn search(&self, query: &str) -> Result<Vec<SearchResult>, ServiceError> {
+        self.daemon.search(query).await
+    }
+
+    /// Os 10 arquivos abertos por último.
+    async fn recent_items(&self) -> Result<Vec<SearchResult>, ServiceError> {
+        self.daemon.recent_items().await
+    }
+
+    /// `target`: `file` (abre o arquivo), `folder` (abre a pasta que o contém) ou `web`.
+    async fn open_item(&self, item_id: &str, target: &str) -> Result<(), ServiceError> {
+        self.daemon.open_item(item_id, target).await
+    }
+
+    async fn web_link(&self, item_id: &str) -> Result<String, ServiceError> {
+        self.daemon.web_link(item_id).await
+    }
+
+    async fn shared_with_me(&self) -> Result<Vec<SharedItem>, ServiceError> {
+        self.daemon.shared_with_me().await
+    }
+
+    /// Cria no Meu Drive um atalho para o item compartilhado.
+    async fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError> {
+        self.daemon.add_shortcut(item_id).await
     }
 
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.

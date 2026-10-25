@@ -165,11 +165,16 @@ impl BlockCache {
         }))
     }
 
-    /// Arquivo esparso com o conteúdo do item; é onde a gravação local acontece.
+    /// Espaço livre no disco do cache, em bytes.
+    pub fn free_bytes(&self) -> std::io::Result<u64> {
+        Ok(self.0.free.free_kbytes(&self.0.dir)?.saturating_mul(1024))
+    }
+
     pub fn dir(&self) -> &Path {
         &self.0.dir
     }
 
+    /// Arquivo esparso com o conteúdo do item; é onde a gravação local acontece.
     pub fn local_path(&self, id: &ItemId) -> PathBuf {
         self.0.content_dir.join(&id.0)
     }
@@ -398,9 +403,18 @@ impl BlockCache {
     /// Libera os itens de acesso mais antigo até o cache caber no limite. Nunca toca em itens
     /// fixados, com edição local ou sendo baixados agora. Devolve os bytes liberados.
     pub async fn evict_if_needed(&self) -> Result<u64> {
-        let Some(max) = self.0.max_bytes else {
-            return Ok(0);
-        };
+        match self.0.max_bytes {
+            Some(max) => self.evict_down_to(max).await,
+            None => Ok(0),
+        }
+    }
+
+    /// "Limpar cache": libera tudo o que `evict_if_needed` poderia liberar. Devolve os bytes.
+    pub async fn clear(&self) -> Result<u64> {
+        self.evict_down_to(0).await
+    }
+
+    async fn evict_down_to(&self, max: u64) -> Result<u64> {
         let mut total = self.0.store.cached_bytes()?;
         let mut freed = 0;
         while total > max {
@@ -572,6 +586,30 @@ mod tests {
             s.cache.read(id, 0, 10).await.unwrap().as_ref(),
             &data(10)[..]
         );
+    }
+
+    /// "Limpar cache" das Preferências: sai tudo o que não é off-line nem edição por enviar.
+    #[tokio::test]
+    async fn clear_cache_keeps_pinned_and_pending() {
+        let names = [("a", MIB), ("b", MIB), ("c", MIB), ("d", 10)];
+        let (s, ids) = setup(&names, None).await;
+        for id in &ids {
+            s.cache.ensure_full(id).await.unwrap();
+        }
+        let store = &s.env.store;
+        let mut pinned = store.get(&ids[1]).unwrap().unwrap();
+        pinned.pin = PinState::Pinned;
+        let mut dirty = store.get(&ids[2]).unwrap().unwrap();
+        dirty.local_state = LocalState::Dirty;
+        store.upsert_items(&[pinned, dirty]).unwrap();
+
+        assert_eq!(s.cache.clear().await.unwrap(), MIB as u64 + 10);
+
+        assert_eq!(store.cached_bytes().unwrap(), 2 * MIB as u64);
+        assert!(!s.cache.local_path(&ids[0]).exists());
+        assert!(!s.cache.local_path(&ids[3]).exists());
+        assert!(s.cache.local_path(&ids[1]).exists() && s.cache.local_path(&ids[2]).exists());
+        assert_eq!(s.cache.clear().await.unwrap(), 0);
     }
 
     #[tokio::test]

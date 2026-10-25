@@ -19,7 +19,7 @@ gdl-fs = { path = "crates/gdl-fs" }
 gdl-daemon = { path = "crates/gdl-daemon" }
 gdl-ipc = { path = "crates/gdl-ipc" }
 sha2 = "0.11"
-rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
+rusqlite = { version = "0.41", features = ["bundled", "fallible_uint", "functions"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio-util = "0.7"

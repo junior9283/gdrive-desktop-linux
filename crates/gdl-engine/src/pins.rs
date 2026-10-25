@@ -95,6 +95,11 @@ impl PinManager {
         self.set(id, PinState::None)
     }
 
+    /// "Remover arquivos off-line": desfixa tudo. O conteúdo fica, como cache comum.
+    pub fn unpin_all(&self) -> Result<()> {
+        Ok(self.store.unpin_all()?)
+    }
+
     fn set(&self, id: &ItemId, pin: PinState) -> Result<()> {
         self.store.get(id)?.ok_or(EngineError::NotFound)?;
         self.store.set_pins(std::slice::from_ref(id), pin)?;

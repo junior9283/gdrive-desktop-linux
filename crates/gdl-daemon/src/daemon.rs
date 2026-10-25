@@ -1,6 +1,6 @@
 //! Estado do serviço: a conta conectada (motor e montagem), o login e a saída da conta.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -11,15 +11,17 @@ use gdl_common::config::{ConfigError, Preferences, load_preferences, save_user_p
 use gdl_common::i18n::I18n;
 use gdl_common::names::{create_unique, split_ext};
 use gdl_common::paths::Paths;
-use gdl_drive::client::{Backoff, DriveClient};
+use gdl_drive::client::{Backoff, DriveClient, DriveError, FOLDER_MIME, SHORTCUT_MIME};
 use gdl_drive::oauth::{AccessTokens, LoginFlow, OAuthEndpoints};
 use gdl_drive::token_store::{ClientCredentials, TokenSet, TokenStore};
+use gdl_engine::EngineError;
 use gdl_engine::engine::{Engine, Intervals};
 use gdl_engine::errors::ErrorSource;
 use gdl_engine::events::{EngineEvent, SyncState};
+use gdl_engine::gdocs::web_url;
 use gdl_engine::kept::KeptFolder;
 use gdl_fs::DriveFs;
-use gdl_store::{Inode, ItemId, ItemKind};
+use gdl_store::{Inode, Item, ItemId, ItemKind, PinState};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -28,8 +30,8 @@ use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 
 use gdl_ipc::{
-    AccountInfo, ActivityItem, NotificationItem, NotificationSetting, OBJECT_PATH, ServiceError,
-    Status, SyncErrorItem,
+    AccountInfo, ActivityItem, NotificationItem, NotificationSetting, OBJECT_PATH, OfflineEntry,
+    OfflineSummary, SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
 };
 
 use crate::dbus::Service;
@@ -98,6 +100,89 @@ struct Account {
 
 fn failed(e: impl std::fmt::Display) -> ServiceError {
     ServiceError::Failed(e.to_string())
+}
+
+/// `NotFound` para o item `id` que não existe (aqui ou no Drive); `Failed` para o resto.
+fn engine_error(e: EngineError, id: &str) -> ServiceError {
+    match e {
+        EngineError::NotFound | EngineError::Drive(DriveError::NotFound) => {
+            ServiceError::NotFound(id.into())
+        }
+        e => failed(e),
+    }
+}
+
+/// O item `id`, fora da lixeira.
+fn live_item(engine: &Engine, id: &str) -> Result<Item, ServiceError> {
+    engine
+        .store()
+        .get(&ItemId(id.into()))
+        .map_err(failed)?
+        .filter(|i| !i.trashed)
+        .ok_or_else(|| ServiceError::NotFound(id.into()))
+}
+
+/// Caminho do item a partir do Meu Drive (`Pasta/arquivo.txt`).
+fn path_in_drive(engine: &Engine, item: &Item) -> Result<String, ServiceError> {
+    engine
+        .store()
+        .path_of(&item.id)
+        .map_err(failed)?
+        .ok_or_else(|| ServiceError::NotFound(item.id.0.clone()))
+}
+
+/// Caminhos completos na montagem para uma lista de itens. O caminho de cada pasta é consultado
+/// uma vez só (numa pasta da lista de off-line, todos têm o mesmo pai).
+struct DrivePaths<'a> {
+    engine: &'a Engine,
+    my_drive: &'a Path,
+    folders: HashMap<ItemId, Option<String>>,
+}
+
+impl<'a> DrivePaths<'a> {
+    fn new(engine: &'a Engine, my_drive: &'a Path) -> DrivePaths<'a> {
+        DrivePaths {
+            engine,
+            my_drive,
+            folders: HashMap::new(),
+        }
+    }
+
+    /// Sem o caminho da pasta, só o nome, direto no Meu Drive.
+    fn of(&mut self, item: &Item) -> String {
+        let store = self.engine.store();
+        let folder = item.parent.as_ref().and_then(|parent| {
+            self.folders
+                .entry(parent.clone())
+                .or_insert_with(|| store.path_of(parent).ok().flatten())
+                .clone()
+        });
+        let folder = self.my_drive.join(folder.unwrap_or_default());
+        folder.join(&item.local_name).display().to_string()
+    }
+}
+
+fn web_link(item: &Item) -> Result<String, ServiceError> {
+    web_url(item).ok_or_else(|| ServiceError::NotFound(item.id.0.clone()))
+}
+
+fn search_results(engine: &Engine, my_drive: &Path, items: Vec<Item>) -> Vec<SearchResult> {
+    let mut paths = DrivePaths::new(engine, my_drive);
+    items
+        .into_iter()
+        .map(|item| SearchResult {
+            path: paths.of(&item),
+            mime: match &item.kind {
+                ItemKind::Folder => FOLDER_MIME.into(),
+                ItemKind::GoogleDoc { mime } => mime.clone(),
+                ItemKind::Shortcut { .. } => SHORTCUT_MIME.into(),
+                ItemKind::File => String::new(),
+            },
+            is_folder: item.kind == ItemKind::Folder,
+            id: item.id.0,
+            name: item.local_name,
+        })
+        .collect()
 }
 
 pub struct Daemon {
@@ -181,13 +266,23 @@ impl Daemon {
         self.stop_account().await;
     }
 
-    /// Abre no navegador sem esperar o lançador terminar.
+    /// Abre o endereço no navegador (`DefaultWebBrowser`, se o administrador definiu).
     fn open(&self, target: String) {
         let launcher = self
             .config
             .browser
             .clone()
             .or_else(|| self.prefs.default_web_browser.clone());
+        Self::launch(target, launcher);
+    }
+
+    /// Abre o arquivo ou a pasta no programa padrão (`xdg-open`), nunca no navegador da política.
+    fn open_local(&self, path: &Path) {
+        Self::launch(path.display().to_string(), self.config.browser.clone());
+    }
+
+    /// Abre sem esperar o lançador terminar.
+    fn launch(target: String, launcher: Option<PathBuf>) {
         tokio::task::spawn_blocking(move || {
             if let Err(e) = browser::open(&target, launcher.as_deref()) {
                 tracing::warn!(erro = %e, "não deu para abrir o navegador");
@@ -231,7 +326,7 @@ impl Daemon {
             _ => return Err(ServiceError::InvalidArgs(key.into())),
         };
         let engine = self.connected_engine().await?;
-        self.open(engine.kept().get(folder).dir().display().to_string());
+        self.open_local(engine.kept().get(folder).dir());
         Ok(())
     }
 
@@ -580,8 +675,7 @@ impl Daemon {
     }
 
     pub async fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError> {
-        let engine = self.connected_engine().await?;
-        let my_drive = self.mount_point().await?.join(self.my_drive_name());
+        let (engine, my_drive) = self.engine_and_my_drive().await?;
         let rows = engine.activity().map_err(failed)?;
         Ok(rows
             .into_iter()
@@ -694,6 +788,125 @@ impl Daemon {
         let engine = self.connected_engine().await?;
         let files = engine.lost_and_found().list();
         Ok(files.iter().map(|p| p.display().to_string()).collect())
+    }
+
+    pub async fn offline_summary(&self) -> Result<OfflineSummary, ServiceError> {
+        let engine = self.connected_engine().await?;
+        let store = engine.store();
+        Ok(OfflineSummary {
+            pinned_bytes: store.pinned_bytes().map_err(failed)?,
+            cache_bytes: store.cached_bytes().map_err(failed)?,
+            free_bytes: engine.cache().free_bytes().map_err(failed)?,
+            pinned_count: store.count_top_pinned().map_err(failed)?,
+        })
+    }
+
+    /// Ver `Store::pinned_children`; `folder_id` vazio é o topo.
+    pub async fn offline_items(&self, folder_id: &str) -> Result<Vec<OfflineEntry>, ServiceError> {
+        let (engine, my_drive) = self.engine_and_my_drive().await?;
+        let folder = (!folder_id.is_empty()).then(|| ItemId(folder_id.into()));
+        let items = engine
+            .store()
+            .pinned_children(folder.as_ref())
+            .map_err(failed)?;
+        let mut paths = DrivePaths::new(&engine, &my_drive);
+        Ok(items
+            .into_iter()
+            .map(|item| OfflineEntry {
+                path: paths.of(&item),
+                is_folder: item.kind == ItemKind::Folder,
+                size: item.size,
+                pin: match item.pin {
+                    PinState::None => "mixed",
+                    PinState::Pinned | PinState::Inherited => "on",
+                }
+                .into(),
+                id: item.id.0,
+                name: item.local_name,
+            })
+            .collect())
+    }
+
+    pub async fn unpin_item(&self, item_id: &str) -> Result<(), ServiceError> {
+        let engine = self.connected_engine().await?;
+        engine
+            .pins()
+            .unpin(&ItemId(item_id.into()))
+            .map_err(|e| engine_error(e, item_id))
+    }
+
+    pub async fn clear_cache(&self) -> Result<u64, ServiceError> {
+        let engine = self.connected_engine().await?;
+        engine.cache().clear().await.map_err(failed)
+    }
+
+    pub async fn clear_offline_files(&self) -> Result<(), ServiceError> {
+        let engine = self.connected_engine().await?;
+        engine.pins().unpin_all().map_err(failed)
+    }
+
+    pub async fn search(&self, query: &str) -> Result<Vec<SearchResult>, ServiceError> {
+        let (engine, my_drive) = self.engine_and_my_drive().await?;
+        let items = engine.search(query).await.map_err(failed)?;
+        Ok(search_results(&engine, &my_drive, items))
+    }
+
+    pub async fn recent_items(&self) -> Result<Vec<SearchResult>, ServiceError> {
+        let (engine, my_drive) = self.engine_and_my_drive().await?;
+        let items = engine.recent().map_err(failed)?;
+        Ok(search_results(&engine, &my_drive, items))
+    }
+
+    /// `file` abre o item, `folder` a pasta que o contém (os dois pela montagem) e `web` o
+    /// endereço no Drive.
+    pub async fn open_item(&self, item_id: &str, target: &str) -> Result<(), ServiceError> {
+        if !matches!(target, "file" | "folder" | "web") {
+            return Err(ServiceError::InvalidArgs(target.into()));
+        }
+        let (engine, my_drive) = self.engine_and_my_drive().await?;
+        let item = live_item(&engine, item_id)?;
+        let path = || Ok::<_, ServiceError>(my_drive.join(path_in_drive(&engine, &item)?));
+        match target {
+            "web" => self.open(web_link(&item)?),
+            "file" => self.open_local(&path()?),
+            _ => self.open_local(path()?.parent().unwrap_or(&my_drive)),
+        }
+        Ok(())
+    }
+
+    pub async fn web_link(&self, item_id: &str) -> Result<String, ServiceError> {
+        let engine = self.connected_engine().await?;
+        web_link(&live_item(&engine, item_id)?)
+    }
+
+    pub async fn shared_with_me(&self) -> Result<Vec<SharedItem>, ServiceError> {
+        let engine = self.connected_engine().await?;
+        let shared = engine.shared_with_me().await.map_err(failed)?;
+        Ok(shared
+            .into_iter()
+            .map(|s| SharedItem {
+                id: s.file.id,
+                name: s.file.name,
+                mime: s.file.mime_type,
+                owner: s.owner,
+                shared_ms: s.shared_ms,
+            })
+            .collect())
+    }
+
+    pub async fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError> {
+        let engine = self.connected_engine().await?;
+        engine
+            .add_shortcut(&ItemId(item_id.into()))
+            .await
+            .map(drop)
+            .map_err(|e| engine_error(e, item_id))
+    }
+
+    /// O motor da conta conectada e a pasta do Meu Drive na montagem.
+    async fn engine_and_my_drive(&self) -> Result<(Arc<Engine>, PathBuf), ServiceError> {
+        let engine = self.connected_engine().await?;
+        Ok((engine, self.mount_point().await?.join(self.my_drive_name())))
     }
 
     /// Item do Meu Drive no caminho `path` da montagem.

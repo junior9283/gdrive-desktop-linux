@@ -14,7 +14,7 @@ use axum::routing::{get, patch, post, put};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 
-use crate::state::{self, IdRefused, Session, SessionRef, Shared, parse_query, random_id};
+use crate::state::{self, Clause, IdRefused, Session, SessionRef, Shared, parse_query, random_id};
 
 type Shr = State<Arc<Shared>>;
 type Params = Query<HashMap<String, String>>;
@@ -175,11 +175,14 @@ async fn list(State(shared): Shr, Query(params): Params) -> Response {
         .get("pageToken")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
+    // O compartilhado comigo só aparece quando pedido.
+    let shared_only = clauses.iter().any(|c| matches!(c, Clause::SharedWithMe));
     let mut state = shared.state();
     let mut hits = state
         .files
         .values()
-        .filter(|f| f.id != state.root_id && clauses.iter().all(|c| c.matches(f)))
+        .filter(|f| f.id != state.root_id && (shared_only || f.shared.is_none()))
+        .filter(|f| clauses.iter().all(|c| c.matches(f)))
         .skip(offset);
     let files: Vec<Value> = hits.by_ref().take(size).map(|f| state.to_json(f)).collect();
     let mut body = json!({ "kind": "drive#fileList", "files": files });

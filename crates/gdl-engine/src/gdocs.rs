@@ -2,10 +2,29 @@
 //! documento no navegador.
 
 pub use gdl_common::gdocs::{is_pointer_extension, pointer_extension};
+use gdl_store::{Item, ItemKind};
+
+use crate::uploads::is_local_id;
 
 /// Endereço que abre o documento no navegador.
 pub fn open_url(id: &str) -> String {
     format!("https://docs.google.com/open?id={id}")
+}
+
+/// Endereço do item no Drive na web (`user.gdl.web_url`, "Abrir no navegador"); itens ainda
+/// não enviados não têm.
+pub fn web_url(item: &Item) -> Option<String> {
+    let id = &item.id.0;
+    if is_local_id(&item.id) {
+        return None;
+    }
+    Some(match item.kind {
+        ItemKind::Folder => format!("https://drive.google.com/drive/folders/{id}"),
+        ItemKind::GoogleDoc { .. } => open_url(id),
+        ItemKind::File | ItemKind::Shortcut { .. } => {
+            format!("https://drive.google.com/file/d/{id}/view")
+        }
+    })
 }
 
 /// Conteúdo do ponteiro: JSON de uma linha com o endereço do documento e a conta. Montado à mão

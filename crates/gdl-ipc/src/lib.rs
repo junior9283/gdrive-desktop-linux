@@ -96,6 +96,54 @@ pub struct AccountInfo {
     pub quota_total: i64,
 }
 
+/// Resposta de `OfflineSummary`: o espaço dos arquivos off-line e do cache.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct OfflineSummary {
+    pub pinned_bytes: u64,
+    /// Conteúdo baixado no disco (off-line e cache comum).
+    pub cache_bytes: u64,
+    /// Espaço livre no disco do cache.
+    pub free_bytes: u64,
+    /// Itens fixados por conta própria.
+    pub pinned_count: u32,
+}
+
+/// Uma linha de `OfflineItems`.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct OfflineEntry {
+    pub id: String,
+    pub name: String,
+    /// Caminho completo na montagem.
+    pub path: String,
+    pub is_folder: bool,
+    pub size: u64,
+    /// `on` (off-line) ou `mixed` (pasta com parte do conteúdo off-line).
+    pub pin: String,
+}
+
+/// Um resultado de `Search` ou de `RecentItems`.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct SearchResult {
+    pub id: String,
+    pub name: String,
+    /// Caminho completo na montagem.
+    pub path: String,
+    /// Tipo do Google (pastas, Documentos Google e atalhos); vazio nos demais arquivos.
+    pub mime: String,
+    pub is_folder: bool,
+}
+
+/// Um item de `SharedWithMe`.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct SharedItem {
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    /// Nome de quem compartilhou (o dono).
+    pub owner: String,
+    pub shared_ms: i64,
+}
+
 #[derive(Debug, zbus::DBusError)]
 #[zbus(prefix = "io.github.junior9283.GDriveDesktopLinux1.Error")]
 pub enum ServiceError {
@@ -158,6 +206,24 @@ pub trait Service {
     fn pause(&self) -> Result<(), ServiceError>;
     fn resume(&self) -> Result<(), ServiceError>;
     fn list_lost_and_found(&self) -> Result<Vec<String>, ServiceError>;
+    fn offline_summary(&self) -> Result<OfflineSummary, ServiceError>;
+    /// Os arquivos off-line: com `folder_id` vazio, os fixados mais altos; numa pasta, o que
+    /// está off-line dentro dela.
+    fn offline_items(&self, folder_id: &str) -> Result<Vec<OfflineEntry>, ServiceError>;
+    fn unpin_item(&self, item_id: &str) -> Result<(), ServiceError>;
+    /// Libera o cache (menos off-line e envios pendentes) e devolve os bytes liberados.
+    fn clear_cache(&self) -> Result<u64, ServiceError>;
+    fn clear_offline_files(&self) -> Result<(), ServiceError>;
+    /// Nome (sem diferenciar maiúsculas e acentos) e, com internet, conteúdo; até 50.
+    fn search(&self, query: &str) -> Result<Vec<SearchResult>, ServiceError>;
+    /// Os 10 arquivos abertos por último.
+    fn recent_items(&self) -> Result<Vec<SearchResult>, ServiceError>;
+    /// `target`: `file` (abre o arquivo), `folder` (abre a pasta que o contém) ou `web`.
+    fn open_item(&self, item_id: &str, target: &str) -> Result<(), ServiceError>;
+    fn web_link(&self, item_id: &str) -> Result<String, ServiceError>;
+    fn shared_with_me(&self) -> Result<Vec<SharedItem>, ServiceError>;
+    /// Cria no Meu Drive um atalho para o item compartilhado.
+    fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError>;
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.
     fn logout(&self, mode: &str, dir: &str) -> Result<(), ServiceError>;
 

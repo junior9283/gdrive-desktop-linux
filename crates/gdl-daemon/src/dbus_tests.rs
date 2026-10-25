@@ -562,3 +562,132 @@ async fn notifications_unread_count() {
     h.proxy.dismiss_notification(first).await.unwrap();
     assert_eq!(h.proxy.notifications().await.unwrap().len(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shared_with_me_lists_and_adds_shortcut() {
+    let h = Harness::new().await;
+    let shared = h
+        .fake
+        .add_shared_file("Orçamento.xlsx", "Ana Souza", b"planilha".to_vec());
+    h.logged_in().await;
+
+    let items = h.proxy.shared_with_me().await.unwrap();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(
+        (items[0].id.as_str(), items[0].name.as_str()),
+        (shared.as_str(), "Orçamento.xlsx")
+    );
+    assert_eq!(items[0].owner, "Ana Souza");
+    assert!(items[0].shared_ms > 0);
+    let path = h.drive().join("Orçamento.xlsx");
+    let exists = move || {
+        let path = path.clone();
+        blocking(move || path.symlink_metadata().is_ok())
+    };
+    assert!(!exists().await);
+
+    h.proxy.add_shortcut(&shared).await.unwrap();
+
+    assert!(exists().await, "o atalho aparece no Meu Drive");
+    let err = h.proxy.add_shortcut("nao-existe").await.unwrap_err();
+    assert_eq!(err.short_name(), "NotFound", "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_item_uses_mount_path() {
+    let h = Harness::new().await;
+    let root = h.fake.root_id();
+    let folder = h.fake.add_folder(&root, "Pasta");
+    let file = h.fake.add_file(&folder, "nota.txt", b"x".to_vec());
+    let top = h.fake.add_file(&root, "solta.txt", b"y".to_vec());
+    h.logged_in().await;
+    let before = h.opened().len();
+
+    for (id, target) in [
+        (&file, "file"),
+        (&file, "folder"),
+        (&file, "web"),
+        (&top, "folder"),
+    ] {
+        h.proxy.open_item(id, target).await.unwrap();
+    }
+
+    wait_until("quatro aberturas", || h.opened().len() == before + 4).await;
+    let mut opened = h.opened().split_off(before);
+    opened.sort();
+    let web = format!("https://drive.google.com/file/d/{file}/view");
+    let drive = h.drive();
+    let mut expected = vec![
+        drive.join("Pasta/nota.txt").display().to_string(),
+        drive.join("Pasta").display().to_string(),
+        web.clone(),
+        drive.display().to_string(),
+    ];
+    expected.sort();
+    assert_eq!(opened, expected);
+    assert_eq!(h.proxy.web_link(&file).await.unwrap(), web);
+    let err = h.proxy.open_item(&file, "janela").await.unwrap_err();
+    assert_eq!(err.short_name(), "InvalidArgs", "{err}");
+    let err = h.proxy.open_item("nao-existe", "file").await.unwrap_err();
+    assert_eq!(err.short_name(), "NotFound", "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn offline_files_over_dbus() {
+    let h = Harness::new().await;
+    let root = h.fake.root_id();
+    let folder = h.fake.add_folder(&root, "Pasta");
+    let a = h.fake.add_file(&folder, "a.txt", b"12345".to_vec());
+    h.fake.add_file(&folder, "b.txt", b"fora".to_vec());
+    h.logged_in().await;
+    let engine = h.daemon.engine().await.unwrap();
+
+    let a_path = h.drive().join("Pasta/a.txt").display().to_string();
+    h.proxy.pin(&a_path).await.unwrap();
+    wait_until("a.txt baixado", || {
+        engine.store().cached_bytes().unwrap() == 5
+    })
+    .await;
+
+    let top = h.proxy.offline_items("").await.unwrap();
+    assert_eq!(top.len(), 1, "{top:?}");
+    assert_eq!(
+        (
+            top[0].id.as_str(),
+            top[0].path.as_str(),
+            top[0].pin.as_str()
+        ),
+        (a.as_str(), a_path.as_str(), "on")
+    );
+    assert_eq!((top[0].size, top[0].is_folder), (5, false));
+    let in_root = h.proxy.offline_items(&root).await.unwrap();
+    assert_eq!(in_root.len(), 1, "{in_root:?}");
+    assert_eq!(
+        (in_root[0].name.as_str(), in_root[0].pin.as_str()),
+        ("Pasta", "mixed")
+    );
+    assert!(in_root[0].is_folder);
+    let summary = h.proxy.offline_summary().await.unwrap();
+    assert_eq!((summary.pinned_count, summary.pinned_bytes), (1, 5));
+    assert_eq!(summary.cache_bytes, 5);
+    assert!(summary.free_bytes > 0);
+    assert_eq!(h.proxy.clear_cache().await.unwrap(), 0, "off-line fica");
+
+    h.proxy.unpin_item(&a).await.unwrap();
+    assert!(h.proxy.offline_items("").await.unwrap().is_empty());
+    h.proxy.pin(&a_path).await.unwrap();
+    h.proxy.clear_offline_files().await.unwrap();
+    assert!(h.proxy.offline_items("").await.unwrap().is_empty());
+    assert_eq!(h.proxy.clear_cache().await.unwrap(), 5);
+
+    let found = h.proxy.search("A.TX").await.unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (found[0].path.as_str(), found[0].is_folder),
+        (a_path.as_str(), false)
+    );
+    let folder_hit = h.proxy.search("past").await.unwrap();
+    assert_eq!(folder_hit[0].mime, "application/vnd.google-apps.folder");
+    let recent = h.proxy.recent_items().await.unwrap();
+    assert!(recent.iter().all(|r| !r.is_folder));
+}

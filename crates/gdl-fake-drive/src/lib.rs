@@ -127,6 +127,11 @@ impl FakeDrive {
             .add(parent, name, SHORTCUT_MIME, vec![], Some(target.into()))
     }
 
+    /// Arquivo de `owner` compartilhado com o usuário ("Compartilhados comigo").
+    pub fn add_shared_file(&self, name: &str, owner: &str, bytes: Vec<u8>) -> String {
+        self.shared.state().add_shared(name, owner, bytes)
+    }
+
     /// Simula uma edição feita por outra pessoa: novo conteúdo, nova revisão e uma mudança.
     pub fn modify_remote(&self, id: &str, bytes: Vec<u8>) {
         self.shared.state().set_content(id, bytes, None);

@@ -100,6 +100,8 @@ pub(crate) struct FileRec {
     pub(crate) trashed: bool,
     pub(crate) can_edit: bool,
     pub(crate) shortcut_target: Option<String>,
+    /// Compartilhado com o usuário por outra pessoa (dono, data): fora do Meu Drive.
+    pub(crate) shared: Option<(String, i64)>,
 }
 
 impl FileRec {
@@ -247,9 +249,22 @@ impl State {
                 trashed: false,
                 can_edit: true,
                 shortcut_target: target,
+                shared: None,
             },
         );
         self.record_change(&id);
+        id
+    }
+
+    /// Arquivo de outra pessoa compartilhado com o usuário. Como no Drive real, ele não está em
+    /// nenhuma pasta do Meu Drive: só aparece em `sharedWithMe = true` (nem nas mudanças).
+    pub(crate) fn add_shared(&mut self, name: &str, owner: &str, content: Vec<u8>) -> String {
+        let id = self.add("", name, "application/octet-stream", content, None);
+        self.changes.pop();
+        let shared_ms = self.tick();
+        let file = self.file_mut(&id);
+        file.parents.clear();
+        file.shared = Some((owner.into(), shared_ms));
         id
     }
 
@@ -342,6 +357,10 @@ impl State {
             v["size"] = f.content.len().to_string().into();
             v["md5Checksum"] = f.md5.clone().into();
             v["headRevisionId"] = f.head_revision.clone().into();
+        }
+        if let Some((owner, shared_ms)) = &f.shared {
+            v["sharedWithMeTime"] = rfc3339(*shared_ms).into();
+            v["owners"] = json!([{ "displayName": owner }]);
         }
         if let Some(target) = &f.shortcut_target {
             let target_mime = self
@@ -442,6 +461,7 @@ pub(crate) enum Clause {
     FullText(String),
     MimeIs(String),
     MimeIsNot(String),
+    SharedWithMe,
 }
 
 impl Clause {
@@ -458,6 +478,7 @@ impl Clause {
             }
             Clause::MimeIs(t) => f.mime == *t,
             Clause::MimeIsNot(t) => f.mime != *t,
+            Clause::SharedWithMe => f.shared.is_some(),
         }
     }
 }
@@ -472,6 +493,8 @@ pub(crate) fn parse_query(q: &str) -> Result<Vec<Clause>, String> {
                 Clause::InParents(literal(rest)?)
             } else if clause.ends_with(" in owners") {
                 Clause::Always
+            } else if clause == "sharedWithMe = true" {
+                Clause::SharedWithMe
             } else if let Some(rest) = clause.strip_prefix("trashed =") {
                 Clause::Trashed(rest.trim() == "true")
             } else if let Some(rest) = clause.strip_prefix("name contains") {

@@ -4,9 +4,8 @@
 use std::ffi::OsStr;
 
 use gdl_common::i18n::I18n;
-use gdl_engine::gdocs::open_url;
+use gdl_engine::gdocs::web_url;
 use gdl_engine::kept::KeptFolder;
-use gdl_engine::uploads::is_local_id;
 use gdl_store::{Inode, Item, ItemKind, LocalState, PinState};
 
 use crate::inodes::Node;
@@ -87,21 +86,6 @@ pub(crate) fn item_state(item: &Item) -> &'static str {
         LocalState::Clean if item.pin != PinState::None => "offline",
         LocalState::Clean => "cloud",
     }
-}
-
-/// `user.gdl.web_url`; itens ainda não enviados não têm endereço.
-pub(crate) fn web_url(item: &Item) -> Option<String> {
-    let id = &item.id.0;
-    if is_local_id(&item.id) {
-        return None;
-    }
-    Some(match item.kind {
-        ItemKind::Folder => format!("https://drive.google.com/drive/folders/{id}"),
-        ItemKind::GoogleDoc { .. } => open_url(id),
-        ItemKind::File | ItemKind::Shortcut { .. } => {
-            format!("https://drive.google.com/file/d/{id}/view")
-        }
-    })
 }
 
 pub(crate) fn xattr_value(item: &Item, name: &OsStr) -> Option<String> {

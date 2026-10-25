@@ -74,6 +74,11 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE upload_queue ADD COLUMN error_category TEXT;
     CREATE INDEX upload_queue_item ON upload_queue (item_id);
 ",
+    "
+    -- Arquivos off-line e recentes sem varrer as tabelas inteiras.
+    CREATE INDEX items_pinned ON items (parent) WHERE pin != 0;
+    CREATE INDEX access_recent ON access (last_access_ms);
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.

@@ -12,6 +12,7 @@ pub mod indexer;
 pub mod kept;
 pub mod ops;
 pub mod pins;
+pub mod search;
 #[cfg(test)]
 mod testutil;
 pub mod uploads;

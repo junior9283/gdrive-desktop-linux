@@ -1,6 +1,7 @@
 //! Fachada do motor: junta banco, cache, fixados, fila de envio e mudanças, e roda os laços do
 //! serviço com pausa.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +16,7 @@ use tokio::sync::{broadcast, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::Result;
+use crate::activity::{Activity, ActivityLog, ActivityRow, ActivityState, MAX_ROWS};
 use crate::cache::BlockCache;
 use crate::changes::ChangePoller;
 use crate::events::{EngineEvent, SyncSummary};
@@ -57,6 +59,7 @@ pub struct Engine {
     pub(crate) events: broadcast::Sender<EngineEvent>,
     intervals: Intervals,
     paused: watch::Sender<bool>,
+    pub(crate) activity: Arc<ActivityLog>,
 }
 
 impl Engine {
@@ -89,15 +92,18 @@ impl Engine {
         );
         recover_on_start(&store, &cache)?;
         let lost = LostAndFound::new(data_dir.join("lost_and_found"));
+        let activity = Arc::new(ActivityLog::default());
         Ok(Engine {
-            pins: PinManager::new(store.clone(), cache.clone()),
+            pins: PinManager::new(store.clone(), cache.clone()).with_activity(activity.clone()),
             uploads: UploadWorker::new(
                 store.clone(),
                 client.clone(),
                 cache.clone(),
                 lost.clone(),
                 events.clone(),
-            ),
+            )
+            .with_activity(activity.clone()),
+            activity,
             poller: ChangePoller::new(store.clone(), client.clone(), cache.clone(), events.clone()),
             lost,
             data_dir,
@@ -161,6 +167,33 @@ impl Engine {
     /// A foto da conta (`About::photo_link`).
     pub async fn fetch_photo(&self, link: &str) -> Result<bytes::Bytes> {
         Ok(self.client.fetch_photo(link).await?)
+    }
+
+    /// A atividade de sincronização, a mais recente primeiro. O que está na fila e ainda não
+    /// começou aparece como `UploadQueued`, no topo.
+    pub fn activity(&self) -> Result<Vec<ActivityRow>> {
+        let mut rows = self.activity.rows();
+        let next_seq = rows.first().map_or(1, |r| r.seq + 1);
+        let shown: HashSet<_> = rows.iter().map(|r| r.inode).collect();
+        let queued: Vec<ActivityRow> = self
+            .store
+            .pending_items()?
+            .iter()
+            .filter(|item| !shown.contains(&item.inode))
+            .take(MAX_ROWS)
+            .map(|item| ActivityRow {
+                seq: next_seq,
+                time_ms: item.modified_ms,
+                activity: Activity::of(&self.store, item, ActivityState::UploadQueued, None),
+            })
+            .collect();
+        rows.splice(0..0, queued);
+        Ok(rows)
+    }
+
+    /// Muda a cada registro novo na atividade.
+    pub fn activity_changes(&self) -> watch::Receiver<u64> {
+        self.activity.subscribe()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {

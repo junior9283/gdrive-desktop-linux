@@ -26,6 +26,25 @@ pub struct Status {
     pub remaining_secs: i64,
 }
 
+/// Uma linha de `Activity`: o último estado de um item que subiu, desceu ou foi para a lixeira.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct ActivityItem {
+    /// Ordem do registro (maior = mais recente).
+    pub seq: u64,
+    pub item_id: String,
+    pub name: String,
+    /// Caminho completo na montagem.
+    pub path: String,
+    pub size: i64,
+    /// `upload-queued`, `uploading`, `uploaded`, `upload-canceling`, `upload-canceled`,
+    /// `upload-failed`, `downloading`, `downloaded`, `trashing`, `trashed`, `restoring` ou
+    /// `restored`.
+    pub state: String,
+    /// Andamento do envio; -1 quando não se sabe.
+    pub percent: i32,
+    pub time_ms: i64,
+}
+
 /// Resposta de `AccountInfo`: a conta conectada, para o menu da conta.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct AccountInfo {
@@ -80,6 +99,8 @@ pub trait Service {
     fn begin_login(&self, client_id: &str, client_secret: &str) -> Result<String, ServiceError>;
     fn status(&self) -> Result<Status, ServiceError>;
     fn account_info(&self) -> Result<AccountInfo, ServiceError>;
+    /// A atividade de sincronização, a mais recente primeiro (até 500 itens).
+    fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError>;
     fn pin(&self, path: &str) -> Result<(), ServiceError>;
     fn unpin(&self, path: &str) -> Result<(), ServiceError>;
     fn pause(&self) -> Result<(), ServiceError>;
@@ -92,6 +113,9 @@ pub trait Service {
     fn login_finished(&self, ok: bool, email: &str, error: &str) -> zbus::Result<()>;
     #[zbus(signal)]
     fn status_changed(&self) -> zbus::Result<()>;
+    /// A atividade mudou (no máximo um a cada 250 ms).
+    #[zbus(signal)]
+    fn activity_changed(&self) -> zbus::Result<()>;
 }
 
 #[cfg(test)]

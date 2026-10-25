@@ -31,6 +31,8 @@ const CHUNK: usize = 8 * 1024 * 1024;
 pub trait SessionSlot: Send + Sync {
     fn load(&self) -> Option<String>;
     fn store(&self, url: Option<&str>);
+    /// Quantos bytes o servidor já tem, a cada trecho do upload retomável.
+    fn progress(&self, _sent: u64, _total: u64) {}
 }
 
 /// Upload sem sessão guardada (recomeça do zero se o processo cair).
@@ -605,7 +607,8 @@ impl DriveClient {
                     u
                 }
             };
-            self.send_from(&session_url, src, offset, size).await
+            self.send_from(&session_url, src, offset, size, session)
+                .await
         })
         .await?;
         session.store(None);
@@ -656,6 +659,7 @@ impl DriveClient {
         src: &Path,
         mut offset: u64,
         size: u64,
+        session: &dyn SessionSlot,
     ) -> Result<RemoteFile> {
         let mut file = tokio::fs::File::open(src).await?;
         // Um buffer só para todos os trechos: `split` entrega o trecho e a memória volta no
@@ -666,6 +670,7 @@ impl DriveClient {
             if pos != Some(offset) {
                 file.seek(std::io::SeekFrom::Start(offset)).await?;
             }
+            session.progress(offset, size);
             let len = CHUNK.min((size - offset) as usize);
             buf.resize(len, 0);
             file.read_exact(&mut buf).await?;

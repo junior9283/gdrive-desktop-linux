@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
-use gdl_ipc::{AccountInfo, ServiceError, Status};
+use gdl_ipc::{AccountInfo, ActivityItem, ServiceError, Status};
 use zbus::object_server::SignalEmitter;
 
 use crate::daemon::Daemon;
@@ -44,6 +44,10 @@ impl Service {
         self.daemon.account_info().await
     }
 
+    async fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError> {
+        self.daemon.activity().await
+    }
+
     async fn pin(&self, path: &str) -> Result<(), ServiceError> {
         self.daemon.set_pinned(path, true).await
     }
@@ -79,4 +83,7 @@ impl Service {
 
     #[zbus(signal)]
     pub async fn status_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn activity_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 }

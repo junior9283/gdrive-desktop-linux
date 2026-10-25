@@ -12,6 +12,7 @@ use gdl_drive::client::{Change, DriveError};
 use gdl_drive::model::RemoteFile;
 use gdl_store::{Item, ItemId, ItemKind, LocalState};
 
+use crate::activity::ActivityState;
 use crate::changes::apply_changes;
 use crate::engine::Engine;
 use crate::events::EngineEvent;
@@ -155,7 +156,9 @@ impl Engine {
                 self.set_local_trashed(id, true)
             };
         }
+        self.note(&item, ActivityState::Trashing);
         self.applied(self.client.set_trashed(&id.0, true).await?)?;
+        self.note(&item, ActivityState::Trashed);
         Ok(())
     }
 
@@ -165,7 +168,16 @@ impl Engine {
             enqueue_upload(&self.store, id, now_ms() + UPLOAD_DELAY_MS, None)?;
             return self.item(id);
         }
-        self.applied(self.client.set_trashed(&id.0, false).await?)
+        if let Ok(item) = self.item(id) {
+            self.note(&item, ActivityState::Restoring);
+        }
+        let restored = self.applied(self.client.set_trashed(&id.0, false).await?)?;
+        self.note(&restored, ActivityState::Restored);
+        Ok(restored)
+    }
+
+    fn note(&self, item: &Item, state: ActivityState) {
+        self.activity.note(&self.store, item, state, None);
     }
 
     /// Lixeira daqui, para o que ainda não existe no Drive.

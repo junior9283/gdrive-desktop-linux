@@ -24,7 +24,7 @@ use url::Url;
 use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 
-use gdl_ipc::{AccountInfo, OBJECT_PATH, ServiceError, Status};
+use gdl_ipc::{AccountInfo, ActivityItem, OBJECT_PATH, ServiceError, Status};
 
 use crate::dbus::Service;
 use crate::mount;
@@ -34,6 +34,8 @@ use crate::notify::{self, Notification, Notifier, OPEN_LOST_FOUND};
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// Arquivo (em `data_dir`) com a conta conectada, para reconectar na próxima partida.
 const CURRENT_ACCOUNT: &str = "current-account";
+/// Intervalo mínimo entre dois sinais `ActivityChanged`.
+const ACTIVITY_SIGNAL_GAP: Duration = Duration::from_millis(250);
 /// Foto da conta, no diretório de dados dela.
 const PHOTO_FILE: &str = "photo.png";
 /// De quanto em quanto tempo `logout finish` confere se os envios terminaram.
@@ -201,6 +203,12 @@ impl Daemon {
         }
     }
 
+    async fn emit_activity_changed(&self) {
+        if let Some(emitter) = self.emitter() {
+            let _ = Service::activity_changed(&emitter).await;
+        }
+    }
+
     /// Começa o login no navegador e devolve o endereço (para quem não tem navegador aqui). O
     /// resultado chega pelo sinal `LoginFinished`.
     pub async fn begin_login(
@@ -313,6 +321,7 @@ impl Daemon {
             async move { engine.run(shutdown).await }
         });
         self.forward_events(engine.subscribe(), shutdown.clone());
+        self.forward_activity(engine.activity_changes(), shutdown.clone());
         let moved = mount_point != preferred;
         *self.account.lock().await = Some(Account {
             email,
@@ -357,6 +366,29 @@ impl Daemon {
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
+            }
+        });
+    }
+
+    /// `ActivityChanged` a cada mudança da atividade, no máximo um por `ACTIVITY_SIGNAL_GAP`.
+    fn forward_activity(
+        self: &Arc<Self>,
+        mut changes: tokio::sync::watch::Receiver<u64>,
+        shutdown: CancellationToken,
+    ) {
+        let daemon = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    () = shutdown.cancelled() => break,
+                    changed = changes.changed() => if changed.is_err() { break },
+                }
+                let Some(daemon) = daemon.upgrade() else {
+                    break;
+                };
+                daemon.emit_activity_changed().await;
+                drop(daemon);
+                tokio::time::sleep(ACTIVITY_SIGNAL_GAP).await;
             }
         });
     }
@@ -428,6 +460,39 @@ impl Daemon {
         })
     }
 
+    pub async fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError> {
+        let engine = self.connected_engine().await?;
+        let my_drive = self
+            .my_drive_dir()
+            .await
+            .ok_or_else(|| self.not_logged_in())?;
+        let rows = engine.activity().map_err(failed)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ActivityItem {
+                seq: r.seq,
+                time_ms: r.time_ms,
+                path: my_drive.join(&r.activity.path).display().to_string(),
+                size: r.activity.size as i64,
+                state: r.activity.state.as_str().into(),
+                percent: r.activity.percent.map_or(-1, i32::from),
+                item_id: r.activity.item_id,
+                name: r.activity.name,
+            })
+            .collect())
+    }
+
+    /// `Meu Drive` dentro da montagem da conta conectada.
+    async fn my_drive_dir(&self) -> Option<PathBuf> {
+        let my_drive = self.my_drive_name();
+        self.with_account(|a| a.mount_point.join(&my_drive)).await
+    }
+
+    /// Nome da pasta do Meu Drive na montagem (no idioma do sistema, como o FUSE mostra).
+    fn my_drive_name(&self) -> String {
+        self.i18n.tr("folder-my-drive", &[])
+    }
+
     /// `f` sobre a conta conectada, soltando a trava antes de o chamador consultar o banco.
     async fn with_account<T>(&self, f: impl FnOnce(&Account) -> T) -> Option<T> {
         self.account.lock().await.as_ref().map(f)
@@ -473,7 +538,7 @@ impl Daemon {
             || ServiceError::NotFound(self.i18n.tr("path-not-in-drive", &[("path", path)]));
         let relative = relative_to_mount(Path::new(path), &mount_point).ok_or_else(not_found)?;
         let mut parts = relative.components();
-        let my_drive = self.i18n.tr("folder-my-drive", &[]);
+        let my_drive = self.my_drive_name();
         if parts.next() != Some(Component::Normal(my_drive.as_ref())) {
             return Err(not_found());
         }

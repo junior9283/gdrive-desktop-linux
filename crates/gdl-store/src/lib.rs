@@ -483,6 +483,35 @@ impl Store {
         )
     }
 
+    /// Caminho de `id` a partir da raiz do Meu Drive (`Pasta/arquivo.txt`), pelos nomes locais;
+    /// `None` se algum pai estiver faltando.
+    pub fn path_of(&self, id: &ItemId) -> Result<Option<String>> {
+        // Sobe pelos pais numa consulta só; `depth` ordena do item para a raiz.
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "WITH RECURSIVE up(id, parent, name, depth) AS ( \
+                 SELECT id, parent, local_name, 0 FROM items WHERE id = ?1 \
+                 UNION ALL \
+                 SELECT i.id, i.parent, i.local_name, up.depth + 1 \
+                 FROM items i JOIN up ON i.id = up.parent) \
+             SELECT parent, name FROM up ORDER BY depth DESC",
+        )?;
+        let rows: Vec<(Option<String>, String)> = stmt
+            .query_map(params![id.0], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        // Chegou à raiz (sem pai) só se nenhum pai faltou no caminho.
+        match rows.first() {
+            Some((None, _)) => Ok(Some(
+                rows.iter()
+                    .skip(1)
+                    .map(|(_, name)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            )),
+            _ => Ok(None),
+        }
+    }
+
     /// Envios na fila, quantos deles já falharam ao menos uma vez e os bytes dos itens deles.
     pub fn queue_stats(&self) -> Result<QueueStats> {
         Ok(self.conn().query_row(

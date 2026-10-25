@@ -266,3 +266,62 @@ async fn account_info_has_name_quota_and_photo() {
     h.proxy.account_info().await.unwrap();
     assert_eq!(h.fake.requests("/photo.png"), photos);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn activity_over_dbus() {
+    use futures_util::StreamExt;
+
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let mut changed = h.proxy.receive_activity_changed().await.unwrap();
+
+    let path = h.drive().join("a.txt");
+    blocking(move || std::fs::write(path, b"atividade").unwrap()).await;
+
+    // Na fila antes de começar.
+    let rows = h.proxy.activity().await.unwrap();
+    assert_eq!(rows[0].name, "a.txt");
+    assert_eq!(rows[0].state, "upload-queued");
+    tokio::time::timeout(std::time::Duration::from_secs(10), changed.next())
+        .await
+        .expect("ActivityChanged");
+    status_until(&h, "envio concluído", |s| s.pending_uploads == 0).await;
+    let rows = h.proxy.activity().await.unwrap();
+    let row = rows.iter().find(|r| r.name == "a.txt").unwrap();
+    assert_eq!(row.state, "uploaded");
+    assert_eq!(row.percent, 100);
+    assert_eq!(row.size, 9);
+    assert!(
+        row.path.ends_with("Google Drive/Meu Drive/a.txt"),
+        "{}",
+        row.path
+    );
+    assert!(!row.item_id.starts_with("local:"), "{}", row.item_id);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn upload_progress_reaches_activity() {
+    const MIB: usize = 1024 * 1024;
+    let h = Harness::new().await;
+    h.logged_in().await;
+    // O primeiro trecho (8 MiB) chega e o envio empaca no segundo.
+    h.fake
+        .inject(gdl_fake_drive::Fault::StallConnectionAfterBytes(
+            10 * MIB as u64,
+        ));
+
+    let path = h.drive().join("grande.bin");
+    blocking(move || std::fs::write(path, vec![7u8; 20 * MIB]).unwrap()).await;
+    wait_until("envio empacado na metade", || h.fake.byte_limit_reached()).await;
+
+    let start = std::time::Instant::now();
+    loop {
+        let rows = h.proxy.activity().await.unwrap();
+        let row = rows.iter().find(|r| r.name == "grande.bin").unwrap();
+        if row.state == "uploading" && row.percent == 40 {
+            break;
+        }
+        assert!(start.elapsed().as_secs() < 10, "{row:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}

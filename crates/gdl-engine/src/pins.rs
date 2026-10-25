@@ -4,12 +4,14 @@ use std::sync::Arc;
 
 use gdl_store::{Item, ItemId, ItemKind, PinState, Store};
 
+use crate::activity::{ActivityLog, ActivityState};
 use crate::cache::BlockCache;
 use crate::{EngineError, Result};
 
 pub struct PinManager {
     store: Arc<Store>,
     cache: BlockCache,
+    activity: Arc<ActivityLog>,
 }
 
 /// Recalcula a fixação de `id` e de tudo o que está dentro dele a partir da posição na árvore:
@@ -63,7 +65,22 @@ fn ancestor_pinned(store: &Store, id: &ItemId) -> Result<bool> {
 
 impl PinManager {
     pub fn new(store: Arc<Store>, cache: BlockCache) -> PinManager {
-        PinManager { store, cache }
+        PinManager {
+            store,
+            cache,
+            activity: Arc::default(),
+        }
+    }
+
+    /// Registra os downloads em `activity`.
+    pub fn with_activity(self, activity: Arc<ActivityLog>) -> PinManager {
+        PinManager { activity, ..self }
+    }
+
+    fn note(&self, id: &ItemId, state: ActivityState) {
+        if let Ok(Some(item)) = self.store.get(id) {
+            self.activity.note(&self.store, &item, state, None);
+        }
     }
 
     /// Fixa o item; numa pasta, tudo o que está dentro passa a herdar a fixação. O download
@@ -88,8 +105,12 @@ impl PinManager {
     pub async fn maintain_once(&self) -> Result<usize> {
         let mut done = 0;
         for id in self.store.incomplete_pinned_files()? {
+            self.note(&id, ActivityState::Downloading);
             match self.cache.ensure_full(&id).await {
-                Ok(()) => done += 1,
+                Ok(()) => {
+                    self.note(&id, ActivityState::Downloaded);
+                    done += 1
+                }
                 // Sem rede ou sem espaço, nenhum outro vai conseguir agora.
                 Err(e) if e.is_transient() => return Err(e.into()),
                 Err(e) => tracing::warn!(item = %id.0, erro = %e, "falha ao baixar item fixado"),
@@ -174,6 +195,31 @@ mod tests {
             0,
             "nada a baixar de novo"
         );
+    }
+
+    #[tokio::test]
+    async fn pinning_shows_downloads() {
+        let env = Env::new().await;
+        let folder = env.fake.add_folder(&env.fake.root_id(), "Fotos");
+        env.fake.add_file(&folder, "a.jpg", vec![1; 1000]);
+        env.fake.add_file(&folder, "b.jpg", vec![2; 1000]);
+        let s = setup(env, None).await;
+        let log = Arc::new(ActivityLog::default());
+        let pins = PinManager::new(s.env.store.clone(), s.cache.clone()).with_activity(log.clone());
+
+        pins.pin(&id(&folder)).unwrap();
+        pins.maintain_once().await.unwrap();
+
+        let rows: Vec<_> = log
+            .rows()
+            .into_iter()
+            .map(|r| (r.path.clone(), r.state))
+            .collect();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        for (path, state) in &rows {
+            assert!(path.starts_with("Fotos/"), "{path}");
+            assert_eq!(*state, ActivityState::Downloaded);
+        }
     }
 
     #[tokio::test]

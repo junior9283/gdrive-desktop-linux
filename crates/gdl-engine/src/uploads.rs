@@ -15,6 +15,7 @@ use gdl_store::{
 };
 use tokio::sync::broadcast;
 
+use crate::activity::{ActivityLog, ActivityState};
 use crate::cache::BlockCache;
 use crate::changes::merge;
 use crate::events::{EngineEvent, LostReason};
@@ -222,6 +223,8 @@ struct JobSession<'a> {
     store: &'a Store,
     job_id: i64,
     url: Mutex<Option<String>>,
+    activity: &'a ActivityLog,
+    inode: Inode,
 }
 
 impl SessionSlot for JobSession<'_> {
@@ -235,6 +238,11 @@ impl SessionSlot for JobSession<'_> {
             tracing::warn!(erro = %e, "não deu para guardar a sessão de envio");
         }
     }
+
+    fn progress(&self, sent: u64, total: u64) {
+        let percent = (sent * 100 / total.max(1)).min(99) as u8;
+        self.activity.progress(self.inode, percent);
+    }
 }
 
 pub struct UploadWorker {
@@ -246,6 +254,7 @@ pub struct UploadWorker {
     retry: Backoff,
     ids: IdPool,
     pub(crate) stats: Arc<UploadStats>,
+    activity: Arc<ActivityLog>,
 }
 
 impl UploadWorker {
@@ -265,7 +274,17 @@ impl UploadWorker {
             retry: Backoff::default(),
             ids: IdPool::default(),
             stats: Arc::default(),
+            activity: Arc::default(),
         }
+    }
+
+    /// Registra os envios em `activity` (sem isto, num registro só desta fila).
+    pub fn with_activity(self, activity: Arc<ActivityLog>) -> UploadWorker {
+        UploadWorker { activity, ..self }
+    }
+
+    fn note(&self, item: &Item, state: ActivityState, percent: Option<u8>) {
+        self.activity.note(&self.store, item, state, percent);
     }
 
     /// Processa o próximo envio pronto; `None` quando a fila não tem nada para agora.
@@ -314,11 +333,13 @@ impl UploadWorker {
         Ok(UploadOutcome::Skipped)
     }
 
-    fn session<'a>(&'a self, job: &UploadJob) -> JobSession<'a> {
+    fn session<'a>(&'a self, job: &UploadJob, item: &Item) -> JobSession<'a> {
         JobSession {
             store: &self.store,
             job_id: job.job_id,
             url: Mutex::new(job.session_url.clone()),
+            activity: &self.activity,
+            inode: item.inode,
         }
     }
 
@@ -338,6 +359,7 @@ impl UploadWorker {
         };
         self.store
             .set_local_state(&item.id, LocalState::Uploading)?;
+        self.note(&item, ActivityState::Uploading, Some(0));
         let result = match item.kind {
             ItemKind::Folder => {
                 self.client
@@ -346,7 +368,7 @@ impl UploadWorker {
             }
             _ => {
                 let src = self.cache.local_path(&item.id);
-                let session = self.session(job);
+                let session = self.session(job, &item);
                 self.client
                     .upload_new(
                         &parent.0,
@@ -407,8 +429,9 @@ impl UploadWorker {
         }
         self.store
             .set_local_state(&item.id, LocalState::Uploading)?;
+        self.note(&item, ActivityState::Uploading, Some(0));
         let src = self.cache.local_path(&item.id);
-        let session = self.session(job);
+        let session = self.session(job, &item);
         match self
             .client
             .upload_update(&item.id.0, &src, item.modified_ms, &session)
@@ -421,7 +444,7 @@ impl UploadWorker {
 
     /// Envio aceito: a revisão da nuvem vira a nova revisão-base.
     fn uploaded(&self, job: &UploadJob, id: &ItemId, remote: RemoteFile) -> Result<UploadOutcome> {
-        let size = self.store.modify(|batch| -> Result<u64> {
+        let item = self.store.modify(|batch| -> Result<Item> {
             let mut item = batch.get(id)?.ok_or(EngineError::NotFound)?;
             item.md5 = remote.md5.clone();
             item.base_md5 = remote.md5;
@@ -433,10 +456,11 @@ impl UploadWorker {
                 item.local_state = LocalState::Clean;
             }
             batch.put(&item)?;
-            Ok(item.size)
+            Ok(item)
         })?;
         self.store.finish_job(job.job_id)?;
-        self.stats.uploaded(size, now_ms());
+        self.stats.uploaded(item.size, now_ms());
+        self.note(&item, ActivityState::Uploaded, Some(100));
         Ok(UploadOutcome::Uploaded(id.clone()))
     }
 
@@ -451,6 +475,11 @@ impl UploadWorker {
         }
         self.store
             .transition_local_state(&item.id, LocalState::Uploading, LocalState::Dirty)?;
+        let state = match e {
+            DriveError::Offline => ActivityState::UploadQueued,
+            _ => ActivityState::UploadFailed,
+        };
+        self.note(&item, state, None);
         let now = now_ms();
         if matches!(e, DriveError::Offline) {
             self.store
@@ -484,6 +513,7 @@ impl UploadWorker {
         reason: LostReason,
         remote: Option<RemoteFile>,
     ) -> Result<UploadOutcome> {
+        self.note(&item, ActivityState::UploadFailed, None);
         let (lost, src) = (self.lost.clone(), self.cache.local_path(&item.id));
         let name = item.local_name.clone();
         let path = tokio::task::spawn_blocking(move || lost.preserve(&src, &name, reason))

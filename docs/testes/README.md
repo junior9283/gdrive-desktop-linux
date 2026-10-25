@@ -11,10 +11,22 @@ cargo test -p gdl-engine                     # um crate
 cargo test -p gdl-daemon no_data_loss        # a suíte "nunca perder dados"
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
+node --test 'crates/gdl-ui/ui/tests/*.test.js'   # a lógica das telas (sem janela)
+scripts/e2e.sh                               # a janela e a bandeja de verdade (ponta a ponta)
+scripts/e2e.sh search                        # só os de ponta a ponta com "search" no nome
 ```
 
-Os testes de montagem precisam do FUSE 3 (`fusermount3`) e de acesso a `/dev/fuse`. Nenhum teste
-usa a rede, uma conta Google, o barramento D-Bus da sessão ou o navegador.
+Os testes de montagem precisam do FUSE 3 (`fusermount3`) e de acesso a `/dev/fuse`; os da bandeja e
+da instância única, do `dbus-daemon` (cada um sobe um barramento privado). O teste de instalação
+usa o `desktop-file-validate`, se houver. Nenhum teste usa a rede, uma conta Google, o barramento
+D-Bus da sessão, a tela de quem roda ou o navegador.
+
+O `scripts/e2e.sh` precisa do `WebKitWebDriver` (pacote `webkitgtk6.0` no Fedora,
+`webkit2gtk-driver` no Ubuntu), do `tauri-driver` (`cargo install tauri-driver --locked`), do
+`openbox`, do `xvfb-run` e do `dbus-run-session`; sem um deles, sai com 77 (pulado). Ele sobe o
+serviço de teste (`crates/gdl-daemon/examples/e2e-daemon.rs`, Drive simulado com a conta já
+conectada), um Xvfb e um barramento de sessão próprios e roda `crates/gdl-ui/tests/e2e.rs` em
+ordem alfabética, um por vez. Nada aparece na tela.
 
 ## Onde fica cada coisa
 
@@ -27,6 +39,12 @@ usa a rede, uma conta Google, o barramento D-Bus da sessão ou o navegador.
 | `gdl-fs` | montagem FUSE real: leitura, escrita, salvar por rename, lixeira do Dolphin, ponteiros | `testutil::Mounted` |
 | `gdl-daemon` | serviço completo pelo D-Bus e a suíte "nunca perder dados" | `testutil::Harness` |
 | `gdl-cli` | `open-pointer` com um navegador falso no `PATH` | binário compilado |
+| `gdl-ipc` | contrato D-Bus, erros tipados e o nome único (`claim_name`); utilidades de teste (`p2p_pair`, `PrivateBus`) | barramento privado |
+| `gdl-tray` | menu e ícone por estado, lançador da janela, atalho global sem portal, uma bandeja só | funções puras e barramento privado |
+| `gdl-ui` (Rust) | ponte D-Bus da janela, escolha da tela pelos argumentos, idioma, uma instância só, lista de terceiros | barramento privado |
+| `gdl-ui` (JS) | lógica de cada tela (`ui/screens/*/model.js`), formatação, Fluent e chaves dos textos | `node --test` |
+| `gdl-ui` (e2e) | a janela e a bandeja de verdade: Início, pausar, sair, primeiro uso, preferências, Sobre, pesquisa, erros, off-line, menu da bandeja | `scripts/e2e.sh` |
+| `gdl-common/tests/packaging.rs` | `install-dev.sh`: o que instala, os caminhos no `Exec`, prefixos recusados, `.desktop` válidos | prefixo temporário |
 
 ### Drive simulado (`gdl-fake-drive`)
 
@@ -65,6 +83,13 @@ O serviço completo, com montagem real, sobre o Drive simulado:
 | `disk_full_never_corrupts_existing_cache` | sem espaço, o que já estava no cache continua íntegro e o que faltava dá erro (nunca dado errado) |
 | `conflict_storm_preserves_every_local_version` | 20 arquivos editados aqui e na nuvem; as 20 versões locais vão para o Lost and Found e a nuvem fica intacta |
 
+### Serviço de ponta a ponta (`examples/e2e-daemon.rs`)
+
+O serviço de verdade sobre o Drive simulado, com a conta conectada, `notas.txt` off-line já
+baixado e um "navegador" que anota em `$GDL_E2E_OPENED` o que pediram para abrir. `SIGUSR1` enche
+o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$GDL_E2E_QUOTA`
+(`full`/`free`), e o teste espera por ela antes de seguir.
+
 ## Armadilhas conhecidas
 
 - **FUSE na CI:** é preciso instalar `fuse3` e liberar `/dev/fuse` (`chmod 666`) antes dos testes.
@@ -87,6 +112,24 @@ O serviço completo, com montagem real, sobre o Drive simulado:
   de desenvolvimento roda com carga alta, e um teste por tempo seria instável.
 - **Antes de aumentar um tempo-limite,** rode o teste isolado várias vezes e também junto com o
   crate inteiro. Os testes intermitentes desta suíte eram bugs, não lentidão.
+- **Xvfb sem gerenciador de janelas tira o foco ao acaso** (medido: entre 0,15 e 2,8 s depois de
+  abrir, mesmo em janelas comuns). A pesquisa fecha ao perder o foco, como no original; por isso o
+  `e2e.sh` sobe o openbox antes de tudo.
+- **`cargo build --example` não recompila os programas:** com `-p gdl-ui -p gdl-tray --example …`
+  o cargo só monta o exemplo, e o e2e rodava a bandeja velha. Programas e exemplo são compilados
+  em comandos separados.
+- **Texto pelo `innerText`:** o texto do elemento pelo WebDriver vem cortado com reticências
+  quando o CSS corta; os testes leem o `innerText` por script.
+- **`fieldset disabled`** bloqueia os controles de dentro (chave gerenciada), mas a propriedade
+  `disabled` de cada um continua `false`: confira com `matches(':disabled')`.
+- **O serviço de ponta a ponta é um só para todos os testes:** quem muda o estado (sair da conta,
+  encher o armazenamento, pausar) desfaz no fim, mesmo em pânico (`Drop`), e cada teste prepara o
+  próprio cenário (a pesquisa lê `notas.txt` para ele entrar nos recentes) em vez de contar com o
+  teste anterior.
+- **Sinal não é confirmação:** depois do `SIGUSR1`/`SIGUSR2`, espere o arquivo de confirmação; o
+  sinal chega, mas a falha só vale quando o serviço a aplicou.
+- **Instância única e ativação pelo D-Bus:** a janela ativada com `--dbus` só reserva o nome e
+  espera o pedido de tela; sem isso, a ativação abriria uma tela sozinha.
 
 ## Registro de bugs
 
@@ -108,6 +151,11 @@ O serviço completo, com montagem real, sobre o Drive simulado:
 | Lixeira do Dolphin: arquivo não enviado sumia, pasta dava EACCES | lixeira só existia para o que estava no Drive | lixeira local; dentro da lixeira, apagar só esquece | `trashing_a_file_not_yet_uploaded_can_be_restored`, `emptying_kio_trash_with_folder` | o KIO apaga o conteúdo antes da pasta |
 | `kill_during_upload_then_restart_finishes_upload` falhava 4 em 10 | o teste esperava `Uploading`, que vem antes dos bytes, e às vezes limpava a falha antes de o envio empacar; quando empacava, o Drive simulado segurava a trava da sessão para sempre e o envio retomado esperava | o simulado solta a trava ao ler o corpo e a requisição nova substitui a anterior (como no Drive real); o teste espera `byte_limit_reached` | `kill_during_upload_then_restart_finishes_upload` (20 de 20 isolado) | o teste passava justamente quando não exercitava o caso; espere o fato, não um estado que vem antes dele |
 
+| A pesquisa fechava sozinha no e2e | o Xvfb sem gerenciador de janelas tira o foco ao acaso, e a pesquisa fecha no blur | openbox no `e2e.sh`; o produto continua fechando no blur | `search_finds_by_name_and_opens` | meça antes de pôr guarda no produto: o defeito era do ambiente |
+| Início mostrava "Armazenamento cheio" ou "Sincronizando 1 item" depois de outro teste | o teste da cota não desfazia em pânico, e o arquivo off-line ainda baixava | `QuotaFull` desfaz no `Drop`; o serviço de teste baixa `notas.txt` e espera `syncing == 0` antes de liberar | `home_shows_synced_and_activity` | estado compartilhado entre testes precisa ser devolvido |
+| O e2e da bandeja passava com a bandeja quebrada | `cargo build --example` não recompilava a bandeja | builds separados no `e2e.sh`; mutação (sem "Pesquisar") faz o teste falhar | `tray_publishes_menu` | um teste que nunca falhou não prova nada |
+| Atalho do menu e início automático não achavam a bandeja fora do `PATH`; prefixo com espaço quebrava o `Exec` | `Exec` com o nome solto e caminho sem aspas | caminho completo entre aspas; o instalador recusa aspas, barra invertida, crase, `$`, `%`, `\|` e `&` | `installs_with_the_paths_of_the_prefix`, `refuses_a_prefix_that_no_exec_line_can_hold`, `autostart_file_follows_preference` | o systemd, o D-Bus e o `.desktop` separam o `Exec` nos espaços |
+
 ## Teste manual com conta real
 
 Roteiro da 0.1 no Nobara, com o Client ID do dono do projeto. **Situação: pendente.**
@@ -121,3 +169,15 @@ Roteiro da 0.1 no Nobara, com o Client ID do dono do projeto. **Situação: pend
 7. [ ] Reiniciar o computador e ver a conta reconectar.
 
 A pasta do `rclone@GoogleDrive.service` (`~/GoogleDrive`) não conflita com `~/Google Drive`.
+
+Roteiro da 0.2 no Plasma (Nobara). **Situação: pendente.**
+
+1. [ ] `scripts/install-dev.sh` e "Google Drive" no menu de aplicativos.
+2. [ ] Bandeja no painel do Plasma: ícone por estado, dica, menu e a animação ao sincronizar.
+3. [ ] Primeiro uso com o Client ID real: login no navegador, "Gerar link" e a pasta montada.
+4. [ ] Atalho global da pesquisa: o KDE pede a confirmação e o atalho abre a pesquisa.
+5. [ ] Notificações com ação (Lost and Found, envio cancelado) e "não mostrar de novo".
+6. [ ] Preferências: limite de banda, proxy, cache, início automático e Locais do Dolphin.
+7. [ ] Abrir uma segunda bandeja: mostra a janela principal e sai.
+8. [ ] Serviço parado: a bandeja mostra "Iniciar o serviço", e a janela, o aviso.
+9. [ ] Reiniciar a sessão: a bandeja volta sozinha (início automático).

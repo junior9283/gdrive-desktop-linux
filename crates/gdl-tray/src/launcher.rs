@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use gdl_common::paths::exe_dir;
 use gdl_ipc::{UiProxy, nobody_there};
 use zbus::Connection;
 
@@ -64,11 +65,6 @@ impl Launcher {
         tokio::spawn(async move { child.wait().await });
         Ok(())
     }
-}
-
-/// A pasta deste executável.
-pub fn exe_dir() -> Option<PathBuf> {
-    Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
 }
 
 #[cfg(test)]

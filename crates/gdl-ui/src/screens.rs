@@ -21,7 +21,7 @@ const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
 }
 
 pub const SCREENS: [Screen; 8] = [
-    screen("home", 900.0, 640.0),
+    screen(HOME, 900.0, 640.0),
     screen("onboarding", 560.0, 640.0),
     screen("preferences", 760.0, 640.0),
     Screen {
@@ -41,6 +41,9 @@ impl Screen {
     }
 }
 
+/// A janela principal (a que abre sem pedido e quando a bandeja já está aberta).
+pub const HOME: &str = "home";
+
 pub fn find(name: &str) -> Result<&'static Screen, String> {
     SCREENS
         .iter()
@@ -48,17 +51,21 @@ pub fn find(name: &str) -> Result<&'static Screen, String> {
         .ok_or_else(|| format!("tela desconhecida: {name}"))
 }
 
-/// A tela pedida na linha de comando (`--open <tela>`); sem pedido, a principal.
-pub fn from_args(args: impl IntoIterator<Item = String>) -> Result<&'static Screen, String> {
+/// A tela pedida na linha de comando (`--open <tela>`); sem pedido, a principal. Com `--dbus`
+/// (a ativação pelo D-Bus, que chega com o pedido de tela logo depois), nenhuma.
+pub fn from_args(
+    args: impl IntoIterator<Item = String>,
+) -> Result<Option<&'static Screen>, String> {
     let mut args = args.into_iter();
-    let mut name = None;
+    let mut screen = Some(find(HOME)?);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--open" => name = Some(args.next().ok_or("--open sem tela")?),
+            "--open" => screen = Some(find(&args.next().ok_or("--open sem tela")?)?),
+            "--dbus" => screen = None,
             other => return Err(format!("argumento desconhecido: {other}")),
         }
     }
-    find(name.as_deref().unwrap_or("home"))
+    Ok(screen)
 }
 
 #[cfg(test)]
@@ -71,11 +78,19 @@ mod tests {
 
     #[test]
     fn open_argument_picks_the_screen() {
-        assert_eq!(from_args(args(&[])).unwrap().name, "home");
-        assert_eq!(from_args(args(&["--open", "about"])).unwrap().name, "about");
+        assert_eq!(from_args(args(&[])).unwrap().unwrap().name, "home");
+        assert_eq!(
+            from_args(args(&["--open", "about"])).unwrap().unwrap().name,
+            "about"
+        );
         assert!(from_args(args(&["--open", "x"])).is_err());
         assert!(from_args(args(&["--open"])).is_err());
         assert!(from_args(args(&["--outro"])).is_err());
+    }
+
+    #[test]
+    fn dbus_activation_opens_nothing_by_itself() {
+        assert_eq!(from_args(args(&["--dbus"])), Ok(None));
     }
 
     #[test]

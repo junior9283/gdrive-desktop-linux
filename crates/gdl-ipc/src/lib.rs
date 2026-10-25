@@ -12,6 +12,8 @@ pub const OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1";
 /// A janela (`gdrive-desktop-linux-ui`), que fica com este nome enquanto está aberta.
 pub const UI_BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1.Ui";
 pub const UI_OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1/Ui";
+/// A bandeja (`gdrive-desktop-linux-tray`), que fica com este nome enquanto está aberta.
+pub const TRAY_BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1.Tray";
 
 /// A janela: a bandeja e o atalho pedem uma tela por aqui.
 #[zbus::proxy(
@@ -24,6 +26,23 @@ pub trait Ui {
     /// Mostra a janela na tela `screen` (`home`, `onboarding`, `search`, `offline`, `errors`,
     /// `preferences`, `about`).
     fn open(&self, screen: &str) -> zbus::Result<()>;
+}
+
+/// Fica com o nome `name` sem entrar na fila: `true` se ficou, `false` se outro processo já o tem
+/// (instância única da janela e da bandeja).
+pub async fn claim_name(conn: &zbus::Connection, name: &str) -> zbus::Result<bool> {
+    use zbus::fdo::{RequestNameFlags, RequestNameReply};
+    let name = zbus::names::WellKnownName::try_from(name)?;
+    let reply = conn
+        .request_name_with_flags(name, RequestNameFlags::DoNotQueue.into())
+        .await;
+    match reply {
+        Ok(RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner) => Ok(true),
+        Ok(RequestNameReply::Exists | RequestNameReply::InQueue) | Err(zbus::Error::NameTaken) => {
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Ninguém atende do outro lado: o nome não tem dono (ou, ponto a ponto, não há o objeto).

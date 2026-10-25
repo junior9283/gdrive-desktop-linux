@@ -15,6 +15,11 @@ pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
+/// A pasta deste executável (os outros programas do app ficam ao lado).
+pub fn exe_dir() -> Option<PathBuf> {
+    Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
+}
+
 /// Onde o app guarda configuração, dados, estado e onde lê as políticas do sistema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {

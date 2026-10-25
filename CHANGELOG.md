@@ -7,6 +7,62 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.2.0] - 2026-10-25
+
+### Adicionado
+- Plano de implementação da versão 0.2 (interface) em `docs/superpowers/plans/` e o registro das
+  decisões em `docs/superpowers/decisoes/`.
+- Contrato D-Bus num crate próprio (`gdl-ipc`), usado pelo serviço, pela CLI, pela bandeja e pela
+  janela, com os erros do serviço já tipados.
+- Serviço:
+  - estado detalhado da sincronização (sincronizado, sincronizando N itens, pausado, sem internet,
+    erro, armazenamento cheio) e dados da conta (nome, e-mail, foto e uso do armazenamento);
+  - atividade da sincronização com o progresso de cada envio e download;
+  - cancelar um envio sem perder a versão local, que vai para `Uploads cancelados` com data e hora
+    no nome;
+  - lista de erros por categoria (cota, limite de envio, sem permissão, grande demais, apagado na
+    nuvem ou aqui, Lost and Found), com "Tentar de novo";
+  - histórico de notificações, ações nos avisos e "não mostrar de novo" para os avisos opcionais;
+  - resumo do uso do disco e itens off-line por pasta, "Limpar cache", "Limpar arquivos
+    off-line", pesquisa por nome, itens recentes e "Compartilhados comigo";
+  - preferências pelo serviço, com as políticas do administrador bloqueando as chaves
+    gerenciadas, aviso quando a mudança pede reinício e reinício no mesmo processo;
+  - início automático na sessão e a montagem nos Locais do Dolphin, conforme as preferências;
+  - limite de banda de envio e de download, proxy (sistema, direto ou um endereço HTTP/SOCKS
+    validado ao gravar, sem a URL no log) e pausa em conexão limitada.
+- Bandeja (`gdrive-desktop-linux-tray`): ícone que muda com o estado (animado ao sincronizar),
+  dica com o resumo e menu com fazer login, abrir a pasta, abrir o Drive no navegador, pesquisa,
+  pausar/retomar, erros, arquivos off-line, preferências, Sobre e sair (com o serviço fora do ar,
+  "Iniciar o serviço"). Atalho global da pesquisa pelo portal do KDE
+  (sem portal, segue sem atalho) e uma bandeja só por sessão: abrir outra mostra a janela
+  principal.
+- Janela (`gdrive-desktop-linux-ui`, Tauri), em pt-BR e inglês, com tema do sistema ou claro e uma
+  instância só (abrir de novo traz a tela pedida):
+  - janela principal: estado da sincronização com pausar, Início com os cartões (precisa de
+    atenção, off-line, compartilhados, status), atividade com progresso e cancelar, compartilhados
+    comigo, notificações e links rápidos, menu da conta e sair (perguntando se ainda há envios);
+  - primeiro uso: Client ID e segredo, login no navegador (com "Gerar link" para copiar),
+    escolha do que fazer com a pasta e o passo de off-line;
+  - preferências em três abas (Meu computador, Google Drive e Configurações), preferências de
+    notificação e Sobre com a lista de licenças de terceiros;
+  - pesquisa rápida flutuante: recentes com o campo vazio, resultados com ícone e pasta, setas,
+    Enter abre e Esc ou a perda de foco fecham;
+  - lista de erros agrupada por categoria, com explicação, 10 por página, "Abrir pasta" e
+    "Tentar de novo";
+  - arquivos off-line: barra de uso do disco (off-line, cache, livre), itens pasta a pasta,
+    "Remover acesso off-line" e as ações de cache.
+- Instalação para uso sem root (`scripts/install-dev.sh`, em `~/.local` ou noutro prefixo):
+  programas, serviço do usuário, ativação do serviço e da janela pelo D-Bus, atalho no menu,
+  ponteiros `.gdoc` e ícones. A janela aceita `--dbus` (ativação sem abrir tela).
+- Testes da interface: `node --test` para a lógica das telas e `scripts/e2e.sh` (Xvfb, barramento
+  próprio, openbox e tauri-driver) para a janela e a bandeja de verdade sobre o Drive simulado; o
+  CI ganhou as bibliotecas da janela, os testes JS e um job de ponta a ponta.
+
+### Mudado
+- Os atalhos `.desktop` e o início automático apontam para o caminho completo dos programas
+  (entre aspas), para funcionarem também fora do `PATH`.
+- O build de release falha se não conseguir montar a lista de licenças de terceiros.
+
 ## [0.1.0] - 2026-10-25
 
 ### Adicionado
@@ -112,6 +168,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.1.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/junior9283/gdrive-desktop-linux/releases/tag/v0.0.1

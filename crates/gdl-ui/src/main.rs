@@ -148,9 +148,10 @@ async fn pick_folder(
 }
 
 /// Fica com o nome da janela; `None` se outra janela já estava aberta (e recebeu o pedido).
-async fn start(screen: &Screen) -> zbus::Result<Option<(Bridge, Requests)>> {
+async fn start(screen: Option<&Screen>) -> zbus::Result<Option<(Bridge, Requests)>> {
     let conn = Connection::session().await?;
-    match SingleInstance::claim(&conn, screen.name).await? {
+    let name = screen.map_or(screens::HOME, |s| s.name);
+    match SingleInstance::claim(&conn, name).await? {
         SingleInstance::Primary(requests) => Ok(Some((Bridge::new(&conn).await?, requests))),
         SingleInstance::Secondary => Ok(None),
     }
@@ -194,7 +195,9 @@ fn main() -> ExitCode {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            show(&handle, screen, None)?;
+            if let Some(screen) = screen {
+                show(&handle, screen, None)?;
+            }
             let emit: Emit = Arc::new({
                 let handle = handle.clone();
                 move |name, payload| {

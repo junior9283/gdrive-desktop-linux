@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=io.github.junior9283.GDriveDesktopLinux1.Ui
+Exec=/usr/bin/gdrive-desktop-linux-ui --dbus

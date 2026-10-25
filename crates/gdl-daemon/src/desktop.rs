@@ -15,15 +15,33 @@ pub const AUTOSTART_FILE: &str = "io.github.junior9283.GDriveDesktopLinux.deskto
 const AUTOSTART: &str =
     include_str!("../../../packaging/desktop/io.github.junior9283.GDriveDesktopLinux.desktop");
 
-/// Grava ou apaga `<config_home>/autostart/…desktop`, que abre a bandeja (e ela, o serviço) na
-/// sessão. Só grava se mudou.
-pub fn set_autostart(config_home: &Path, enabled: bool) -> io::Result<()> {
+const TRAY_EXEC: &str = "Exec=/usr/bin/gdrive-desktop-linux-tray";
+
+/// Grava ou apaga `<config_home>/autostart/…desktop`, que abre a bandeja de `bin` (e ela, o
+/// serviço) na sessão. Só grava se mudou.
+pub fn set_autostart(config_home: &Path, bin: &Path, enabled: bool) -> io::Result<()> {
     let file = config_home.join("autostart").join(AUTOSTART_FILE);
-    match enabled {
-        true if std::fs::read_to_string(&file).is_ok_and(|body| body == AUTOSTART) => Ok(()),
-        true => write_atomic(&file, AUTOSTART.as_bytes()),
-        false => remove_file_if_exists(&file),
+    if !enabled {
+        return remove_file_if_exists(&file);
     }
+    let body = autostart_body(bin);
+    match std::fs::read_to_string(&file) {
+        Ok(current) if current == body => Ok(()),
+        _ => write_atomic(&file, body.as_bytes()),
+    }
+}
+
+/// O `.desktop` com a bandeja de `bin`, entre aspas (o Exec separa nos espaços); uma pasta que
+/// nem entre aspas cabe no Exec fica de fora, e a bandeja é procurada no PATH (a mesma lista que
+/// o `scripts/install-dev.sh` recusa).
+fn autostart_body(bin: &Path) -> String {
+    let bin = bin.to_string_lossy();
+    let exec = if bin.contains(['"', '`', '$', '\\', '%']) {
+        "Exec=gdrive-desktop-linux-tray".to_owned()
+    } else {
+        format!("Exec=\"{bin}/gdrive-desktop-linux-tray\"")
+    };
+    AUTOSTART.replace(TRAY_EXEC, &exec)
 }
 
 /// Põe (no fim) ou tira a montagem dos "Locais" do KDE (`user-places.xbel`), sem mexer no resto
@@ -85,17 +103,29 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("autostart").join(AUTOSTART_FILE);
 
-        set_autostart(tmp.path(), true).unwrap();
+        let bin = Path::new("/opt/com espaço/bin");
+        set_autostart(tmp.path(), bin, true).unwrap();
         let body = std::fs::read_to_string(&file).unwrap();
         assert!(body.starts_with("[Desktop Entry]\n"), "{body}");
         assert!(
-            body.contains("\nExec=gdrive-desktop-linux-tray\n"),
+            body.contains("\nExec=\"/opt/com espaço/bin/gdrive-desktop-linux-tray\"\n"),
             "{body}"
         );
 
-        set_autostart(tmp.path(), false).unwrap();
+        set_autostart(tmp.path(), bin, false).unwrap();
         assert!(!file.exists());
-        set_autostart(tmp.path(), false).unwrap();
+        set_autostart(tmp.path(), bin, false).unwrap();
+    }
+
+    #[test]
+    fn autostart_falls_back_to_the_path_when_the_folder_cannot_be_quoted() {
+        let tmp = tempfile::tempdir().unwrap();
+        set_autostart(tmp.path(), Path::new("/opt/a\"b"), true).unwrap();
+        let body = std::fs::read_to_string(tmp.path().join("autostart").join(AUTOSTART_FILE));
+        assert!(
+            body.unwrap().contains("\nExec=gdrive-desktop-linux-tray\n"),
+            "procura no PATH"
+        );
     }
 
     const PLACES: &str = r#"<?xml version="1.0" encoding="UTF-8"?>

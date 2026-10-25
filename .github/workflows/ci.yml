@@ -4,15 +4,22 @@ on:
   push:
   pull_request:
 
+# As bibliotecas da janela (os pré-requisitos do Tauri 2 para Debian/Ubuntu e a libdbus do tao),
+# o FUSE 3 da montagem e o desktop-file-validate do teste de instalação.
+env:
+  SYSTEM_DEPS: >-
+    fuse3 libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev
+    libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev desktop-file-utils
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Dependências do sistema (FUSE 3)
+      - name: Dependências do sistema
         run: |
           sudo apt-get update
-          sudo apt-get install -y fuse3
+          sudo apt-get install -y $SYSTEM_DEPS
           sudo chmod 666 /dev/fuse
       # Lê a versão e os componentes do rust-toolchain.toml (fonte única) e já faz cache.
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -22,3 +29,31 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Testes
         run: cargo test --workspace
+
+  # A lógica das telas: só o Node, sem esperar a compilação.
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # O glob do `node --test` pede o Node 22 ou mais novo.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Testes da interface (JS)
+        run: node --test 'crates/gdl-ui/ui/tests/*.test.js'
+
+  # A janela de verdade num Xvfb próprio, comandada pelo tauri-driver (scripts/e2e.sh).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $SYSTEM_DEPS webkit2gtk-driver xvfb openbox
+          sudo chmod 666 /dev/fuse
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: tauri-driver
+        run: cargo install tauri-driver --locked --version 2.1.0
+      - name: Ponta a ponta
+        run: ./scripts/e2e.sh

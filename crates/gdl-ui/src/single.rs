@@ -1,10 +1,9 @@
 //! Um processo só: o primeiro fica com o nome `UI_BUS_NAME` e recebe os pedidos de tela
 //! (`Ui.Open`); os seguintes passam o pedido para ele e saem.
 
-use gdl_ipc::{UI_BUS_NAME, UI_OBJECT_PATH, UiProxy};
+use gdl_ipc::{UI_BUS_NAME, UI_OBJECT_PATH, UiProxy, claim_name};
 use tokio::sync::mpsc;
 use zbus::Connection;
-use zbus::fdo::{RequestNameFlags, RequestNameReply};
 
 /// As telas que os outros processos pedem.
 pub type Requests = mpsc::UnboundedReceiver<String>;
@@ -34,21 +33,12 @@ impl SingleInstance {
         // O objeto vem antes do nome: quem achar o nome já encontra quem responda.
         let server = conn.object_server();
         server.at(UI_OBJECT_PATH, UiObject { screens }).await?;
-        let reply = conn
-            .request_name_with_flags(UI_BUS_NAME, RequestNameFlags::DoNotQueue.into())
-            .await;
-        match reply {
-            Ok(RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner) => {
-                Ok(SingleInstance::Primary(requests))
-            }
-            Ok(RequestNameReply::Exists | RequestNameReply::InQueue)
-            | Err(zbus::Error::NameTaken) => {
-                server.remove::<UiObject, _>(UI_OBJECT_PATH).await?;
-                UiProxy::new(conn).await?.open(screen).await?;
-                Ok(SingleInstance::Secondary)
-            }
-            Err(e) => Err(e),
+        if claim_name(conn, UI_BUS_NAME).await? {
+            return Ok(SingleInstance::Primary(requests));
         }
+        server.remove::<UiObject, _>(UI_OBJECT_PATH).await?;
+        UiProxy::new(conn).await?.open(screen).await?;
+        Ok(SingleInstance::Secondary)
     }
 }
 

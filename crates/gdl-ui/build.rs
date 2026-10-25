@@ -15,13 +15,18 @@ fn main() {
         workspace.join("Cargo.lock").display()
     );
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("third-party.json");
-    let list = metadata(&workspace).map_or_else(
-        |e| {
+    // Sem a lista, o build de desenvolvimento só avisa; o de release (o que vai para os
+    // usuários) para, porque o Sobre sairia sem os créditos que as licenças exigem.
+    let list = match metadata(&workspace) {
+        Ok(m) => third_party::licenses(&m),
+        Err(e) if std::env::var("PROFILE").as_deref() == Ok("release") => {
+            panic!("sem a lista de terceiros do Sobre: {e}")
+        }
+        Err(e) => {
             println!("cargo:warning=sem a lista de terceiros do Sobre: {e}");
             serde_json::Value::Array(Vec::new())
-        },
-        |m| third_party::licenses(&m),
-    );
+        }
+    };
     std::fs::write(out, list.to_string()).expect("gravar third-party.json");
 }
 

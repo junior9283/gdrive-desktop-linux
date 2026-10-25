@@ -10,9 +10,10 @@ use gdl_common::config::{Preferences, default_web_browser, load_preferences};
 use gdl_common::i18n::I18n;
 use gdl_common::links::DRIVE_WEB;
 use gdl_common::paths::Paths;
+use gdl_common::paths::exe_dir;
 use gdl_ipc::{BUS_NAME, ServiceProxy, Status};
 use gdl_tray::hotkey::{DEFAULT_TRIGGER, Hotkey};
-use gdl_tray::launcher::{Launcher, exe_dir};
+use gdl_tray::launcher::Launcher;
 use gdl_tray::model::{Action, MenuItem, TrayView, is_signed_out};
 use ksni::TrayMethods;
 use tokio::signal::unix::{SignalKind, signal};
@@ -235,6 +236,13 @@ fn ticker(every: Duration) -> tokio::time::Interval {
 async fn run() -> Result<(), Error> {
     let i18n = I18n::from_env();
     let conn = Connection::session().await?;
+    // Uma bandeja só: a segunda (o "Google Drive" do menu com o app aberto) mostra a principal.
+    if !gdl_ipc::claim_name(&conn, gdl_ipc::TRAY_BUS_NAME).await? {
+        Launcher::new(conn, Launcher::default_program())
+            .open("home")
+            .await;
+        return Ok(());
+    }
     let (actions, mut requested) = mpsc::unbounded_channel();
     let (trigger, triggers) = watch::channel(search_trigger());
     let hotkey = tokio::spawn(keep_search_hotkey(
@@ -325,9 +333,26 @@ async fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use gdl_ipc::testing::PrivateBus;
     use gdl_tray::model::{STILL_ICONS, SYNC_ICONS};
 
     use super::*;
+
+    #[tokio::test]
+    async fn only_the_first_tray_stays() {
+        let bus = PrivateBus::start();
+        let (first, second) = (bus.connect().await, bus.connect().await);
+
+        let stays = gdl_ipc::claim_name(&first, gdl_ipc::TRAY_BUS_NAME)
+            .await
+            .unwrap();
+        let again = gdl_ipc::claim_name(&second, gdl_ipc::TRAY_BUS_NAME)
+            .await
+            .unwrap();
+
+        assert!(stays);
+        assert!(!again);
+    }
 
     /// O repositório tem um ícone para cada nome que o modelo usa.
     #[test]

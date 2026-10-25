@@ -18,6 +18,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   com as mesmas chaves do app original e gravação atômica, e textos em pt-BR e inglês (Fluent).
 - Banco SQLite por conta: metadados com revisão-base, inodes estáveis que nunca se repetem,
   intervalos já baixados, fila de envios que sobrevive a reinícios e escolha do que liberar do cache.
+- Drive simulado para os testes (API v3, upload multipart e retomável, mudanças e OAuth com PKCE),
+  com falhas injetáveis: limite de taxa, códigos de erro, queda de conexão e computador sem rede.
 
 ## [0.0.1] - 2026-10-25
 

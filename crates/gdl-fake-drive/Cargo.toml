@@ -8,6 +8,20 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+axum.workspace = true
+base64.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
+md-5.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
 
 [lints]
 workspace = true

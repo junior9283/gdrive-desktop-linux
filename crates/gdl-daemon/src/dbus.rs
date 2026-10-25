@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
-use gdl_ipc::{AccountInfo, ActivityItem, ServiceError, Status};
+use gdl_ipc::{AccountInfo, ActivityItem, ServiceError, Status, SyncErrorItem};
 use zbus::object_server::SignalEmitter;
 
 use crate::daemon::Daemon;
@@ -46,6 +46,14 @@ impl Service {
 
     async fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError> {
         self.daemon.activity().await
+    }
+
+    async fn errors(&self) -> Result<Vec<SyncErrorItem>, ServiceError> {
+        self.daemon.errors().await
+    }
+
+    async fn retry(&self, item_id: &str) -> Result<(), ServiceError> {
+        self.daemon.retry(item_id).await
     }
 
     async fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError> {

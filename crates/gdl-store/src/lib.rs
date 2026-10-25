@@ -47,7 +47,7 @@ const INCOMPLETE_PINNED: &str = "FROM items i \
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct QueueStats {
     pub pending: u32,
-    /// Envios que já falharam ao menos uma vez.
+    /// Itens com envio com erro registrado (os mesmos de `Store::job_errors`).
     pub failed: u32,
     /// Bytes dos itens com envio na fila.
     pub bytes: u64,
@@ -269,6 +269,38 @@ impl Store {
         Ok(())
     }
 
+    /// Os itens com envio com erro registrado (um por item: o erro mais recente da fila).
+    pub fn job_errors(&self) -> Result<Vec<JobError>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT q.item_id, i.local_name, q.error_category, q.last_error \
+             FROM upload_queue q JOIN items i ON i.id = q.item_id \
+             WHERE q.job_id IN (SELECT MAX(job_id) FROM upload_queue \
+                                WHERE error_category IS NOT NULL GROUP BY item_id)",
+        )?;
+        let errors = stmt
+            .query_map([], |r| {
+                Ok(JobError {
+                    item: ItemId(r.get(0)?),
+                    name: r.get(1)?,
+                    category: r.get(2)?,
+                    message: r.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(errors)
+    }
+
+    /// "Tentar de novo": os envios do item vão para agora, com as tentativas zeradas.
+    pub fn retry_now(&self, id: &ItemId) -> Result<()> {
+        self.conn().execute(
+            "UPDATE upload_queue SET next_try_ms = 0, attempts = 0, waiting_network = 0, \
+             error_category = NULL, last_error = NULL WHERE item_id = ?1",
+            [&id.0],
+        )?;
+        Ok(())
+    }
+
     /// Tira da fila todos os envios do item.
     pub fn drop_jobs(&self, id: &ItemId) -> Result<()> {
         self.conn()
@@ -276,11 +308,20 @@ impl Store {
         Ok(())
     }
 
-    pub fn retry_job(&self, job_id: i64, next_try_ms: i64) -> Result<()> {
+    /// Mais uma tentativa às `next_try_ms`; `error` (categoria e mensagem) registra o erro desta
+    /// tentativa para a lista de erros (sem ele, fica o erro anterior, se houver).
+    pub fn retry_job(
+        &self,
+        job_id: i64,
+        next_try_ms: i64,
+        error: Option<(&str, &str)>,
+    ) -> Result<()> {
+        let (category, message) = error.unzip();
         self.conn().execute(
-            "UPDATE upload_queue SET attempts = attempts + 1, next_try_ms = ?2, waiting_network = 0 \
+            "UPDATE upload_queue SET attempts = attempts + 1, next_try_ms = ?2, waiting_network = 0, \
+             error_category = COALESCE(?3, error_category), last_error = COALESCE(?4, last_error) \
              WHERE job_id = ?1",
-            [job_id, next_try_ms],
+            params![job_id, next_try_ms, category, message],
         )?;
         Ok(())
     }
@@ -522,7 +563,7 @@ impl Store {
     /// Envios na fila, quantos deles já falharam ao menos uma vez e os bytes dos itens deles.
     pub fn queue_stats(&self) -> Result<QueueStats> {
         Ok(self.conn().query_row(
-            "SELECT COUNT(*), COUNT(*) FILTER (WHERE attempts > 0), \
+            "SELECT COUNT(*), COUNT(DISTINCT item_id) FILTER (WHERE error_category IS NOT NULL), \
              (SELECT COALESCE(SUM(size), 0) FROM items \
               WHERE id IN (SELECT item_id FROM upload_queue)) \
              FROM upload_queue",
@@ -950,7 +991,7 @@ mod tests {
             (a, UploadKind::Update, 0)
         );
         assert_eq!(job.session_url.as_deref(), Some("https://upload/sessao"));
-        store.retry_job(a, 2000).unwrap();
+        store.retry_job(a, 2000, None).unwrap();
         assert!(store.next_job(500).unwrap().is_none());
         assert_eq!(store.next_job(1500).unwrap().unwrap().job_id, b);
         store.finish_job(b).unwrap();
@@ -1121,7 +1162,7 @@ mod tests {
         for job in [retried, postponed] {
             store.wait_for_network(job, 100).unwrap();
         }
-        store.retry_job(retried, 500).unwrap();
+        store.retry_job(retried, 500, None).unwrap();
         store.postpone_job(postponed, 500).unwrap();
 
         assert_eq!(store.wake_network_waiters(0).unwrap(), 0);

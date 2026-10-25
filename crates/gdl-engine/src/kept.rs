@@ -37,6 +37,11 @@ impl KeptCopies {
         &self.dir
     }
 
+    /// Quantas cópias há (sem ler os dados de cada uma, como `list`).
+    pub fn count(&self) -> usize {
+        std::fs::read_dir(&self.dir).map_or(0, |entries| entries.flatten().count())
+    }
+
     /// Cópias guardadas, da mais antiga à mais nova.
     pub fn list(&self) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {

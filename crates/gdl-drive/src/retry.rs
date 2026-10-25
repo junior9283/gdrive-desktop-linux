@@ -18,6 +18,8 @@ pub enum DriveError {
     QuotaExceeded,
     #[error("limite diário de envio do Google Drive atingido")]
     DailyUploadLimit,
+    #[error("o arquivo é maior do que o Google Drive aceita")]
+    TooLarge,
     #[error("limite de download deste arquivo atingido; tente mais tarde")]
     DownloadQuotaExceeded,
     #[error("o Google pediu para diminuir o ritmo")]

@@ -148,6 +148,15 @@ pub struct UploadJob {
     pub file_id: Option<String>,
 }
 
+/// O erro mais recente registrado nos envios de um item (`Store::retry_job` com erro).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobError {
+    pub item: ItemId,
+    pub name: String,
+    pub category: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewUploadJob {
     pub item: ItemId,

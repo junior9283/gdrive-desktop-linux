@@ -68,6 +68,12 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE items ADD COLUMN remote_size INTEGER NOT NULL DEFAULT 0;
     UPDATE items SET remote_size = size;
 ",
+    "
+    -- Último erro de cada envio, para a lista de erros.
+    ALTER TABLE upload_queue ADD COLUMN last_error TEXT;
+    ALTER TABLE upload_queue ADD COLUMN error_category TEXT;
+    CREATE INDEX upload_queue_item ON upload_queue (item_id);
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.
@@ -107,5 +113,30 @@ mod tests {
             .query_row("SELECT remote_size FROM items", [], |r| r.get(0))
             .unwrap();
         assert_eq!(remote_size, 7);
+    }
+
+    #[test]
+    fn migration_4_adds_error_columns_and_keeps_the_queue() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..3] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        conn.execute(
+            "INSERT INTO upload_queue (item_id, kind, next_try_ms) VALUES ('a', 0, 5)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let row: (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT item_id, last_error, error_category FROM upload_queue",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("a".into(), None, None));
     }
 }

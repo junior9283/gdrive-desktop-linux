@@ -14,6 +14,7 @@ use gdl_drive::client::{Backoff, DriveClient};
 use gdl_drive::oauth::{AccessTokens, LoginFlow, OAuthEndpoints};
 use gdl_drive::token_store::{ClientCredentials, TokenSet, TokenStore};
 use gdl_engine::engine::{Engine, Intervals};
+use gdl_engine::errors::ErrorSource;
 use gdl_engine::events::{EngineEvent, SyncState};
 use gdl_fs::DriveFs;
 use gdl_store::{Inode, ItemId, ItemKind};
@@ -24,7 +25,7 @@ use url::Url;
 use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 
-use gdl_ipc::{AccountInfo, ActivityItem, OBJECT_PATH, ServiceError, Status};
+use gdl_ipc::{AccountInfo, ActivityItem, OBJECT_PATH, ServiceError, Status, SyncErrorItem};
 
 use crate::dbus::Service;
 use crate::mount;
@@ -462,10 +463,7 @@ impl Daemon {
 
     pub async fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError> {
         let engine = self.connected_engine().await?;
-        let my_drive = self
-            .my_drive_dir()
-            .await
-            .ok_or_else(|| self.not_logged_in())?;
+        let my_drive = self.mount_point().await?.join(self.my_drive_name());
         let rows = engine.activity().map_err(failed)?;
         Ok(rows
             .into_iter()
@@ -482,10 +480,50 @@ impl Daemon {
             .collect())
     }
 
-    /// `Meu Drive` dentro da montagem da conta conectada.
-    async fn my_drive_dir(&self) -> Option<PathBuf> {
-        let my_drive = self.my_drive_name();
-        self.with_account(|a| a.mount_point.join(&my_drive)).await
+    pub async fn errors(&self) -> Result<Vec<SyncErrorItem>, ServiceError> {
+        let engine = self.connected_engine().await?;
+        let mount_point = self.mount_point().await?;
+        let my_drive = mount_point.join(self.my_drive_name());
+        // As cópias aparecem na montagem, na pasta oculta do Lost and Found.
+        let lost_found = mount_point.join(self.i18n.tr("folder-lost-found", &[]));
+        let errors = engine.errors().map_err(failed)?;
+        Ok(errors
+            .into_iter()
+            .map(|e| {
+                let (item_id, path) = match e.source {
+                    ErrorSource::Item { id, path } => (id.0, my_drive.join(path)),
+                    ErrorSource::Kept(copy) => (
+                        String::new(),
+                        lost_found.join(copy.file_name().unwrap_or_default()),
+                    ),
+                };
+                SyncErrorItem {
+                    item_id,
+                    name: e.name,
+                    path: path.display().to_string(),
+                    category: e.category.as_str().into(),
+                    message: e.message,
+                }
+            })
+            .collect())
+    }
+
+    /// "Tentar de novo" num envio da lista de erros.
+    pub async fn retry(&self, item_id: &str) -> Result<(), ServiceError> {
+        if item_id.is_empty() {
+            return Err(ServiceError::InvalidArgs("item sem envio".into()));
+        }
+        let engine = self.connected_engine().await?;
+        engine.retry(&ItemId(item_id.into())).map_err(failed)?;
+        self.emit_status_changed().await;
+        Ok(())
+    }
+
+    /// A montagem da conta conectada.
+    async fn mount_point(&self) -> Result<PathBuf, ServiceError> {
+        self.with_account(|a| a.mount_point.clone())
+            .await
+            .ok_or_else(|| self.not_logged_in())
     }
 
     /// Nome da pasta do Meu Drive na montagem (no idioma do sistema, como o FUSE mostra).

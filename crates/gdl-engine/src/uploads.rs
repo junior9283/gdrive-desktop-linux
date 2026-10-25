@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::activity::{Activity, ActivityLog, ActivityState};
 use crate::cache::BlockCache;
 use crate::changes::merge;
+use crate::errors::ErrorCategory;
 use crate::events::{EngineEvent, LostReason};
 use crate::ids::IdPool;
 use crate::indexer::{ACCOUNT_EMAIL, item_from_remote};
@@ -349,10 +350,12 @@ impl UploadWorker {
             }
             _ => self.skip(&job),
         };
-        if result.is_err() {
+        if let Err(e) = &result {
             // Erro daqui (disco, banco): este envio vai para depois, pelo recuo, e a fila segue.
             let delay = self.retry.delay(job.attempts).as_millis() as i64;
-            self.store.retry_job(job.job_id, now_ms() + delay)?;
+            let error = (ErrorCategory::of_engine(e).as_str(), e.to_string());
+            self.store
+                .retry_job(job.job_id, now_ms() + delay, Some((error.0, &error.1)))?;
             self.store.transition_local_state(
                 &job.item,
                 LocalState::Uploading,
@@ -526,7 +529,12 @@ impl UploadWorker {
             return Ok(UploadOutcome::Offline);
         }
         let delay = self.retry.delay(job.attempts).as_millis() as i64;
-        self.store.retry_job(job.job_id, now + delay)?;
+        // Falhas passageiras não entram na lista de erros.
+        let message = (!e.is_retryable()).then(|| e.to_string());
+        let error = message
+            .as_deref()
+            .map(|m| (ErrorCategory::of(&e).as_str(), m));
+        self.store.retry_job(job.job_id, now + delay, error)?;
         if !e.is_retryable() {
             let event = match e {
                 DriveError::QuotaExceeded => {
@@ -702,6 +710,7 @@ mod tests {
 
     use super::*;
     use crate::cache::BlockCache;
+    use crate::errors::{self, ErrorCategory, ErrorSource};
     use crate::events::{EngineEvent, LostReason};
     use crate::indexer::initial_index;
     use crate::kept::{Kept, KeptFolder};
@@ -1284,6 +1293,69 @@ mod tests {
         assert!(s.canceled().is_empty());
         assert_eq!(s.env.fake.content(&id.0), b"ok");
         assert_eq!(s.env.item(&id.0).local_state, LocalState::Clean);
+    }
+
+    #[tokio::test]
+    async fn quota_full_upload_is_listed_as_quota_error() {
+        let s = setup(Env::new().await).await;
+        let local = s.write_new(&s.env.root(), "grande.bin", b"dados");
+        s.env.fake.inject(Fault::QuotaExceeded { times: 1 });
+
+        assert_eq!(s.run().await, Some(UploadOutcome::Retrying));
+
+        let errors = errors::list(&s.env.store, s.kept.get(KeptFolder::LostAndFound)).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].category, ErrorCategory::Quota);
+        assert_eq!(errors[0].name, "grande.bin");
+        assert_eq!(
+            errors[0].source,
+            ErrorSource::Item {
+                id: local,
+                path: "grande.bin".into()
+            }
+        );
+        assert!(!errors[0].message.is_empty());
+        assert_eq!(s.env.store.queue_stats().unwrap().failed, 1);
+    }
+
+    #[tokio::test]
+    async fn retry_runs_the_job_now() {
+        let s = setup(Env::new().await).await;
+        let local = s.write_new(&s.env.root(), "grande.bin", b"dados");
+        s.env.fake.inject(Fault::QuotaExceeded { times: 1 });
+        assert_eq!(s.run().await, Some(UploadOutcome::Retrying));
+        assert_eq!(s.run().await, None, "espera o recuo");
+
+        s.env.store.retry_now(&local).unwrap();
+
+        assert!(matches!(s.run().await, Some(UploadOutcome::Uploaded(_))));
+        assert!(
+            errors::list(&s.env.store, s.kept.get(KeptFolder::LostAndFound))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn lost_and_found_files_are_errors() {
+        let env = Env::new().await;
+        let id = ItemId(
+            env.fake
+                .add_file(&env.fake.root_id(), "a.txt", b"velho".to_vec()),
+        );
+        let s = setup(env).await;
+        s.edit(&id, b"minha edicao local").await;
+        s.env.fake.modify_remote(&id.0, b"da nuvem".to_vec());
+        let Some(UploadOutcome::Preserved { path, .. }) = s.run().await else {
+            panic!("esperava conflito");
+        };
+
+        let errors = errors::list(&s.env.store, s.kept.get(KeptFolder::LostAndFound)).unwrap();
+
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].category, ErrorCategory::LostAndFound);
+        assert_eq!(errors[0].source, ErrorSource::Kept(path.clone()));
+        assert_eq!(errors[0].name, path.file_name().unwrap().to_string_lossy());
     }
 
     #[test]

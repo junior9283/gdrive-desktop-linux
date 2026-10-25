@@ -26,6 +26,21 @@ pub struct Status {
     pub remaining_secs: i64,
 }
 
+/// Uma linha de `Errors`.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct SyncErrorItem {
+    /// Vazio nas cópias do Lost and Found.
+    pub item_id: String,
+    pub name: String,
+    /// Caminho completo na montagem (a cópia, no caso do Lost and Found).
+    pub path: String,
+    /// `quota`, `upload-limit`, `no-permission`, `too-large`, `cloud-missing`, `local-missing`,
+    /// `lost-and-found` ou `unknown`.
+    pub category: String,
+    /// O erro técnico; vazio no Lost and Found.
+    pub message: String,
+}
+
 /// Uma linha de `Activity`: o último estado de um item que subiu, desceu ou foi para a lixeira.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct ActivityItem {
@@ -101,6 +116,8 @@ pub trait Service {
     fn account_info(&self) -> Result<AccountInfo, ServiceError>;
     /// A atividade de sincronização, a mais recente primeiro (até 500 itens).
     fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError>;
+    fn errors(&self) -> Result<Vec<SyncErrorItem>, ServiceError>;
+    fn retry(&self, item_id: &str) -> Result<(), ServiceError>;
     /// `canceled` ou `too-late`.
     fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError>;
     fn pin(&self, path: &str) -> Result<(), ServiceError>;

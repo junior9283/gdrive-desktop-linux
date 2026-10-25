@@ -370,3 +370,49 @@ async fn cancel_upload_over_dbus() {
         .unwrap();
     assert_eq!(std::fs::read_dir(&copies).unwrap().count(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn errors_over_dbus() {
+    let h = Harness::new().await;
+    let id = h
+        .fake
+        .add_file(&h.fake.root_id(), "contrato.txt", b"v1".to_vec());
+    h.logged_in().await;
+    // Uma edição em conflito (Lost and Found) e um envio barrado pela cota.
+    let path = h.drive().join("contrato.txt");
+    blocking(move || std::fs::write(path, b"editado aqui").unwrap()).await;
+    h.fake.modify_remote(&id, b"editado na nuvem".to_vec());
+    status_until(&h, "conflito guardado", |s| s.errors == 1).await;
+    // A consulta de mudanças também recebe o erro: a cota fica cheia até o teste liberar.
+    h.fake
+        .inject(gdl_fake_drive::Fault::QuotaExceeded { times: 1_000 });
+    let path = h.drive().join("novo.txt");
+    blocking(move || std::fs::write(path, b"sem espaco").unwrap()).await;
+    status_until(&h, "erro de cota", |s| s.errors == 2).await;
+
+    let errors = h.proxy.errors().await.unwrap();
+
+    let categories: Vec<_> = errors.iter().map(|e| e.category.as_str()).collect();
+    assert_eq!(categories, ["quota", "lost-and-found"]);
+    assert_eq!(errors[0].name, "novo.txt");
+    assert!(
+        errors[0].path.ends_with("Google Drive/Meu Drive/novo.txt"),
+        "{}",
+        errors[0].path
+    );
+    assert!(
+        errors[1]
+            .path
+            .contains("Google Drive/.Lost and Found/contrato (local "),
+        "{}",
+        errors[1].path
+    );
+    assert_eq!(errors[1].item_id, "");
+    h.fake.clear_faults();
+    h.proxy.retry(&errors[0].item_id).await.unwrap();
+    status_until(&h, "envio refeito", |s| {
+        s.errors == 1 && s.pending_uploads == 0
+    })
+    .await;
+    assert_eq!(h.proxy.errors().await.unwrap().len(), 1);
+}

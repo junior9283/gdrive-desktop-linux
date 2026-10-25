@@ -86,6 +86,7 @@ async fn error_from(resp: reqwest::Response) -> DriveError {
         (403, "storageQuotaExceeded" | "quotaExceeded") => DriveError::QuotaExceeded,
         (403, "uploadLimitExceeded" | "dailyLimitExceeded") => DriveError::DailyUploadLimit,
         (403, "downloadQuotaExceeded") => DriveError::DownloadQuotaExceeded,
+        (403, "maxFileSizeExceeded") | (413, _) => DriveError::TooLarge,
         (403, _) => DriveError::PermissionDenied,
         // 410: sessão de upload expirada.
         (404 | 410, _) => DriveError::NotFound,

@@ -19,6 +19,7 @@ use crate::Result;
 use crate::activity::{Activity, ActivityLog, ActivityRow, ActivityState, MAX_ROWS};
 use crate::cache::BlockCache;
 use crate::changes::ChangePoller;
+use crate::errors::{self, SyncError};
 use crate::events::{EngineEvent, SyncSummary};
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, initial_index};
 use crate::kept::{Kept, KeptCopies, KeptFolder};
@@ -160,6 +161,16 @@ impl Engine {
         &self.kept
     }
 
+    /// Os erros da sincronização, por categoria e nome.
+    pub fn errors(&self) -> Result<Vec<SyncError>> {
+        errors::list(&self.store, self.lost_and_found())
+    }
+
+    /// "Tentar de novo": o envio do item vai para agora.
+    pub fn retry(&self, id: &gdl_store::ItemId) -> Result<()> {
+        Ok(self.store.retry_now(id)?)
+    }
+
     /// Cancela o envio do arquivo (ver `UploadWorker::cancel`).
     pub async fn cancel_upload(&self, id: &gdl_store::ItemId) -> Result<CancelOutcome> {
         self.uploads.cancel(id).await
@@ -242,7 +253,8 @@ impl Engine {
             paused: self.is_paused(),
             offline: self.poller.is_offline(),
             last_sync_ms: self.poller.last_sync_ms(),
-            errors: queue.failed,
+            // O mesmo que `errors().len()`, sem montar os caminhos.
+            errors: queue.failed + self.lost_and_found().count() as u32,
             // Sem nada na fila, a cota cheia não impede nada.
             quota_full: queue.pending > 0 && stats.quota_full(),
             syncing: queue.pending + downloads,

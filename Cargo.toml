@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-only"
+repository = "https://github.com/junior9283/gdrive-desktop-linux"
+
+[workspace.dependencies]
+gdl-common = { path = "crates/gdl-common" }
+gdl-store = { path = "crates/gdl-store" }
+gdl-drive = { path = "crates/gdl-drive" }
+gdl-fake-drive = { path = "crates/gdl-fake-drive" }
+gdl-engine = { path = "crates/gdl-engine" }
+gdl-fs = { path = "crates/gdl-fs" }
+sha2 = "0.11"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

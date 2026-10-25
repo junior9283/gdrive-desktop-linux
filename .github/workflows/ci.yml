@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências do sistema (FUSE 3)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse3
+          sudo chmod 666 /dev/fuse
+      # Lê a versão e os componentes do rust-toolchain.toml (fonte única) e já faz cache.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Formatação
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Testes
+        run: cargo test --workspace

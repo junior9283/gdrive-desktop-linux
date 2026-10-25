@@ -1,0 +1,1 @@
+//! Banco SQLite por conta.

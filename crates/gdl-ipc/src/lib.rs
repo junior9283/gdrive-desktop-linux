@@ -144,6 +144,18 @@ pub struct SharedItem {
     pub shared_ms: i64,
 }
 
+/// Uma linha de `Preferences`.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct Pref {
+    pub key: String,
+    /// O valor efetivo em JSON (`null` sem valor nem padrão).
+    pub value: String,
+    /// Definida pela política do administrador: a janela mostra, mas não deixa mudar.
+    pub managed: bool,
+    /// Só vale depois de reiniciar o serviço.
+    pub restart: bool,
+}
+
 #[derive(Debug, zbus::DBusError)]
 #[zbus(prefix = "io.github.junior9283.GDriveDesktopLinux1.Error")]
 pub enum ServiceError {
@@ -226,6 +238,16 @@ pub trait Service {
     fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError>;
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.
     fn logout(&self, mode: &str, dir: &str) -> Result<(), ServiceError>;
+    fn preferences(&self) -> Result<Vec<Pref>, ServiceError>;
+    /// Grava as preferências (`chave`, valor em JSON) todas ou nenhuma; `true` se alguma só
+    /// vale depois de reiniciar.
+    fn set_preferences(&self, values: &[(&str, &str)]) -> Result<bool, ServiceError>;
+    /// Volta ao padrão tudo o que o usuário mudou (a política continua valendo).
+    fn reset_preferences(&self) -> Result<(), ServiceError>;
+    /// Reinicia o serviço (para as preferências que pedem isso).
+    fn restart(&self) -> Result<(), ServiceError>;
+    /// Encerra o serviço; a bandeja sai junto ao ver `Quitting`.
+    fn quit(&self) -> Result<(), ServiceError>;
 
     #[zbus(signal)]
     fn login_finished(&self, ok: bool, email: &str, error: &str) -> zbus::Result<()>;
@@ -237,6 +259,12 @@ pub trait Service {
     /// O histórico de notificações mudou (aviso novo, lido ou dispensado).
     #[zbus(signal)]
     fn notifications_changed(&self) -> zbus::Result<()>;
+    /// Alguma preferência mudou (por `SetPreferences` ou `ResetPreferences`).
+    #[zbus(signal)]
+    fn preferences_changed(&self) -> zbus::Result<()>;
+    /// O serviço vai sair (`Quit`).
+    #[zbus(signal)]
+    fn quitting(&self) -> zbus::Result<()>;
 }
 
 #[cfg(test)]

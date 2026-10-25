@@ -65,3 +65,7 @@ cli-status-offline = Sem conexão
 cli-status-last-sync = Última sincronização: { $when }
 cli-status-errors = Falhas: { $count }
 cli-not-pointer = { $path } não é um ponteiro de Documento Google.
+notify-cache-moving-title = Mudando o cache de lugar
+notify-cache-moving-body = Os arquivos baixados estão indo para { $path }. O Drive abre quando terminar.
+notify-cache-moved-title = Cache no lugar novo
+notify-cache-moved-body = Os arquivos baixados agora ficam em { $path }.

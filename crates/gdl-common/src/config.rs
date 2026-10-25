@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::fs::write_atomic;
+use crate::fs::{remove_file_if_exists, write_atomic};
 use crate::paths::Paths;
 
 #[derive(Debug, thiserror::Error)]
@@ -48,8 +48,18 @@ macro_rules! resolve {
     };
 }
 
-/// Fonte única das preferências: gera `KNOWN_KEYS`, a camada TOML (`Layer`) e as
-/// preferências efetivas (`Preferences`).
+/// Padrão como valor TOML, para `pref_values`.
+macro_rules! default_value {
+    ($ty:ty) => {
+        None
+    };
+    ($ty:ty, $default:expr) => {
+        toml::Value::try_from::<$ty>($default).ok()
+    };
+}
+
+/// Fonte única das preferências: gera `KNOWN_KEYS`, a camada TOML (`Layer`), as preferências
+/// efetivas (`Preferences`) e os padrões de cada chave (`default_value`).
 macro_rules! preferences {
     ($($key:literal => $field:ident: $ty:ty $(= $default:expr)?;)*) => {
         /// Todas as chaves aceitas, com os mesmos nomes do app original (spec §6.16).
@@ -70,6 +80,14 @@ macro_rules! preferences {
 
             fn resolve(self) -> Preferences {
                 Preferences { $($field: resolve!(self.$field $(, $default)?),)* }
+            }
+        }
+
+        /// Valor padrão de `key`, para as chaves que têm um.
+        fn default_value(key: &str) -> Option<toml::Value> {
+            match key {
+                $($key => default_value!($ty $(, $default)?),)*
+                _ => None,
             }
         }
 
@@ -105,6 +123,8 @@ preferences! {
     "OpenOfficeFilesInDocs" => open_office_files_in_docs: bool = true;
     "PauseSyncingOnMeteredConnection" => pause_syncing_on_metered_connection: bool = false;
     "PromptToBackupDevices" => prompt_to_backup_devices: bool = true;
+    // Própria deste app: o proxy manual (endereço), que o original não tem como chave.
+    "ProxyServer" => proxy_server: String;
     "SearchHotKey" => search_hot_key: String;
     "ShowMountPointInSidebar" => show_mount_point_in_sidebar: bool = true;
     "TrustSystemRootCerts" => trust_system_root_certs: bool = true;
@@ -167,35 +187,98 @@ pub fn load_preferences(
     Ok((policy.over(user).over(defaults).resolve(), managed))
 }
 
-/// Grava uma preferência do usuário, recusando chaves desconhecidas, definidas pela política
-/// ou com valor de tipo errado. A gravação é atômica: o arquivo nunca fica pela metade.
+/// Preferências que só valem depois de reiniciar o serviço (cache, montagem e rede); as
+/// outras valem na hora.
+const RESTART_KEYS: &[&str] = &[
+    "ContentCacheMaxKbytes",
+    "ContentCachePath",
+    "DefaultMountPoint",
+    "DirectConnection",
+    "ProxyServer",
+    "TrustSystemRootCerts",
+    "TrustedRootCertsFile",
+];
+
+pub fn needs_restart(key: &str) -> bool {
+    RESTART_KEYS.contains(&key)
+}
+
+/// Uma preferência como a janela de Preferências mostra: o valor efetivo (ou o padrão; `None`
+/// sem nenhum dos dois) e se a política do administrador a define.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrefValue {
+    pub key: &'static str,
+    pub value: Option<toml::Value>,
+    pub managed: bool,
+}
+
+/// Todas as preferências conhecidas, com o valor efetivo de cada uma.
+pub fn pref_values(paths: &Paths) -> Result<Vec<PrefValue>, ConfigError> {
+    let policy = read_table(&policies_path(paths))?;
+    let layers = [
+        &policy,
+        &read_table(&user_path(paths))?,
+        &read_table(&defaults_path(paths))?,
+    ];
+    Ok(KNOWN_KEYS
+        .iter()
+        .map(|&key| PrefValue {
+            key,
+            value: layers
+                .iter()
+                .find_map(|t| t.get(key).cloned())
+                .or_else(|| default_value(key)),
+            managed: policy.contains_key(key),
+        })
+        .collect())
+}
+
+/// Grava uma preferência do usuário (ver `set_user_preferences`).
 pub fn save_user_preference(
     paths: &Paths,
     key: &str,
     value: toml::Value,
 ) -> Result<(), ConfigError> {
-    if !KNOWN_KEYS.contains(&key) {
-        return Err(ConfigError::UnknownKey(key.into()));
+    set_user_preferences(paths, &[(key.into(), value)])
+}
+
+/// Grava várias preferências do usuário de uma vez. Recusa tudo, sem gravar nada, se alguma
+/// chave for desconhecida, definida pela política ou tiver valor de tipo errado: um valor
+/// inválido nunca chega ao arquivo (e nunca impede a próxima partida). A gravação é atômica.
+pub fn set_user_preferences(
+    paths: &Paths,
+    values: &[(String, toml::Value)],
+) -> Result<(), ConfigError> {
+    let policy = read_table(&policies_path(paths))?;
+    for (key, value) in values {
+        if !KNOWN_KEYS.contains(&key.as_str()) {
+            return Err(ConfigError::UnknownKey(key.clone()));
+        }
+        if policy.contains_key(key) {
+            return Err(ConfigError::Managed(key.clone()));
+        }
+        let probe = toml::Table::from_iter([(key.clone(), value.clone())]);
+        probe
+            .try_into::<Layer>()
+            .map_err(|source| ConfigError::InvalidValue {
+                key: key.clone(),
+                source,
+            })?;
     }
-    if read_table(&policies_path(paths))?.contains_key(key) {
-        return Err(ConfigError::Managed(key.into()));
-    }
-    let probe = toml::Table::from_iter([(key.to_string(), value.clone())]);
-    probe
-        .try_into::<Layer>()
-        .map_err(|source| ConfigError::InvalidValue {
-            key: key.into(),
-            source,
-        })?;
 
     let path = user_path(paths);
     let mut table = read_table(&path)?;
-    table.insert(key.into(), value);
-    let io = |source| ConfigError::Io {
+    table.extend(values.iter().cloned());
+    write_atomic(&path, table.to_string().as_bytes()).map_err(|source| ConfigError::Io {
         path: path.clone(),
         source,
-    };
-    write_atomic(&path, table.to_string().as_bytes()).map_err(io)
+    })
+}
+
+/// "Restaurar padrões": apaga as preferências do usuário. As da política continuam valendo.
+pub fn reset_user_preferences(paths: &Paths) -> Result<(), ConfigError> {
+    let path = user_path(paths);
+    remove_file_if_exists(&path).map_err(|source| ConfigError::Io { path, source })
 }
 
 #[cfg(test)]
@@ -278,6 +361,92 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, ConfigError::InvalidValue { key, .. } if key == "AutoStartOnLogin"));
         assert!(load_preferences(&paths).is_ok());
+    }
+
+    #[test]
+    fn set_preferences_rejects_bad_values_before_writing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let user = paths.config_dir.join("preferences.toml");
+        write(&user, "UITheme = \"light\"\n");
+
+        let err = set_user_preferences(
+            &paths,
+            &[
+                ("UITheme".into(), toml::Value::String("dark".into())),
+                (
+                    "BandwidthRxKBPS".into(),
+                    toml::Value::String("rápido".into()),
+                ),
+            ],
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, ConfigError::InvalidValue { key, .. } if key == "BandwidthRxKBPS"));
+        assert_eq!(fs::read_to_string(&user).unwrap(), "UITheme = \"light\"\n");
+        set_user_preferences(
+            &paths,
+            &[
+                ("UITheme".into(), toml::Value::String("dark".into())),
+                ("BandwidthRxKBPS".into(), toml::Value::Integer(300)),
+            ],
+        )
+        .unwrap();
+        let (prefs, _) = load_preferences(&paths).unwrap();
+        assert_eq!(prefs.ui_theme.as_deref(), Some("dark"));
+        assert_eq!(prefs.bandwidth_rx_kbps, Some(300));
+    }
+
+    #[test]
+    fn reset_preferences_keeps_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        write(
+            &paths.etc_dir.join("policies.toml"),
+            "AutoStartOnLogin = false\n",
+        );
+        save_user_preference(&paths, "UITheme", toml::Value::String("dark".into())).unwrap();
+
+        reset_user_preferences(&paths).unwrap();
+
+        let (prefs, managed) = load_preferences(&paths).unwrap();
+        assert_eq!(prefs.ui_theme, None);
+        assert!(!prefs.auto_start_on_login);
+        assert!(managed.contains("AutoStartOnLogin"));
+        reset_user_preferences(&paths).unwrap();
+    }
+
+    #[test]
+    fn pref_values_show_effective_value_default_and_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        write(
+            &paths.etc_dir.join("policies.toml"),
+            "AutoStartOnLogin = false\n",
+        );
+        save_user_preference(&paths, "UITheme", toml::Value::String("dark".into())).unwrap();
+
+        let values = pref_values(&paths).unwrap();
+        let get = |key: &str| values.iter().find(|v| v.key == key).unwrap();
+
+        assert_eq!(values.len(), KNOWN_KEYS.len());
+        assert_eq!(
+            get("UITheme").value,
+            Some(toml::Value::String("dark".into()))
+        );
+        assert!(!get("UITheme").managed);
+        assert_eq!(
+            get("AutoStartOnLogin").value,
+            Some(toml::Value::Boolean(false))
+        );
+        assert!(get("AutoStartOnLogin").managed);
+        assert_eq!(
+            get("MinFreeDiskSpaceKBytes").value,
+            Some(toml::Value::Integer(512_000)),
+            "padrão"
+        );
+        assert_eq!(get("ProxyServer").value, None, "sem padrão");
+        assert!(needs_restart("ContentCacheMaxKbytes") && !needs_restart("UITheme"));
     }
 
     #[test]

@@ -691,3 +691,153 @@ async fn offline_files_over_dbus() {
     let recent = h.proxy.recent_items().await.unwrap();
     assert!(recent.iter().all(|r| !r.is_folder));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn managed_keys_are_reported_and_locked() {
+    let h = Harness::with_policy("AutoStartOnLogin = false\n").await;
+
+    let prefs = h.proxy.preferences().await.unwrap();
+    let auto = prefs.iter().find(|p| p.key == "AutoStartOnLogin").unwrap();
+    assert!(auto.managed);
+    assert_eq!(auto.value, "false");
+    let theme = prefs.iter().find(|p| p.key == "UITheme").unwrap();
+    assert!(!theme.managed);
+    assert_eq!(theme.value, "null");
+
+    let err = h
+        .proxy
+        .set_preferences(&[("UITheme", "\"dark\""), ("AutoStartOnLogin", "true")])
+        .await
+        .unwrap_err();
+    assert_eq!(err.short_name(), "Managed", "{err}");
+    let theme = h.proxy.preferences().await.unwrap();
+    let theme = theme.iter().find(|p| p.key == "UITheme").unwrap();
+    assert_eq!(theme.value, "null", "nada gravado");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restart_flag_only_for_restart_keys() {
+    use futures_util::StreamExt;
+
+    let h = Harness::new().await;
+    let mut changed = h.proxy.receive_preferences_changed().await.unwrap();
+
+    assert!(
+        !h.proxy
+            .set_preferences(&[("UITheme", "\"dark\"")])
+            .await
+            .unwrap()
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(10), changed.next())
+        .await
+        .expect("PreferencesChanged");
+    assert!(
+        h.proxy
+            .set_preferences(&[("ContentCacheMaxKbytes", "1000")])
+            .await
+            .unwrap()
+    );
+    let prefs = h.proxy.preferences().await.unwrap();
+    let get = |key: &str| prefs.iter().find(|p| p.key == key).unwrap().clone();
+    assert_eq!(get("UITheme").value, "\"dark\"");
+    assert!(get("ContentCacheMaxKbytes").restart && !get("UITheme").restart);
+    for bad in [
+        ("BandwidthRxKBPS", "\"rápido\""),
+        ("UITheme", "{"),
+        ("Inexistente", "1"),
+    ] {
+        let err = h.proxy.set_preferences(&[bad]).await.unwrap_err();
+        assert_eq!(err.short_name(), "InvalidArgs", "{bad:?}: {err}");
+    }
+
+    h.proxy.reset_preferences().await.unwrap();
+    let prefs = h.proxy.preferences().await.unwrap();
+    assert_eq!(
+        prefs.iter().find(|p| p.key == "UITheme").unwrap().value,
+        "null"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn autostart_preference_writes_the_session_file() {
+    let h = Harness::new().await;
+    let paths = h.paths();
+    let file = paths
+        .config_dir
+        .parent()
+        .unwrap()
+        .join("autostart")
+        .join(crate::desktop::AUTOSTART_FILE);
+    assert!(file.exists(), "padrão: abre na sessão");
+
+    h.proxy
+        .set_preferences(&[("AutoStartOnLogin", "false")])
+        .await
+        .unwrap();
+    assert!(!file.exists());
+    h.proxy.reset_preferences().await.unwrap();
+    assert!(file.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn quit_emits_quitting_and_ends_the_service() {
+    use futures_util::StreamExt;
+
+    let h = Harness::new().await;
+    let mut quitting = h.proxy.receive_quitting().await.unwrap();
+
+    h.proxy.quit().await.unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), quitting.next())
+        .await
+        .expect("Quitting");
+    let exit = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        h.daemon.exit_requested(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(exit, crate::daemon::Exit::Quit);
+    h.proxy.restart().await.unwrap();
+    assert_eq!(
+        h.daemon.exit_requested().await,
+        crate::daemon::Exit::Restart
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cache_path_change_moves_cache_on_start() {
+    let mut h = Harness::new().await;
+    let root = h.fake.root_id();
+    h.fake
+        .add_file(&root, "fixo.txt", b"conteudo off-line".to_vec());
+    h.logged_in().await;
+    let path = h.drive().join("fixo.txt");
+    h.proxy.pin(&path.display().to_string()).await.unwrap();
+    let engine = h.daemon.engine().await.unwrap();
+    wait_until("baixado", || engine.store().cached_bytes().unwrap() == 17).await;
+    drop(engine);
+    let downloaded = h.fake.downloaded_bytes();
+    let new_cache = h.home.join("outro disco");
+    let value = serde_json::to_string(&new_cache.display().to_string()).unwrap();
+
+    assert!(
+        h.proxy
+            .set_preferences(&[("ContentCachePath", &value)])
+            .await
+            .unwrap()
+    );
+    h.restart(None).await;
+
+    let read = blocking(move || std::fs::read(path).unwrap()).await;
+    assert_eq!(read, b"conteudo off-line");
+    assert_eq!(
+        h.fake.downloaded_bytes(),
+        downloaded,
+        "nada baixado de novo"
+    );
+    let engine = h.daemon.engine().await.unwrap();
+    assert!(engine.cache().dir().starts_with(&new_cache));
+    let notes = h.proxy.notifications().await.unwrap();
+    assert_eq!(notes[0].kind, "cache-moved", "{notes:?}");
+}

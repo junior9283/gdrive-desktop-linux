@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use gdl_common::i18n;
 use gdl_common::paths::Paths;
+use gdl_daemon::daemon::Exit;
 use gdl_daemon::{Api, Config, Daemon, Service};
 use gdl_drive::client::Backoff;
 use gdl_drive::oauth::OAuthEndpoints;
@@ -18,16 +19,20 @@ async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
-    match run().await {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            tracing::error!(erro = %e, "o serviço parou");
-            ExitCode::FAILURE
+    // `Restart` sobe o serviço de novo aqui mesmo, sem depender do systemd.
+    loop {
+        match run().await {
+            Ok(Exit::Restart) => tracing::info!("reiniciando o serviço"),
+            Ok(Exit::Quit) => return ExitCode::SUCCESS,
+            Err(e) => {
+                tracing::error!(erro = %e, "o serviço parou");
+                return ExitCode::FAILURE;
+            }
         }
     }
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
+async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
     let home = std::env::var_os("HOME").ok_or("HOME não definido")?;
     let config = Config {
         paths: Paths::from_env(),
@@ -46,7 +51,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .name(BUS_NAME)?
         .build()
         .await?;
-    daemon.attach(conn).await?;
+    daemon.attach(conn.clone()).await?;
     // A reconexão (que pode indexar o Drive inteiro) corre em paralelo à espera do SIGTERM.
     let mut term = signal(SignalKind::terminate())?;
     let resume = tokio::spawn({
@@ -58,11 +63,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     // O systemd para o serviço com SIGTERM: desmonta antes de sair.
-    tokio::select! {
-        _ = term.recv() => {}
-        _ = tokio::signal::ctrl_c() => {}
-    }
+    let exit = tokio::select! {
+        _ = term.recv() => Exit::Quit,
+        _ = tokio::signal::ctrl_c() => Exit::Quit,
+        exit = daemon.exit_requested() => exit,
+    };
     resume.abort();
     daemon.shutdown().await;
-    Ok(())
+    // Solta o nome no barramento antes de o próximo serviço (no `Restart`) pedi-lo.
+    conn.object_server()
+        .remove::<Service, _>(OBJECT_PATH)
+        .await?;
+    conn.release_name(BUS_NAME).await?;
+    Ok(exit)
 }

@@ -18,6 +18,10 @@ pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
 /// Onde o app guarda configuração, dados, estado e onde lê as políticas do sistema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
+    /// As bases XDG (`~/.config`, `~/.local/share`), para o que fica fora da pasta do app:
+    /// `autostart` e os Locais do KDE.
+    pub config_home: PathBuf,
+    pub data_home: PathBuf,
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub state_dir: PathBuf,
@@ -58,6 +62,8 @@ impl Paths {
     /// A subpasta do app dentro de cada diretório-base.
     fn under(config: &Path, data: &Path, state: &Path, etc: &Path) -> Paths {
         Paths {
+            config_home: config.into(),
+            data_home: data.into(),
             config_dir: config.join(APP),
             data_dir: data.join(APP),
             state_dir: state.join(APP),

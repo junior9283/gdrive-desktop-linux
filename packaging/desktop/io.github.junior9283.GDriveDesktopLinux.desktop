@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Google Drive
+Comment=Starts Google Drive when you log in
+Comment[pt_BR]=Abre o Google Drive ao entrar na sessão
+Exec=gdrive-desktop-linux-tray
+Icon=io.github.junior9283.GDriveDesktopLinux
+Terminal=false
+X-GNOME-Autostart-enabled=true

@@ -2,12 +2,15 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use gdl_common::browser;
-use gdl_common::config::{ConfigError, Preferences, load_preferences, save_user_preference};
+use gdl_common::config::{
+    ConfigError, Preferences, load_preferences, needs_restart, pref_values, reset_user_preferences,
+    save_user_preference, set_user_preferences,
+};
 use gdl_common::i18n::I18n;
 use gdl_common::names::{create_unique, split_ext};
 use gdl_common::paths::Paths;
@@ -15,14 +18,14 @@ use gdl_drive::client::{Backoff, DriveClient, DriveError, FOLDER_MIME, SHORTCUT_
 use gdl_drive::oauth::{AccessTokens, LoginFlow, OAuthEndpoints};
 use gdl_drive::token_store::{ClientCredentials, TokenSet, TokenStore};
 use gdl_engine::EngineError;
-use gdl_engine::engine::{Engine, Intervals};
+use gdl_engine::engine::{Engine, Intervals, pending_cache_move};
 use gdl_engine::errors::ErrorSource;
 use gdl_engine::events::{EngineEvent, SyncState};
 use gdl_engine::gdocs::web_url;
 use gdl_engine::kept::KeptFolder;
 use gdl_fs::DriveFs;
 use gdl_store::{Inode, Item, ItemId, ItemKind, PinState};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use url::Url;
@@ -31,12 +34,12 @@ use zbus::object_server::SignalEmitter;
 
 use gdl_ipc::{
     AccountInfo, ActivityItem, NotificationItem, NotificationSetting, OBJECT_PATH, OfflineEntry,
-    OfflineSummary, SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
+    OfflineSummary, Pref, SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
 };
 
 use crate::dbus::Service;
+use crate::desktop;
 use crate::history::History;
-use crate::lock;
 use crate::mount;
 use crate::notify::{
     self, Notification, Notifier, OPEN_CANCELED, OPEN_LOST_FOUND, OPTIONAL_KINDS, RESUME,
@@ -100,6 +103,17 @@ struct Account {
 
 fn failed(e: impl std::fmt::Display) -> ServiceError {
     ServiceError::Failed(e.to_string())
+}
+
+/// `Managed` para a chave da política, `InvalidArgs` para chave ou valor inválido.
+fn config_error(e: ConfigError) -> ServiceError {
+    match e {
+        ConfigError::Managed(key) => ServiceError::Managed(key),
+        e @ (ConfigError::UnknownKey(_) | ConfigError::InvalidValue { .. }) => {
+            ServiceError::InvalidArgs(e.to_string())
+        }
+        e => failed(e),
+    }
 }
 
 /// `NotFound` para o item `id` que não existe (aqui ou no Drive); `Failed` para o resto.
@@ -185,16 +199,27 @@ fn search_results(engine: &Engine, my_drive: &Path, items: Vec<Item>) -> Vec<Sea
         .collect()
 }
 
+/// Como o serviço termina, pedido pelo D-Bus (`Quit`, `Restart`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exit {
+    Quit,
+    /// O `main` sobe o serviço de novo no mesmo processo, relendo as preferências.
+    Restart,
+}
+
 pub struct Daemon {
     config: Config,
-    prefs: Preferences,
+    /// Recarregadas a cada `SetPreferences`; o que foi lido na partida (cache, montagem, rede)
+    /// só muda ao reiniciar.
+    prefs: RwLock<Arc<Preferences>>,
+    /// Serializa ler-modificar-gravar das preferências do usuário.
+    saving: tokio::sync::Mutex<()>,
+    exit: watch::Sender<Option<Exit>>,
     i18n: I18n,
     account: tokio::sync::Mutex<Option<Account>>,
     conn: OnceLock<Connection>,
     notifier: OnceLock<Notifier>,
     history: History,
-    /// Famílias de aviso desligadas pelo usuário (`DoNotShowNotifications`).
-    muted: Mutex<BTreeSet<String>>,
     login: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -204,8 +229,9 @@ impl Daemon {
         Ok(Arc::new(Daemon {
             i18n: I18n::new(&config.lang),
             history: History::load(config.paths.state_dir.join(HISTORY_FILE)),
-            muted: Mutex::new(prefs.do_not_show_notifications.iter().cloned().collect()),
-            prefs,
+            prefs: RwLock::new(Arc::new(prefs)),
+            saving: tokio::sync::Mutex::default(),
+            exit: watch::Sender::new(None),
             config,
             account: tokio::sync::Mutex::default(),
             conn: OnceLock::new(),
@@ -221,6 +247,7 @@ impl Daemon {
         let mut actions = notifier.proxy().receive_action_invoked().await?;
         let _ = self.notifier.set(notifier);
         let _ = self.conn.set(conn);
+        self.apply_autostart();
         let daemon = Arc::downgrade(self);
         tokio::spawn(async move {
             while let Some(signal) = actions.next().await {
@@ -233,6 +260,113 @@ impl Daemon {
             }
         });
         Ok(())
+    }
+
+    fn prefs(&self) -> Arc<Preferences> {
+        self.prefs.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// A família de aviso está em `DoNotShowNotifications`?
+    fn muted(&self, kind: &str) -> bool {
+        self.prefs()
+            .do_not_show_notifications
+            .iter()
+            .any(|k| k == kind)
+    }
+
+    /// Espera alguém pedir `Quit` ou `Restart`.
+    pub async fn exit_requested(&self) -> Exit {
+        let mut exit = self.exit.subscribe();
+        let wanted = exit.wait_for(Option::is_some).await;
+        wanted.ok().and_then(|e| *e).unwrap_or(Exit::Quit)
+    }
+
+    pub async fn quit(&self) {
+        if let Some(emitter) = self.emitter() {
+            let _ = Service::quitting(&emitter).await;
+        }
+        self.exit.send_replace(Some(Exit::Quit));
+    }
+
+    pub fn restart(&self) {
+        self.exit.send_replace(Some(Exit::Restart));
+    }
+
+    /// As preferências com o valor efetivo, em JSON.
+    pub fn preferences(&self) -> Result<Vec<Pref>, ServiceError> {
+        let values = pref_values(&self.config.paths).map_err(failed)?;
+        values
+            .into_iter()
+            .map(|v| {
+                Ok(Pref {
+                    key: v.key.into(),
+                    value: serde_json::to_string(&v.value).map_err(failed)?,
+                    managed: v.managed,
+                    restart: needs_restart(v.key),
+                })
+            })
+            .collect()
+    }
+
+    /// Grava todas ou nenhuma (valor em JSON) e aplica o que vale na hora. `true` se alguma só
+    /// vale depois de reiniciar.
+    pub async fn set_preferences(
+        &self,
+        values: Vec<(String, String)>,
+    ) -> Result<bool, ServiceError> {
+        let mut parsed = Vec::with_capacity(values.len());
+        for (key, json) in values {
+            let invalid =
+                |e: &dyn std::fmt::Display| ServiceError::InvalidArgs(format!("{key}: {e}"));
+            let json: serde_json::Value = serde_json::from_str(&json).map_err(|e| invalid(&e))?;
+            let value = toml::Value::try_from(json).map_err(|e| invalid(&e))?;
+            parsed.push((key, value));
+        }
+        let _saving = self.saving.lock().await;
+        set_user_preferences(&self.config.paths, &parsed).map_err(config_error)?;
+        self.preferences_saved().await?;
+        Ok(parsed.iter().any(|(key, _)| needs_restart(key)))
+    }
+
+    pub async fn reset_preferences(&self) -> Result<(), ServiceError> {
+        let _saving = self.saving.lock().await;
+        reset_user_preferences(&self.config.paths).map_err(failed)?;
+        self.preferences_saved().await
+    }
+
+    /// Relê as preferências, aplica as da área de trabalho e avisa quem mostra.
+    async fn preferences_saved(&self) -> Result<(), ServiceError> {
+        let (prefs, _) = load_preferences(&self.config.paths).map_err(failed)?;
+        *self.prefs.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(prefs);
+        self.apply_autostart();
+        if let Some(mount_point) = self.with_account(|a| a.mount_point.clone()).await {
+            self.apply_sidebar(&mount_point);
+        }
+        if let Some(emitter) = self.emitter() {
+            let _ = Service::preferences_changed(&emitter).await;
+        }
+        Ok(())
+    }
+
+    /// `AutoStartOnLogin` em `~/.config/autostart`.
+    fn apply_autostart(&self) {
+        let enabled = self.prefs().auto_start_on_login;
+        if let Err(e) = desktop::set_autostart(&self.config.paths.config_home, enabled) {
+            tracing::warn!(erro = %e, "não deu para ajustar o início automático");
+        }
+    }
+
+    /// `ShowMountPointInSidebar` nos Locais do KDE.
+    fn apply_sidebar(&self, mount_point: &Path) {
+        let title = mount_point
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let enabled = self.prefs().show_mount_point_in_sidebar;
+        let places = self.config.paths.data_home.join("user-places.xbel");
+        if let Err(e) = desktop::set_sidebar_place(&places, mount_point, &title, enabled) {
+            tracing::warn!(erro = %e, "não deu para ajustar os Locais do Dolphin");
+        }
     }
 
     /// O motor da conta conectada.
@@ -272,7 +406,7 @@ impl Daemon {
             .config
             .browser
             .clone()
-            .or_else(|| self.prefs.default_web_browser.clone());
+            .or_else(|| self.prefs().default_web_browser.clone());
         Self::launch(target, launcher);
     }
 
@@ -292,7 +426,7 @@ impl Daemon {
 
     /// Mostra o aviso e o guarda no histórico, a menos que a família dele esteja desligada.
     async fn notify(&self, note: &Notification) {
-        if lock(&self.muted).contains(note.kind_id) {
+        if self.muted(note.kind_id) {
             return;
         }
         let id = self.history.push(note);
@@ -365,37 +499,40 @@ impl Daemon {
 
     /// Os avisos que o usuário pode desligar, com o estado de cada um.
     pub fn notification_settings(&self) -> Vec<NotificationSetting> {
-        let muted = lock(&self.muted);
         OPTIONAL_KINDS
             .iter()
             .map(|kind| NotificationSetting {
                 kind: kind.to_string(),
                 label: self.i18n.tr(&format!("notify-kind-{kind}"), &[]),
-                enabled: !muted.contains(*kind),
+                enabled: !self.muted(kind),
             })
             .collect()
     }
 
     /// Liga ou desliga uma família de aviso e grava a preferência `DoNotShowNotifications`.
-    pub fn set_notification_enabled(&self, kind: &str, enabled: bool) -> Result<(), ServiceError> {
+    pub async fn set_notification_enabled(
+        &self,
+        kind: &str,
+        enabled: bool,
+    ) -> Result<(), ServiceError> {
         if !OPTIONAL_KINDS.contains(&kind) {
             return Err(ServiceError::InvalidArgs(kind.into()));
         }
-        let mut muted = lock(&self.muted);
-        let mut wanted = muted.clone();
+        let _saving = self.saving.lock().await;
+        let mut muted: BTreeSet<String> = self
+            .prefs()
+            .do_not_show_notifications
+            .iter()
+            .cloned()
+            .collect();
         match enabled {
-            true => wanted.remove(kind),
-            false => wanted.insert(kind.into()),
+            true => muted.remove(kind),
+            false => muted.insert(kind.into()),
         };
-        let list = toml::Value::try_from(&wanted).map_err(failed)?;
-        save_user_preference(&self.config.paths, "DoNotShowNotifications", list).map_err(|e| {
-            match e {
-                ConfigError::Managed(key) => ServiceError::Managed(key),
-                e => failed(e),
-            }
-        })?;
-        *muted = wanted;
-        Ok(())
+        let list = toml::Value::try_from(&muted).map_err(failed)?;
+        save_user_preference(&self.config.paths, "DoNotShowNotifications", list)
+            .map_err(config_error)?;
+        self.preferences_saved().await
     }
 
     fn emitter(&self) -> Option<SignalEmitter<'static>> {
@@ -483,10 +620,47 @@ impl Daemon {
         Ok(email)
     }
 
+    /// Abre o motor fora das threads do runtime: com `ContentCachePath` novo, ele primeiro muda
+    /// o cache de lugar (que pode ser uma cópia entre discos), com um aviso no início e no fim.
+    async fn open_engine(
+        &self,
+        prefs: &Preferences,
+        email: &str,
+        client: DriveClient,
+    ) -> Result<Engine, ServiceError> {
+        let paths = self.config.paths.clone();
+        let moving = pending_cache_move(&paths, prefs, email);
+        // `stage`: `moving` (início) ou `moved` (fim, que substitui o do início).
+        let note = |stage: &str, to: &Path| Notification {
+            kind_id: "cache-moved",
+            summary: self.i18n.tr(&format!("notify-cache-{stage}-title"), &[]),
+            body: self.i18n.tr(
+                &format!("notify-cache-{stage}-body"),
+                &[("path", &to.display().to_string())],
+            ),
+            action: None,
+            replaces_key: Some("cache-moved".into()),
+        };
+        if let Some((_, to)) = &moving {
+            self.notify(&note("moving", to)).await;
+        }
+        let (prefs_owned, email_owned) = (prefs.clone(), email.to_string());
+        let engine = tokio::task::spawn_blocking(move || {
+            Engine::open(&paths, &prefs_owned, &email_owned, client)
+        })
+        .await
+        .map_err(failed)?
+        .map_err(failed)?;
+        if let Some((_, to)) = &moving {
+            self.notify(&note("moved", to)).await;
+        }
+        Ok(engine)
+    }
+
     /// `AllowedAccountsPattern` (expressão regular sobre o e-mail inteiro); sem padrão, toda
     /// conta é permitida. Um padrão inválido não deixa ninguém entrar.
     fn allowed(&self, email: &str) -> bool {
-        match self.prefs.allowed_accounts_pattern.as_deref() {
+        match self.prefs().allowed_accounts_pattern.as_deref() {
             None | Some("") => true,
             Some(pattern) => regex::Regex::new(&format!("^(?:{pattern})$"))
                 .inspect_err(|e| tracing::warn!(erro = %e, "AllowedAccountsPattern inválido"))
@@ -509,12 +683,12 @@ impl Daemon {
             Arc::new(access),
         )
         .with_backoff(config.backoff);
-        let engine = Engine::open(&config.paths, &self.prefs, &email, client).map_err(failed)?;
+        let prefs = self.prefs();
+        let engine = self.open_engine(&prefs, &email, client).await?;
         let engine = Arc::new(engine.with_intervals(config.intervals));
         engine.ensure_indexed().await.map_err(failed)?;
 
-        let preferred = self
-            .prefs
+        let preferred = prefs
             .default_mount_point
             .clone()
             .unwrap_or_else(|| config.home.join("Google Drive"));
@@ -544,6 +718,7 @@ impl Daemon {
             shutdown,
             _session: session,
         });
+        self.apply_sidebar(&mount_point);
         if moved {
             let path = mount_point.display().to_string();
             self.notify(&Notification {

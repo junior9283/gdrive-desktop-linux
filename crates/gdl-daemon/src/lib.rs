@@ -2,6 +2,7 @@
 
 pub mod daemon;
 pub mod dbus;
+pub mod desktop;
 pub mod history;
 pub mod mount;
 pub mod notify;

@@ -61,6 +61,9 @@ impl From<DriveError> for CacheError {
 
 pub type Result<T> = std::result::Result<T, CacheError>;
 
+/// Subpasta do cache com o conteúdo de cada item.
+pub(crate) const CONTENT_DIR: &str = "content";
+
 /// Espaço livre no disco do cache (injetável nos testes).
 pub trait FreeSpace: Send + Sync {
     fn free_kbytes(&self, dir: &Path) -> std::io::Result<u64>;
@@ -154,7 +157,7 @@ impl BlockCache {
         BlockCache(Arc::new(Inner {
             store,
             client,
-            content_dir: dir.join("content"),
+            content_dir: dir.join(CONTENT_DIR),
             dir,
             max_bytes: max_kbytes.map(|kb| kb * 1024),
             min_free_kbytes,

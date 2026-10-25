@@ -65,3 +65,7 @@ cli-status-offline = No connection
 cli-status-last-sync = Last sync: { $when }
 cli-status-errors = Failures: { $count }
 cli-not-pointer = { $path } isn't a Google Docs pointer.
+notify-cache-moving-title = Moving the cache
+notify-cache-moving-body = Downloaded files are moving to { $path }. Drive opens when this finishes.
+notify-cache-moved-title = Cache moved
+notify-cache-moved-body = Downloaded files are now in { $path }.

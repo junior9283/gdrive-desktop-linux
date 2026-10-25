@@ -5,7 +5,7 @@ use std::sync::Arc;
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
     AccountInfo, ActivityItem, NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary,
-    SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
+    Pref, SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -84,7 +84,7 @@ impl Service {
         kind: &str,
         enabled: bool,
     ) -> Result<(), ServiceError> {
-        self.daemon.set_notification_enabled(kind, enabled)
+        self.daemon.set_notification_enabled(kind, enabled).await
     }
 
     async fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError> {
@@ -167,6 +167,31 @@ impl Service {
         self.daemon.logout(mode, dir).await
     }
 
+    fn preferences(&self) -> Result<Vec<Pref>, ServiceError> {
+        self.daemon.preferences()
+    }
+
+    /// Grava as preferências (`chave`, valor em JSON) todas ou nenhuma; `true` se alguma só
+    /// vale depois de reiniciar.
+    async fn set_preferences(&self, values: Vec<(String, String)>) -> Result<bool, ServiceError> {
+        self.daemon.set_preferences(values).await
+    }
+
+    /// Volta ao padrão tudo o que o usuário mudou (a política continua valendo).
+    async fn reset_preferences(&self) -> Result<(), ServiceError> {
+        self.daemon.reset_preferences().await
+    }
+
+    /// Reinicia o serviço (para as preferências que pedem isso).
+    fn restart(&self) {
+        self.daemon.restart();
+    }
+
+    /// Encerra o serviço; a bandeja sai junto ao ver `Quitting`.
+    async fn quit(&self) {
+        self.daemon.quit().await;
+    }
+
     #[zbus(signal)]
     pub async fn login_finished(
         emitter: &SignalEmitter<'_>,
@@ -183,4 +208,10 @@ impl Service {
 
     #[zbus(signal)]
     pub async fn notifications_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn preferences_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn quitting(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 }

@@ -2,12 +2,14 @@
 //! serviço com pausa.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gdl_common::config::Preferences;
+use gdl_common::fs::write_atomic;
 use gdl_common::paths::{Paths, create_private_dir};
 use gdl_common::time::now_ms;
 use gdl_drive::client::DriveClient;
@@ -18,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Result;
 use crate::activity::{Activity, ActivityLog, ActivityRow, ActivityState, MAX_ROWS};
-use crate::cache::BlockCache;
+use crate::cache::{BlockCache, CONTENT_DIR};
 use crate::changes::ChangePoller;
 use crate::errors::{self, SyncError};
 use crate::events::{EngineEvent, SyncSummary};
@@ -66,6 +68,62 @@ pub struct Engine {
     pub(crate) activity: Arc<ActivityLog>,
 }
 
+/// Arquivo (na pasta de dados da conta) com a pasta de cache da última abertura, para saber se
+/// `ContentCachePath` mudou.
+const CACHE_DIR_FILE: &str = "cache_dir";
+
+/// Pasta de dados da conta (banco, `Lost and Found` e, por padrão, o cache).
+fn data_dir_of(paths: &Paths, account: &str) -> PathBuf {
+    paths.data_dir.join(account)
+}
+
+/// Pasta do cache da conta: `ContentCachePath/<conta>` quando configurada, senão a dos dados.
+fn cache_dir_of(paths: &Paths, prefs: &Preferences, account: &str) -> PathBuf {
+    prefs
+        .content_cache_path
+        .as_ref()
+        .map_or_else(|| data_dir_of(paths, account), |p| p.join(account))
+}
+
+/// A pasta de cache gravada na última abertura (a dos dados, se nunca foi gravada).
+fn last_cache_dir(data_dir: &Path) -> PathBuf {
+    std::fs::read(data_dir.join(CACHE_DIR_FILE))
+        .map(|bytes| PathBuf::from(std::ffi::OsString::from_vec(bytes)))
+        .unwrap_or_else(|_| data_dir.to_path_buf())
+}
+
+/// A mudança de lugar do cache que a próxima abertura do motor fará (de, para), quando
+/// `ContentCachePath` mudou desde a última e o cache antigo tem conteúdo.
+pub fn pending_cache_move(
+    paths: &Paths,
+    prefs: &Preferences,
+    account: &str,
+) -> Option<(PathBuf, PathBuf)> {
+    let old = last_cache_dir(&data_dir_of(paths, account));
+    let new = cache_dir_of(paths, prefs, account);
+    (old != new && old.join(CONTENT_DIR).is_dir()).then_some((old, new))
+}
+
+/// Move o conteúdo do cache: `rename` no mesmo disco; entre discos (ou com o destino já
+/// ocupado), cada arquivo que não pode ser renomeado é copiado e só então apagado da origem.
+fn move_content(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    create_private_dir(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let (src, dst) = {
+            let entry = entry?;
+            (entry.path(), to.join(entry.file_name()))
+        };
+        if std::fs::rename(&src, &dst).is_err() {
+            std::fs::copy(&src, &dst)?;
+            std::fs::remove_file(&src)?;
+        }
+    }
+    std::fs::remove_dir(from)
+}
+
 impl Engine {
     /// Abre o motor da conta `account`: banco, cache e `Lost and Found` ficam em
     /// `<dados>/<conta>` (o cache vai para `ContentCachePath/<conta>` quando configurado), e o
@@ -76,13 +134,18 @@ impl Engine {
         account: &str,
         client: DriveClient,
     ) -> Result<Engine> {
-        let data_dir = paths.data_dir.join(account);
-        let cache_dir: PathBuf = prefs
-            .content_cache_path
-            .as_ref()
-            .map_or_else(|| data_dir.clone(), |p| p.join(account));
+        let data_dir = data_dir_of(paths, account);
+        let cache_dir = cache_dir_of(paths, prefs, account);
         create_private_dir(&data_dir)?;
         create_private_dir(&cache_dir)?;
+        if let Some((from, _)) = pending_cache_move(paths, prefs, account) {
+            move_content(&from.join(CONTENT_DIR), &cache_dir.join(CONTENT_DIR))?;
+        }
+        let marker = data_dir.join(CACHE_DIR_FILE);
+        let cache_bytes = cache_dir.as_os_str().as_bytes();
+        if std::fs::read(&marker).ok().as_deref() != Some(cache_bytes) {
+            write_atomic(&marker, cache_bytes)?;
+        }
         let store = Arc::new(Store::open(&data_dir.join("metadata.db"))?);
         let client = Arc::new(client);
         let (events, _) = broadcast::channel(64);

@@ -1,0 +1,12 @@
+/target/
+**/*.rs.bk
+*.pdb
+/node_modules/
+/dist/
+.env
+*.log
+# Material de engenharia reversa e binários de terceiros nunca entram no repositório
+/re/
+*.exe
+*.dll
+*.sys

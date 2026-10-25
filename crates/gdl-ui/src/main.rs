@@ -1,6 +1,7 @@
 //! `gdrive-desktop-linux-ui`: as janelas do app (Tauri). Abre quando a bandeja ou o atalho pedem
 //! uma tela e sai quando a última janela fecha. Tudo o que mostra vem do serviço.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -81,16 +82,31 @@ fn open_screen(app: AppHandle, screen: String, arg: Option<String>) -> Result<()
     show_named(&app, &screen, arg.as_deref())
 }
 
+/// `xdg-open` (ou o navegador definido) sem travar a janela.
+async fn open_outside(target: String, browser: Option<PathBuf>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || browser::open(&target, browser.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// Abre no navegador o endereço de `name` (a tabela fixa de `gdl_common::links`), com o
 /// navegador de `DefaultWebBrowser` se o administrador definiu um.
 #[tauri::command]
 async fn open_link(name: String) -> Result<(), String> {
     let url = links::url(&name).ok_or_else(|| format!("link desconhecido: {name}"))?;
-    let browser = default_web_browser(&Paths::from_env());
-    tauri::async_runtime::spawn_blocking(move || browser::open(&url, browser.as_deref()))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+    open_outside(url, default_web_browser(&Paths::from_env())).await
+}
+
+/// Abre no gerenciador de arquivos a pasta do Drive: a montagem que o serviço informa (a página
+/// não escolhe o caminho).
+#[tauri::command]
+async fn open_mount(bridge: State<'_, Arc<Bridge>>) -> Result<(), String> {
+    let mount = bridge.mount_point().await.map_err(|e| e.message)?;
+    if mount.is_empty() {
+        return Err("sem a pasta do Drive".into());
+    }
+    open_outside(mount, None).await
 }
 
 /// Pede uma pasta ao usuário pelo portal (o seletor do próprio ambiente); `None` se ele cancelou.
@@ -160,6 +176,7 @@ fn main() -> ExitCode {
             close_window,
             open_screen,
             open_link,
+            open_mount,
             pick_folder
         ])
         .setup(move |app| {

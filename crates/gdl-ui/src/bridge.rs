@@ -151,8 +151,19 @@ impl Bridge {
             "quit" => j!(s.quit()),
             _ => return Err(UiError::new("UnknownMethod", method)),
         };
+        self.settle(reply)
+    }
+
+    /// A pasta do Drive (a montagem), direto do `Status` do serviço.
+    pub async fn mount_point(&self) -> Result<String, UiError> {
+        let status = self.settle(self.service.status().await)?;
+        Ok(status.mount_point)
+    }
+
+    /// Passa o erro para a página e anota se o serviço respondeu: qualquer resposta (mesmo um
+    /// erro do serviço) mostra que ele está no ar.
+    fn settle<T>(&self, reply: Result<T, ServiceError>) -> Result<T, UiError> {
         let reply = reply.map_err(ui_error);
-        // Qualquer resposta (mesmo um erro do serviço) mostra que ele está no ar.
         let down = matches!(&reply, Err(e) if e.name == UNAVAILABLE);
         self.up.store(!down, Ordering::Relaxed);
         reply

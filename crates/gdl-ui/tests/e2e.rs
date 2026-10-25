@@ -95,6 +95,13 @@ impl Session {
         panic!("{css}: esperava {wanted:?}, ficou {last:?}");
     }
 
+    /// Digita `text` no campo `css`.
+    async fn fill(&self, css: &str, text: &str) {
+        let id = self.find(css).await;
+        self.post(&format!("element/{id}/value"), json!({ "text": text }))
+            .await;
+    }
+
     async fn click(&self, css: &str) {
         let id = self.find(css).await;
         self.post(&format!("element/{id}/click"), json!({})).await;
@@ -253,6 +260,43 @@ async fn quit_asks_when_syncing() {
 
     assert!(question.contains("1"), "{question}");
     assert!(still_up);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn onboarding_logs_in_with_client_id() {
+    let service = service().await;
+    service.logout("discard", "").await.unwrap();
+    status_until(&service, "sem conta", |s| s.state == "signed-out").await;
+    let session = Session::open("onboarding").await;
+
+    // Sem o segredo, Continuar não sai do lugar.
+    session.fill("#client-id", "id-de-teste").await;
+    session.click(".continue").await;
+    let missing = session.text(".step-error").await;
+    session.fill("#client-secret", "segredo").await;
+    session.click(".continue").await;
+    session.click(".generate-link").await;
+    let mut url = Value::Null;
+    for _ in 0..100 {
+        url = session
+            .eval("return document.querySelector('.login-url')?.value || null")
+            .await;
+        if url.is_string() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // O teste faz o papel do navegador.
+    reqwest::get(url.as_str().expect("sem o link de login"))
+        .await
+        .unwrap();
+    let title = session.wait_text(".step-title", "computador").await;
+    let account = service.status().await.unwrap().account;
+
+    assert!(missing.contains("Client ID"), "{missing}");
+    assert!(title.contains("Seu Drive"), "{title}");
+    assert!(!account.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

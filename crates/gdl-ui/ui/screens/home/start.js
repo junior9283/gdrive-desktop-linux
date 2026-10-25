@@ -1,7 +1,7 @@
 // Início: cartões do que precisa de atenção, dos arquivos off-line, dos compartilhados, do estado
 // da sincronização e do Gemini (na web).
 
-import { el } from '../../components.js';
+import { card, el } from '../../components.js';
 import { headerFor, offlineText } from './model.js';
 
 // Os números do off-line e dos compartilhados (`shared_with_me` vai ao Drive) valem por um
@@ -19,16 +19,6 @@ function extras(api) {
     });
   }
   return cached.data;
-}
-
-function card(title, text, label, onclick) {
-  return el(
-    'section',
-    { class: 'card' },
-    el('h2', {}, title),
-    text,
-    label ? el('button', { class: 'text', onclick }, label) : [],
-  );
 }
 
 function attention({ status, t, api }) {

@@ -43,10 +43,18 @@ export function createApi(tauri) {
     openScreen: (screen, arg = null) => invoke('open_screen', { screen, arg }),
     // Um endereço da tabela fixa do Rust (`drive-web`, `storage`, `privacy`…).
     openLink: (name) => invoke('open_link', { name }),
+    // A pasta do Drive no gerenciador de arquivos.
+    openMount: () => invoke('open_mount'),
     // Uma pasta escolhida no seletor do sistema, ou `null`.
     pickFolder: (title) => invoke('pick_folder', { title }),
   };
   return api;
+}
+
+// O valor de `key` na lista de `preferences` (os valores vêm em JSON), ou `fallback`.
+export function prefValue(prefs, key, fallback = null) {
+  const pref = prefs.find((p) => p.key === key);
+  return pref ? JSON.parse(pref.value) ?? fallback : fallback;
 }
 
 export const api = createApi(() => globalThis.__TAURI_INTERNALS__);

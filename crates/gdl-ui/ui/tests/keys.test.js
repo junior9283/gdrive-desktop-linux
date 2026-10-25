@@ -29,6 +29,10 @@ test('toda chave usada nas telas existe nos dois idiomas', () => {
     'upload-queued', 'uploading', 'uploaded', 'upload-canceling', 'upload-canceled', 'upload-failed',
     'downloading', 'downloaded', 'trashing', 'trashed', 'restoring', 'restored',
   ]) used.add(`activity-${state}`);
+  for (const step of ['sign-in', 'waiting', 'intro', 'files', 'offline']) used.add(`onboarding-step-${step}`);
+  for (const block of ['stream', 'sync', 'offline']) {
+    used.add(`onboarding-intro-${block}-title`).add(`onboarding-intro-${block}-text`);
+  }
   for (const lang of ['pt-BR', 'en']) {
     const messages = locale(lang);
     const missing = [...used].filter((key) => !(key in messages));

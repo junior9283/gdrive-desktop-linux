@@ -1,13 +1,13 @@
 // Entrada de todas as janelas: carrega os textos, aplica o tema, mostra a tela da query e o aviso
 // de serviço fora do ar (que some sozinho quando ele volta, recarregando a tela).
 
-import { api } from './api.js';
+import { api, prefValue } from './api.js';
 import { el, icon } from './components.js';
 import { I18n, parseFtl } from './i18n.js';
 import { currentScreen } from './router.js';
 
 // As telas que já existem; as outras mostram o aviso de "em construção".
-const READY = new Set(['about', 'home']);
+const READY = new Set(['about', 'home', 'onboarding']);
 
 const screen = currentScreen(location.search);
 // Os textos e o código da tela chegam juntos.
@@ -43,7 +43,7 @@ async function render() {
 async function applyTheme() {
   try {
     const prefs = await api.call('preferences');
-    const theme = JSON.parse(prefs.find((p) => p.key === 'UITheme')?.value ?? 'null');
+    const theme = prefValue(prefs, 'UITheme');
     if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
     else delete document.documentElement.dataset.theme;
   } catch {

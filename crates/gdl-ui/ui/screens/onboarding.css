@@ -1,0 +1,116 @@
+/* Primeiro uso: a lista de passos à esquerda e o passo atual à direita. */
+
+.onboarding {
+  display: grid;
+  grid-template-columns: 168px 1fr;
+  min-height: 100vh;
+}
+
+.steps {
+  margin: 0;
+  padding: 24px 16px;
+  list-style: none;
+  counter-reset: step;
+  background: var(--md-surface-container-low);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font: var(--md-body-medium);
+  color: var(--md-on-surface-variant);
+}
+
+.steps li {
+  counter-increment: step;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.steps li::before {
+  content: counter(step);
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--md-outline);
+  font: var(--md-label-large);
+}
+
+.steps li.done::before,
+.steps li[aria-current='step']::before {
+  background: var(--md-primary);
+  border-color: var(--md-primary);
+  color: var(--md-on-primary);
+}
+
+.steps li[aria-current='step'] {
+  color: var(--md-on-surface);
+  font-weight: 600;
+}
+
+.step {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.step > .actions {
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.step > button.text,
+.step > button.tonal {
+  align-self: flex-start;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: var(--md-label-large);
+}
+
+.field input,
+.login-url {
+  font: var(--md-body-large);
+  padding: 10px 12px;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-shape-small);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+}
+
+.field input:focus,
+.login-url:focus {
+  outline: 2px solid var(--md-primary);
+  outline-offset: -1px;
+}
+
+.step-error {
+  margin: 0;
+  color: var(--md-error);
+}
+
+.step-error:empty {
+  display: none;
+}
+
+.blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.command {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--md-shape-small);
+  background: var(--md-surface-container-high);
+  font: var(--md-body-medium);
+  font-family: monospace;
+  white-space: pre-wrap;
+}

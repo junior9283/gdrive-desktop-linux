@@ -24,6 +24,17 @@ export function icon(name) {
   return svg;
 }
 
+// Um cartão: título, conteúdo e, se houver, um botão de texto.
+export function card(title, content, label, onclick) {
+  return el(
+    'section',
+    { class: 'card' },
+    el('h2', {}, title),
+    content,
+    label ? el('button', { class: 'text', onclick }, label) : [],
+  );
+}
+
 // Carrega a folha de estilo de uma tela (uma vez); resolve quando ela vale, para a tela não
 // aparecer sem estilo.
 export function stylesheet(href) {
@@ -118,8 +129,11 @@ export function toast(text) {
   setTimeout(() => note.remove(), 4000);
 }
 
+// O texto de um erro (do serviço ou do JavaScript).
+export const errorText = (error) => error?.message ?? String(error);
+
 // O erro de uma ação do usuário, num aviso.
-export const toastError = (error) => toast(error?.message ?? String(error));
+export const toastError = (error) => toast(errorText(error));
 
 // Espera `promise`; com sucesso chama `done` (com o resultado), com erro mostra o aviso.
 export const attempt = (promise, done) => promise.then(done).catch(toastError);

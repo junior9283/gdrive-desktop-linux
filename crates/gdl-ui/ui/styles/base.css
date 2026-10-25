@@ -205,6 +205,28 @@ button.filled:disabled {
   margin-top: 6px;
 }
 
+/* Texto secundário. */
+.meta,
+.empty {
+  color: var(--md-on-surface-variant);
+}
+
+/* Cartões. */
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  border-radius: var(--md-shape-medium);
+  background: var(--md-surface-container-low);
+}
+
+.card h2 {
+  font: var(--md-title-medium);
+  margin: 0;
+}
+
 /* Menus suspensos. */
 .menu {
   position: fixed;

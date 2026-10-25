@@ -7,7 +7,7 @@ const PROJECT: &str = "https://github.com/junior9283/gdrive-desktop-linux";
 pub const DRIVE_WEB: &str = "https://drive.google.com/drive/my-drive";
 
 /// O endereço de `name` (`drive-web`, `storage`, `gemini`, `project`, `privacy`, `terms`,
-/// `faq` ou `help`).
+/// `faq`, `help` ou `client-id-guide`).
 pub fn url(name: &str) -> Option<String> {
     let doc = |file: &str| format!("{PROJECT}/blob/main/docs/{file}");
     Some(match name {
@@ -19,6 +19,7 @@ pub fn url(name: &str) -> Option<String> {
         "terms" => doc("termos-de-uso.md"),
         "faq" => doc("perguntas-frequentes.md"),
         "help" => doc("ajuda.md"),
+        "client-id-guide" => doc("guia-client-id.md"),
         _ => return None,
     })
 }
@@ -38,7 +39,7 @@ mod tests {
     #[test]
     fn project_documents_exist() {
         let docs = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs"));
-        for name in ["privacy", "terms", "faq", "help"] {
+        for name in ["privacy", "terms", "faq", "help", "client-id-guide"] {
             let url = url(name).unwrap();
             let file = url.rsplit('/').next().unwrap();
             assert!(docs.join(file).is_file(), "{file}");

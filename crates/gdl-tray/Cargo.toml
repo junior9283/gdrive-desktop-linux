@@ -16,6 +16,8 @@ futures-util.workspace = true
 gdl-common.workspace = true
 gdl-ipc.workspace = true
 ksni.workspace = true
+ashpd.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["process", "signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true

@@ -85,9 +85,6 @@ fn nobody_there(e: &zbus::Error) -> bool {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use zbus::Guid;
-    use zbus::connection::Builder;
-
     use super::*;
 
     #[tokio::test]
@@ -102,20 +99,12 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
         // Um barramento ponto a ponto sem ninguém do outro lado servindo a janela.
-        let (a, b) = tokio::net::UnixStream::pair().unwrap();
-        let server = Builder::unix_stream(a)
-            .server(Guid::generate())
-            .unwrap()
-            .p2p()
-            .build();
-        let client = Builder::unix_stream(b).p2p().build();
-        let (server, client) = tokio::join!(server, client);
+        let (server, client) = crate::testutil::p2p_pair().await;
         // `object_server()` liga o servidor de objetos do outro lado, que passa a responder
         // "objeto desconhecido" (como o barramento real responde "nome sem dono"); sem ele, o
         // pedido ficaria sem resposta.
-        let server = server.unwrap();
         server.object_server();
-        let launcher = Launcher::new(client.unwrap(), program);
+        let launcher = Launcher::new(client, program);
         let start = std::time::Instant::now();
 
         launcher.open("errors").await;

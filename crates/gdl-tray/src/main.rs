@@ -10,11 +10,12 @@ use gdl_common::config::{Preferences, load_preferences};
 use gdl_common::i18n::I18n;
 use gdl_common::paths::Paths;
 use gdl_ipc::{BUS_NAME, ServiceProxy, Status};
+use gdl_tray::hotkey::{DEFAULT_TRIGGER, Hotkey};
 use gdl_tray::launcher::{Launcher, exe_dir};
 use gdl_tray::model::{Action, MenuItem, TrayView, is_signed_out};
 use ksni::TrayMethods;
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 use zbus::Connection;
 
@@ -186,6 +187,45 @@ impl App {
     }
 }
 
+/// O atalho que `SearchHotKey` pede (o padrão, sem a preferência).
+fn search_trigger() -> String {
+    preferences()
+        .and_then(|p| p.search_hot_key)
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_TRIGGER.into())
+}
+
+/// Mantém o atalho da pesquisa registrado no portal com o gatilho de `trigger`, refazendo o
+/// registro quando ele muda. Sem portal, só registra no log: a bandeja segue sem atalho.
+async fn keep_search_hotkey(
+    conn: Connection,
+    description: String,
+    mut trigger: watch::Receiver<String>,
+    actions: mpsc::UnboundedSender<Action>,
+) {
+    loop {
+        let wanted = trigger.borrow_and_update().clone();
+        let actions = actions.clone();
+        let on_press = move || {
+            let _ = actions.send(Action::Open("search"));
+        };
+        let hotkey = match Hotkey::register(&conn, &wanted, &description, on_press).await {
+            Ok(hotkey) => Some(hotkey),
+            Err(e) => {
+                tracing::info!(erro = %e, atalho = %wanted, "sem atalho global da pesquisa");
+                None
+            }
+        };
+        let changed = trigger.changed().await;
+        if let Some(hotkey) = hotkey {
+            hotkey.unregister().await;
+        }
+        if changed.is_err() {
+            return;
+        }
+    }
+}
+
 /// Um relógio que, se ficou desligado no `select!`, não entrega os toques perdidos de uma vez.
 fn ticker(every: Duration) -> tokio::time::Interval {
     let mut ticker = interval_at(Instant::now() + every, every);
@@ -197,6 +237,13 @@ async fn run() -> Result<(), Error> {
     let i18n = I18n::from_env();
     let conn = Connection::session().await?;
     let (actions, mut requested) = mpsc::unbounded_channel();
+    let (trigger, triggers) = watch::channel(search_trigger());
+    let hotkey = tokio::spawn(keep_search_hotkey(
+        conn.clone(),
+        i18n.tr("tray-hotkey-search", &[]),
+        triggers,
+        actions.clone(),
+    ));
     let view = TrayView::service_down(&i18n);
     let handle = Tray {
         view: view.clone(),
@@ -213,6 +260,7 @@ async fn run() -> Result<(), Error> {
     let service = ServiceProxy::new(&conn).await?;
     let mut changes = service.receive_status_changed().await?;
     let mut quitting = service.receive_quitting().await?;
+    let mut prefs_changed = service.receive_preferences_changed().await?;
     let mut app = App {
         launcher: Launcher::new(conn.clone(), Launcher::default_program()),
         i18n,
@@ -232,6 +280,16 @@ async fn run() -> Result<(), Error> {
             _ = retry.tick(), if app.status.is_none() => app.refresh().await,
             Some(_) = changes.next() => app.refresh().await,
             Some(_) = quitting.next() => break,
+            Some(_) = prefs_changed.next() => {
+                let wanted = search_trigger();
+                trigger.send_if_modified(|current| {
+                    let changed = *current != wanted;
+                    if changed {
+                        *current = wanted;
+                    }
+                    changed
+                });
+            }
             _ = frames.tick(), if app.view.animated() => {
                 app.handle.update(|t| t.frame = t.frame.wrapping_add(1)).await;
             }
@@ -244,6 +302,10 @@ async fn run() -> Result<(), Error> {
             _ = interrupt.recv() => break,
         }
     }
+    // Sem gatilho, a tarefa solta o atalho no portal e termina (com prazo: o registro pode
+    // estar esperando o usuário responder ao portal).
+    drop(trigger);
+    let _ = tokio::time::timeout(Duration::from_secs(2), hotkey).await;
     app.handle.shutdown().await;
     Ok(())
 }

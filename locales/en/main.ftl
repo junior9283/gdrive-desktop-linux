@@ -105,3 +105,4 @@ tray-about = About
 tray-quit = Quit
 tray-sign-in = Sign in
 tray-start-service = Start the service
+tray-hotkey-search = Open Google Drive search

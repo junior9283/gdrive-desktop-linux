@@ -965,11 +965,13 @@ dependencies = [
 name = "gdl-tray"
 version = "0.1.0"
 dependencies = [
+ "ashpd",
  "futures-util",
  "gdl-common",
  "gdl-ipc",
  "ksni",
  "tempfile",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",

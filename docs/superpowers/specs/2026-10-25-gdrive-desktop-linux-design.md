@@ -1,7 +1,7 @@
 # Design — gdrive-desktop-linux
 
 - **Data:** 25/10/2026
-- **Situação:** proposta, aguardando aprovação
+- **Situação:** aprovado pelo dono do projeto em 25/10/2026
 - **Referência de paridade:** Google Drive para computador, Windows, versão 133.0 (19/10/2026)
 
 ## 1. Intenção

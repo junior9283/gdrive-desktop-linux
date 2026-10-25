@@ -1,7 +1,7 @@
 // Desconectar a conta: sem pendências, uma confirmação; com arquivos não sincronizados, as três
 // escolhas (terminar e sair, mover para uma pasta, excluir com confirmação explícita).
 
-import { attempt, confirmDialog, el, toast } from '../../components.js';
+import { attempt, choice, confirmDialog, el, toast } from '../../components.js';
 
 // As três escolhas com pendências: `value()` dá `{ mode, dir }` e `ready()` diz se a escolha
 // está completa (a pasta escolhida, a exclusão confirmada).
@@ -17,8 +17,6 @@ function pendingChoices({ api, t }, count) {
     // A pasta chega depois do `change`: avisa o diálogo de novo.
     move.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  const choice = (input, label, ...extra) =>
-    el('label', { class: 'choice' }, input, el('span', {}, label, ...extra));
   const options = el('div', { class: 'choices' },
     choice(radio('finish'), t('disconnect-finish')),
     choice(move, t('disconnect-move', { count }), folder),

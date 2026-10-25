@@ -5,3 +5,4 @@ pub mod bridge;
 pub mod screens;
 pub mod single;
 pub mod strings;
+pub mod third_party;

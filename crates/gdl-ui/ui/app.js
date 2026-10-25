@@ -7,7 +7,7 @@ import { I18n, parseFtl } from './i18n.js';
 import { currentScreen } from './router.js';
 
 // As telas que já existem; as outras mostram o aviso de "em construção".
-const READY = new Set(['about', 'home', 'onboarding']);
+const READY = new Set(['about', 'home', 'notification-settings', 'onboarding', 'preferences']);
 
 const screen = currentScreen(location.search);
 // Os textos e o código da tela chegam juntos.

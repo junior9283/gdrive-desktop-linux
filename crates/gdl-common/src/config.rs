@@ -245,7 +245,7 @@ pub fn save_user_preference(
     key: &str,
     value: toml::Value,
 ) -> Result<(), ConfigError> {
-    set_user_preferences(paths, &[(key.into(), value)])
+    set_user_preferences(paths, &[(key.into(), Some(value))])
 }
 
 /// Esquemas aceitos em `ProxyServer`.
@@ -283,12 +283,13 @@ impl Layer {
     }
 }
 
-/// Grava várias preferências do usuário de uma vez. Recusa tudo, sem gravar nada, se alguma
-/// chave for desconhecida, definida pela política ou tiver valor de tipo errado: um valor
-/// inválido nunca chega ao arquivo (e nunca impede a próxima partida). A gravação é atômica.
+/// Grava várias preferências do usuário de uma vez; `None` apaga a chave (volta o padrão).
+/// Recusa tudo, sem gravar nada, se alguma chave for desconhecida, definida pela política ou
+/// tiver valor de tipo errado: um valor inválido nunca chega ao arquivo (e nunca impede a próxima
+/// partida). A gravação é atômica.
 pub fn set_user_preferences(
     paths: &Paths,
-    values: &[(String, toml::Value)],
+    values: &[(String, Option<toml::Value>)],
 ) -> Result<(), ConfigError> {
     let policy = read_table(&policies_path(paths))?;
     for (key, value) in values {
@@ -298,6 +299,7 @@ pub fn set_user_preferences(
         if policy.contains_key(key) {
             return Err(ConfigError::Managed(key.clone()));
         }
+        let Some(value) = value else { continue };
         let probe = toml::Table::from_iter([(key.clone(), value.clone())]);
         let invalid = |source| ConfigError::InvalidValue {
             key: key.clone(),
@@ -309,7 +311,12 @@ pub fn set_user_preferences(
 
     let path = user_path(paths);
     let mut table = read_table(&path)?;
-    table.extend(values.iter().cloned());
+    for (key, value) in values {
+        match value {
+            Some(value) => table.insert(key.clone(), value.clone()),
+            None => table.remove(key),
+        };
+    }
     write_atomic(&path, table.to_string().as_bytes()).map_err(|source| ConfigError::Io {
         path: path.clone(),
         source,
@@ -426,10 +433,10 @@ mod tests {
         let err = set_user_preferences(
             &paths,
             &[
-                ("UITheme".into(), toml::Value::String("dark".into())),
+                ("UITheme".into(), Some(toml::Value::String("dark".into()))),
                 (
                     "BandwidthRxKBPS".into(),
-                    toml::Value::String("rápido".into()),
+                    Some(toml::Value::String("rápido".into())),
                 ),
             ],
         )
@@ -440,8 +447,8 @@ mod tests {
         set_user_preferences(
             &paths,
             &[
-                ("UITheme".into(), toml::Value::String("dark".into())),
-                ("BandwidthRxKBPS".into(), toml::Value::Integer(300)),
+                ("UITheme".into(), Some(toml::Value::String("dark".into()))),
+                ("BandwidthRxKBPS".into(), Some(toml::Value::Integer(300))),
             ],
         )
         .unwrap();

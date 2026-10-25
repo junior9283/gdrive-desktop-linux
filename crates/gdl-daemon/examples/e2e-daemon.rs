@@ -1,5 +1,5 @@
 //! Serviço para os testes de ponta a ponta da janela (`scripts/e2e.sh`): o serviço de verdade
-//! sobre o Drive simulado, já com a conta conectada e alguns arquivos, publicado no barramento de
+//! sobre o Drive simulado, já com a conta conectada, alguns arquivos e uma política, publicado no barramento de
 //! sessão (o do `dbus-run-session` do script). Escreve `pronto` quando dá para usar e sai com
 //! SIGTERM.
 
@@ -34,8 +34,15 @@ async fn main() -> Result<(), Error> {
     let dir = tempfile::tempdir()?;
     let home = dir.path().join("home");
     std::fs::create_dir_all(&home)?;
+    let paths = Paths::for_test(dir.path());
+    // Uma preferência da política, para a tela mostrar "Gerenciado pelo administrador".
+    std::fs::create_dir_all(&paths.etc_dir)?;
+    std::fs::write(
+        paths.etc_dir.join("policies.toml"),
+        "AutoStartOnLogin = false\n",
+    )?;
     let daemon = Daemon::new(Config {
-        paths: Paths::for_test(dir.path()),
+        paths,
         lang: gdl_common::i18n::env_lang(),
         home,
         oauth: OAuthEndpoints {

@@ -340,7 +340,11 @@ impl Daemon {
             let invalid =
                 |e: &dyn std::fmt::Display| ServiceError::InvalidArgs(format!("{key}: {e}"));
             let json: serde_json::Value = serde_json::from_str(&json).map_err(|e| invalid(&e))?;
-            let value = toml::Value::try_from(json).map_err(|e| invalid(&e))?;
+            // `null` apaga a chave do usuário.
+            let value = (!json.is_null())
+                .then(|| toml::Value::try_from(json))
+                .transpose()
+                .map_err(|e| invalid(&e))?;
             parsed.push((key, value));
         }
         let _saving = self.saving.lock().await;

@@ -1,0 +1,13 @@
+/* Preferências de notificação: uma chave por família de aviso opcional. */
+
+.notification-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  min-height: 100vh;
+}
+
+.notification-settings .actions {
+  margin-top: auto;
+}

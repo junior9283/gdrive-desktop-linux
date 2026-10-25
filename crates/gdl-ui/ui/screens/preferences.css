@@ -1,0 +1,133 @@
+/* Preferências: abas no alto, o conteúdo da aba e o rodapé fixo com Cancelar e Salvar. */
+
+.preferences {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px 0;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.tabs button {
+  border-radius: 0;
+  padding: 12px 16px;
+  color: var(--md-on-surface-variant);
+  border-bottom: 3px solid transparent;
+}
+
+.tabs button[aria-selected='true'] {
+  color: var(--md-primary);
+  border-bottom-color: var(--md-primary);
+}
+
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tab-content h2 {
+  font: var(--md-title-medium);
+  margin: 8px 0 0;
+}
+
+.pref-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.pref-section > button {
+  align-self: flex-start;
+}
+
+.pref-section:last-child {
+  border-bottom: none;
+}
+
+/* Um `fieldset` por linha (desabilitado quando a política define a chave). */
+.pref {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}
+
+.pref .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pref input[type='text'],
+.pref input[type='number'],
+.pref select {
+  font: var(--md-body-large);
+  padding: 8px 12px;
+  min-width: 240px;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-shape-small);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+}
+
+.pref input:disabled,
+.pref select:disabled {
+  opacity: 0.6;
+}
+
+.path {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.row-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.field-error {
+  margin: 0;
+  color: var(--md-error);
+}
+
+.field-error:empty {
+  display: none;
+}
+
+.managed-note {
+  font: var(--md-label-large);
+}
+
+.restart-banner {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+
+.preferences > .actions {
+  align-items: center;
+  padding: 12px 24px;
+  border-top: 1px solid var(--md-outline-variant);
+}
+
+.pending-changes {
+  margin-right: auto;
+  color: var(--md-on-surface-variant);
+}
+

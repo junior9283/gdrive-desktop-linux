@@ -63,6 +63,12 @@ fn strings(strings: State<'_, UiStrings>) -> UiStrings {
     strings.inner().clone()
 }
 
+/// As bibliotecas que vão no app, em JSON (geradas no build pelo `build.rs`), para o "Sobre".
+#[tauri::command]
+fn third_party() -> &'static str {
+    include_str!(concat!(env!("OUT_DIR"), "/third-party.json"))
+}
+
 #[tauri::command]
 fn clipboard_write(app: AppHandle, text: String) -> Result<(), String> {
     // A área de transferência do GTK só pode ser usada na linha principal.
@@ -172,6 +178,7 @@ fn main() -> ExitCode {
         .invoke_handler(tauri::generate_handler![
             call,
             strings,
+            third_party,
             clipboard_write,
             close_window,
             open_screen,

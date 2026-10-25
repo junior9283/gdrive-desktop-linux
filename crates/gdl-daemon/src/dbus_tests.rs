@@ -888,3 +888,23 @@ async fn metered_pause_does_not_undo_user_pause() {
     wait_until("conexão vista como limitada", || h.daemon.is_metered()).await;
     assert!(!engine.is_paused());
 }
+
+/// `null` apaga a chave do usuário: volta a valer o padrão (a banda vazia é sem limite).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn null_value_removes_user_preference() {
+    let h = Harness::new().await;
+    h.proxy
+        .set_preferences(&[("BandwidthRxKBPS", "100"), ("UITheme", "\"light\"")])
+        .await
+        .unwrap();
+
+    h.proxy
+        .set_preferences(&[("BandwidthRxKBPS", "null")])
+        .await
+        .unwrap();
+
+    let prefs = h.proxy.preferences().await.unwrap();
+    let get = |key: &str| prefs.iter().find(|p| p.key == key).unwrap().value.clone();
+    assert_eq!(get("BandwidthRxKBPS"), "null");
+    assert_eq!(get("UITheme"), "\"light\"", "as outras ficam");
+}

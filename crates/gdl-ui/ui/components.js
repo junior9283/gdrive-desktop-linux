@@ -24,6 +24,11 @@ export function icon(name) {
   return svg;
 }
 
+// Uma caixa de seleção ou opção com o texto ao lado (`.choice`).
+export function choice(input, ...content) {
+  return el('label', { class: 'choice' }, input, el('span', {}, ...content));
+}
+
 // Um cartão: título, conteúdo e, se houver, um botão de texto.
 export function card(title, content, label, onclick) {
   return el(

@@ -38,6 +38,8 @@ export function createApi(tauri) {
 
     strings: () => invoke('strings'),
     version: () => invoke('plugin:app|version'),
+    // As bibliotecas que vão no app, `[{ name, version, license }]` (geradas no build).
+    thirdParty: async () => JSON.parse(await invoke('third_party')),
     copy: (text) => invoke('clipboard_write', { text }),
     closeWindow: () => invoke('close_window'),
     openScreen: (screen, arg = null) => invoke('open_screen', { screen, arg }),

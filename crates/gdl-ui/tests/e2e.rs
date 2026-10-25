@@ -95,9 +95,10 @@ impl Session {
         panic!("{css}: esperava {wanted:?}, ficou {last:?}");
     }
 
-    /// Digita `text` no campo `css`.
+    /// Troca o conteúdo do campo `css` por `text`.
     async fn fill(&self, css: &str, text: &str) {
         let id = self.find(css).await;
+        self.post(&format!("element/{id}/clear"), json!({})).await;
         self.post(&format!("element/{id}/value"), json!({ "text": text }))
             .await;
     }
@@ -319,4 +320,67 @@ async fn opens_in_under_1500ms() {
     assert!(!title.is_empty());
     assert!(!cards.is_empty());
     assert!(elapsed < Duration::from_millis(1500), "{elapsed:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn about_lists_third_party_licenses() {
+    let session = Session::open("about").await;
+
+    session.click(".third-party summary").await;
+    let list = session.wait_text(".licenses", "tauri").await;
+
+    assert!(list.contains("OFL-1.1"), "a fonte Inter");
+    assert!(list.contains("MIT"), "{list}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn managed_pref_is_locked() {
+    let session = Session::open("preferences").await;
+
+    session.click("[data-tab='settings']").await;
+    let row = session
+        .wait_text(
+            ".pref[data-key='AutoStartOnLogin']",
+            "Gerenciado pelo administrador",
+        )
+        .await;
+    let disabled = session
+        .eval("return document.querySelector(\".pref[data-key='AutoStartOnLogin'] input\").matches(':disabled')")
+        .await;
+    let free = session
+        .eval("return document.querySelector(\".pref[data-key='PauseSyncingOnMeteredConnection'] input\").matches(':disabled')")
+        .await;
+
+    assert!(row.contains("Iniciar"), "{row}");
+    assert_eq!(disabled, Value::Bool(true));
+    assert_eq!(free, Value::Bool(false));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn saving_restart_key_shows_restart_banner() {
+    let service = service().await;
+    let session = Session::open("preferences").await;
+
+    session.click("[data-tab='settings']").await;
+    session
+        .fill(".pref[data-key='ContentCacheMaxKbytes'] input", "2")
+        .await;
+    let pending = session.text(".pending-changes").await;
+    session.click(".save").await;
+    let banner = session
+        .wait_text(".restart-banner", "Reiniciar agora")
+        .await;
+    let prefs = service.preferences().await.unwrap();
+    service.reset_preferences().await.unwrap();
+
+    let saved = prefs
+        .iter()
+        .find(|p| p.key == "ContentCacheMaxKbytes")
+        .unwrap();
+    assert!(pending.contains("pendentes"), "{pending}");
+    assert!(banner.contains("reiniciar"), "{banner}");
+    assert_eq!(saved.value, (2u64 * 1024 * 1024).to_string());
 }

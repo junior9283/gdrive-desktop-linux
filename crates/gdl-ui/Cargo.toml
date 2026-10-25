@@ -27,6 +27,7 @@ url.workspace = true
 zbus.workspace = true
 
 [build-dependencies]
+serde_json.workspace = true
 tauri-build = "2.7"
 
 [dev-dependencies]

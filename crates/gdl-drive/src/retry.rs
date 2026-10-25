@@ -82,10 +82,16 @@ impl Backoff {
 }
 
 /// Repete `op` enquanto a falha for passageira, até `backoff.tries` tentativas.
-pub async fn with_backoff<T>(
+///
+/// `op` é uma closure comum que devolve a future, e não uma closure `async`: com `AsyncFnMut` o
+/// compilador não prova que a chamada é `Send`, e ela não poderia rodar numa tarefa do tokio.
+pub async fn with_backoff<T, Fut>(
     backoff: &Backoff,
-    mut op: impl AsyncFnMut() -> Result<T, DriveError>,
-) -> Result<T, DriveError> {
+    mut op: impl FnMut() -> Fut,
+) -> Result<T, DriveError>
+where
+    Fut: Future<Output = Result<T, DriveError>>,
+{
     let mut attempt = 0;
     loop {
         match op().await {
@@ -121,21 +127,24 @@ mod tests {
             tries: 5,
         };
         let mut calls = 0;
-        let r: Result<(), _> = with_backoff(&fast, async || {
+        let r: Result<(), _> = with_backoff(&fast, || {
             calls += 1;
-            Err(DriveError::NotFound)
+            async { Err(DriveError::NotFound) }
         })
         .await;
         assert!(matches!(r, Err(DriveError::NotFound)));
         assert_eq!(calls, 1);
 
         let mut calls = 0;
-        let r = with_backoff(&fast, async || {
+        let r = with_backoff(&fast, || {
             calls += 1;
-            if calls < 3 {
-                Err(DriveError::RateLimited)
-            } else {
-                Ok(calls)
+            let n = calls;
+            async move {
+                if n < 3 {
+                    Err(DriveError::RateLimited)
+                } else {
+                    Ok(n)
+                }
             }
         })
         .await;

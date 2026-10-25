@@ -150,19 +150,24 @@ impl DriveClient {
     }
 
     /// Chamada completa com recuo: pedido e leitura da resposta (`finish`) a cada tentativa.
-    async fn call<T>(
+    async fn call<T, Fut>(
         &self,
         build: impl Fn() -> RequestBuilder,
-        finish: impl AsyncFn(reqwest::Response) -> Result<T>,
-    ) -> Result<T> {
-        with_backoff(&self.backoff, async || {
-            finish(self.send_once(&build).await?).await
+        finish: impl Fn(reqwest::Response) -> Fut,
+    ) -> Result<T>
+    where
+        Fut: Future<Output = Result<T>>,
+    {
+        let (build, finish) = (&build, &finish);
+        with_backoff(&self.backoff, || async move {
+            finish(self.send_once(build).await?).await
         })
         .await
     }
 
     async fn json<T: DeserializeOwned>(&self, build: impl Fn() -> RequestBuilder) -> Result<T> {
-        self.call(build, async |resp| Ok(resp.json().await?)).await
+        self.call(build, |resp| async move { Ok(resp.json().await?) })
+            .await
     }
 
     async fn file(&self, build: impl Fn() -> RequestBuilder) -> Result<RemoteFile> {
@@ -201,8 +206,12 @@ impl DriveClient {
         })
     }
 
-    /// Todos os itens fora da lixeira, entregues página a página (1000 por página).
-    pub async fn list_all(&self, mut page: impl FnMut(Vec<RemoteFile>)) -> Result<()> {
+    /// Todos os itens fora da lixeira, entregues página a página (1000 por página). Para na
+    /// primeira página que `page` recusar.
+    pub async fn list_all<E: From<DriveError>>(
+        &self,
+        mut page: impl FnMut(Vec<RemoteFile>) -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Page {
@@ -227,7 +236,7 @@ impl DriveClient {
                     }
                 })
                 .await?;
-            page(p.files);
+            page(p.files)?;
             match p.next_page_token {
                 Some(t) => token = Some(t),
                 None => return Ok(()),
@@ -255,7 +264,7 @@ impl DriveClient {
                     .query(&[("alt", "media")])
                     .header(RANGE, &range)
             },
-            async |resp| {
+            |resp| async move {
                 // O Drive sempre atende intervalos; um 200 seria o arquivo inteiro na memória.
                 if resp.status() != StatusCode::PARTIAL_CONTENT {
                     return Err(DriveError::Protocol(format!(
@@ -494,27 +503,31 @@ impl DriveClient {
         size: u64,
         session: &dyn SessionSlot,
     ) -> Result<RemoteFile> {
-        let mut saved = session.load();
-        let file = with_backoff(&self.backoff, async || {
+        // Cópia em memória da sessão desta chamada (`session` pode não guardar nada).
+        let saved = &std::sync::Mutex::new(session.load());
+        let (method, url) = (&method, &url);
+        let file = with_backoff(&self.backoff, || async move {
+            let mut current = saved.load();
             let mut offset = 0;
-            if let Some(u) = saved.as_deref() {
+            if let Some(u) = current.as_deref() {
                 match self.session_state(u, size).await {
                     Ok(SessionState::Done(file)) => return Ok(*file),
                     Ok(SessionState::At(at)) => offset = at,
                     // Sessão expirada: abre outra.
-                    Err(DriveError::NotFound) => saved = None,
+                    Err(DriveError::NotFound) => current = None,
                     Err(e) => return Err(e),
                 }
             }
-            let session_url = match &mut saved {
+            let session_url = match current {
                 Some(u) => u,
                 None => {
-                    let u = self.open_session(&method, &url, meta, size).await?;
+                    let u = self.open_session(method, url, meta, size).await?;
                     session.store(Some(&u));
-                    saved.insert(u)
+                    saved.store(Some(&u));
+                    u
                 }
             };
-            self.send_from(session_url, src, offset, size).await
+            self.send_from(&session_url, src, offset, size).await
         })
         .await?;
         session.store(None);
@@ -648,6 +661,31 @@ mod tests {
         (path, data)
     }
 
+    /// O serviço roda cada chamada numa tarefa própria: as futures precisam ser `Send + 'static`.
+    #[test]
+    fn every_call_can_run_in_a_spawned_task() {
+        fn spawnable<F: std::future::Future + Send + 'static>(_: F) {}
+        let url: Url = "http://127.0.0.1:1/".parse().unwrap();
+        let c = Arc::new(DriveClient::new(
+            url.clone(),
+            url,
+            Arc::new(FixedToken(Mutex::new(String::new()))),
+        ));
+        macro_rules! spawnable_call {
+            ($($call:tt)*) => {{
+                let c = c.clone();
+                spawnable(async move { c.$($call)*.await })
+            }};
+        }
+        spawnable_call!(about());
+        spawnable_call!(list_all(|_| Ok::<_, DriveError>(())));
+        spawnable_call!(download_range("x", 0, 1));
+        spawnable_call!(changes("1"));
+        spawnable_call!(set_trashed("x", true));
+        spawnable_call!(create_folder("p", "n"));
+        spawnable_call!(upload_new("p", "n", Path::new("/nada"), 0, &NoSession));
+    }
+
     #[tokio::test]
     async fn about_reports_email_root_and_quota() {
         let fake = FakeDrive::start().await;
@@ -670,7 +708,10 @@ mod tests {
         fake.trash_remote(&gone);
         let mut pages = vec![];
         client(&fake)
-            .list_all(|page| pages.push(page.len()))
+            .list_all(|page| {
+                pages.push(page.len());
+                Ok::<_, DriveError>(())
+            })
             .await
             .unwrap();
         assert_eq!(pages, [1000, 1000, 500]);

@@ -3,8 +3,14 @@
 mod fs;
 mod inodes;
 mod layout;
+mod trash;
+mod write;
 
 pub use fs::{DriveFs, mount};
 
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod testutil;
+#[cfg(test)]
+mod write_tests;

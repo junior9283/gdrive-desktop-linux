@@ -65,7 +65,11 @@ async fn log_request(State(shared): Shr, req: Request, next: Next) -> Response {
         .uri()
         .path_and_query()
         .map_or_else(|| req.uri().path().to_string(), |pq| pq.to_string());
-    shared.state().request_log.push(line);
+    {
+        let mut state = shared.state();
+        state.request_log.push(line);
+        state.method_log.push(req.method().to_string());
+    }
     next.run(req).await
 }
 

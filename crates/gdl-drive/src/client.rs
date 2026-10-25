@@ -342,6 +342,12 @@ impl DriveClient {
         self.patch_meta(id, &meta, &query).await
     }
 
+    /// Troca a data de modificação (`touch`, cópia que preserva datas).
+    pub async fn set_modified_time(&self, id: &str, modified_ms: i64) -> Result<RemoteFile> {
+        self.patch_meta(id, &json!({ "modifiedTime": rfc3339(modified_ms) }), &[])
+            .await
+    }
+
     /// Manda para a lixeira do Drive (ou tira de lá). Nunca apaga de vez.
     pub async fn set_trashed(&self, id: &str, trashed: bool) -> Result<RemoteFile> {
         self.patch_meta(id, &json!({ "trashed": trashed }), &[])

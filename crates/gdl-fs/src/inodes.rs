@@ -13,6 +13,9 @@ const MOUNT_ROOT: u64 = 1;
 const TRASH: u64 = 2;
 const LOST_FOUND: u64 = 3;
 const SHORTCUT_TARGETS: u64 = 4;
+const KIO_TRASH: u64 = 5;
+const KIO_FILES: u64 = 6;
+const KIO_INFO: u64 = 7;
 /// Item do banco com inode `n` aparece como `n + ITEM_BASE`; o intervalo abaixo fica para os
 /// nós fixos.
 const ITEM_BASE: u64 = 16;
@@ -30,6 +33,12 @@ pub(crate) enum Node {
     TargetDir(ItemId),
     /// Arquivo dentro de `.Lost and Found`, pelo nome.
     LostFile(OsString),
+    /// `.Trash-<uid>`, a lixeira do KIO na raiz da montagem, e as pastas `files/` e `info/`.
+    KioTrash,
+    KioFiles,
+    KioInfo,
+    /// Um `.trashinfo` dentro de `info/`, pelo nome.
+    KioInfoFile(OsString),
     Item(Inode),
 }
 
@@ -51,6 +60,9 @@ impl Inodes {
             TRASH => Node::Trash,
             LOST_FOUND => Node::LostFound,
             SHORTCUT_TARGETS => Node::ShortcutTargets,
+            KIO_TRASH => Node::KioTrash,
+            KIO_FILES => Node::KioFiles,
+            KIO_INFO => Node::KioInfo,
             n if (ITEM_BASE..DYNAMIC_BASE).contains(&n) => Node::Item(Inode(n - ITEM_BASE)),
             n if n >= DYNAMIC_BASE => {
                 let index = usize::try_from(n - DYNAMIC_BASE).ok()?;
@@ -67,8 +79,11 @@ impl Inodes {
             Node::Trash => TRASH,
             Node::LostFound => LOST_FOUND,
             Node::ShortcutTargets => SHORTCUT_TARGETS,
+            Node::KioTrash => KIO_TRASH,
+            Node::KioFiles => KIO_FILES,
+            Node::KioInfo => KIO_INFO,
             Node::Item(inode) => inode.0 + ITEM_BASE,
-            Node::TargetDir(_) | Node::LostFile(_) => {
+            Node::TargetDir(_) | Node::LostFile(_) | Node::KioInfoFile(_) => {
                 let mut dynamic = lock(&self.dynamic);
                 if let Some(&n) = dynamic.numbers.get(node) {
                     return n;
@@ -98,6 +113,10 @@ mod tests {
             Node::Item(Inode(2)),
             Node::TargetDir(ItemId("alvo".into())),
             Node::LostFile("a.txt".into()),
+            Node::KioTrash,
+            Node::KioFiles,
+            Node::KioInfo,
+            Node::KioInfoFile("a.txt".into()),
         ];
         let numbers: Vec<u64> = nodes.iter().map(|n| inodes.ino(n)).collect();
         for (node, &n) in nodes.iter().zip(&numbers) {

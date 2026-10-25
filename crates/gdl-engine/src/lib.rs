@@ -7,6 +7,7 @@ pub mod events;
 pub mod gdocs;
 pub mod indexer;
 pub mod lost_found;
+pub mod ops;
 pub mod pins;
 #[cfg(test)]
 mod testutil;

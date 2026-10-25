@@ -1,10 +1,11 @@
 //! O `fuser::Filesystem` da montagem: navegação só pelo banco e leitura sob demanda pelo cache.
+//! A escrita fica em `write.rs`.
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::os::unix::fs::{FileExt, MetadataExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -12,8 +13,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use bytes::Bytes;
 use fuser::{
     BackgroundSession, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, FopenFlags,
-    Generation, INodeNo, LockOwner, MountOption, OpenAccMode, OpenFlags, ReplyAttr, ReplyData,
-    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs, ReplyXattr, Request,
+    Generation, INodeNo, LockOwner, MountOption, OpenAccMode, OpenFlags, RenameFlags, ReplyAttr,
+    ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs,
+    ReplyWrite, ReplyXattr, Request, TimeOrNow, WriteFlags,
 };
 use gdl_common::i18n::I18n;
 use gdl_engine::EngineError;
@@ -24,9 +26,10 @@ use gdl_store::{Inode, Item, ItemId, ItemKind};
 
 use crate::inodes::{Inodes, Node};
 use crate::layout::{Layout, XATTRS, item_perm, xattr_value};
+use crate::trash::KioTrash;
 
 /// Por quanto tempo o kernel pode guardar atributos e entradas sem perguntar de novo.
-const TTL: Duration = Duration::from_secs(1);
+pub(crate) const TTL: Duration = Duration::from_secs(1);
 const BLOCK_SIZE: u32 = 4096;
 /// Cota consultada no Drive vale por este tempo.
 const QUOTA_TTL: Duration = Duration::from_secs(60);
@@ -37,35 +40,51 @@ const UNLIMITED: u64 = 1 << 50;
 #[derive(Clone)]
 pub struct DriveFs(Arc<Inner>);
 
-struct Inner {
-    engine: Arc<Engine>,
+pub(crate) struct Inner {
+    pub(crate) engine: Arc<Engine>,
     layout: Layout,
     inodes: Inodes,
     uid: u32,
     gid: u32,
     /// Os pedidos do FUSE chegam em threads próprias; o motor roda neste runtime.
-    rt: tokio::runtime::Handle,
+    pub(crate) rt: tokio::runtime::Handle,
     mounted_at: SystemTime,
     next_handle: AtomicU64,
     /// Listagem tirada no `opendir`, servida aos pedaços pelos `readdir` seguintes.
     dirs: Mutex<HashMap<u64, Arc<Vec<Entry>>>>,
-    files: Mutex<HashMap<u64, OpenFile>>,
+    pub(crate) files: Mutex<HashMap<u64, OpenFile>>,
+    /// Itens abertos para escrita, pelo inode (o ID muda quando o temporário sobe).
+    pub(crate) writers: Mutex<HashMap<Inode, Writer>>,
+    pub(crate) kio: KioTrash,
     /// Quantas listagens de pasta foram montadas (para os testes contarem consultas).
     listings: AtomicUsize,
     quota: Mutex<Quota>,
 }
 
 /// Arquivo aberto: de onde vem o conteúdo, decidido uma vez no `open`.
-enum OpenFile {
+pub(crate) enum OpenFile {
     /// Conteúdo do Drive pelo cache, com o fim da última leitura para reconhecer leitura
     /// sequencial neste handle.
-    Drive {
-        id: ItemId,
-        last_end: Option<u64>,
-    },
+    Drive { id: ItemId, last_end: Option<u64> },
     /// Documento Google: o JSON do ponteiro, montado na abertura.
     Pointer(Bytes),
-    Lost(File),
+    /// Arquivo que só existe neste computador (`Lost and Found`, `.trashinfo` do KIO).
+    Local(Arc<File>),
+    /// Item do Drive aberto para escrita: o conteúdo inteiro está no arquivo local do cache.
+    Write { inode: Inode, file: Arc<File> },
+}
+
+/// Quem está escrevendo num item.
+#[derive(Default)]
+pub(crate) struct Writer {
+    pub handles: usize,
+    pub wrote: bool,
+    /// A abertura marcou o item como editado (estava sincronizado).
+    pub was_clean: bool,
+    /// Data escolhida pelo app com o arquivo aberto (`cp -p`); vale no fechamento.
+    pub mtime: Option<i64>,
+    /// Um registro da gravação por vez: `flush` de cópias do descritor (`fork`) chegam juntos.
+    pub serial: Arc<Mutex<()>>,
 }
 
 struct Entry {
@@ -86,7 +105,7 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn errno(e: impl Into<EngineError>) -> Errno {
+pub(crate) fn errno(e: impl Into<EngineError>) -> Errno {
     match e.into() {
         EngineError::NotFound | EngineError::Cache(CacheError::NotFound) => Errno::ENOENT,
         EngineError::Cache(CacheError::DiskFull) => Errno::ENOSPC,
@@ -94,7 +113,7 @@ fn errno(e: impl Into<EngineError>) -> Errno {
     }
 }
 
-fn time_of(ms: i64) -> SystemTime {
+pub(crate) fn time_of(ms: i64) -> SystemTime {
     UNIX_EPOCH + Duration::from_millis(ms.max(0) as u64)
 }
 
@@ -106,15 +125,15 @@ fn file_type(kind: &ItemKind) -> FileType {
     }
 }
 
-type Res<T> = std::result::Result<T, Errno>;
+pub(crate) type Res<T> = std::result::Result<T, Errno>;
 
 impl DriveFs {
     /// Precisa ser criado dentro do runtime do tokio onde o motor roda.
     pub fn new(engine: Arc<Engine>, i18n: I18n, uid: u32, gid: u32) -> DriveFs {
         DriveFs(Arc::new(Inner {
-            engine,
             layout: Layout::new(&i18n),
             inodes: Inodes::default(),
+            kio: KioTrash::new(uid, engine.data_dir()),
             uid,
             gid,
             rt: tokio::runtime::Handle::current(),
@@ -122,8 +141,10 @@ impl DriveFs {
             next_handle: AtomicU64::new(1),
             dirs: Mutex::default(),
             files: Mutex::default(),
+            writers: Mutex::default(),
             listings: AtomicUsize::new(0),
             quota: Mutex::default(),
+            engine,
         }))
     }
 
@@ -134,11 +155,11 @@ impl DriveFs {
 }
 
 impl Inner {
-    fn node(&self, ino: INodeNo) -> Res<Node> {
+    pub(crate) fn node(&self, ino: INodeNo) -> Res<Node> {
         self.inodes.node(ino.0).ok_or(Errno::ENOENT)
     }
 
-    fn item(&self, inode: Inode) -> Res<Item> {
+    pub(crate) fn item(&self, inode: Inode) -> Res<Item> {
         self.engine
             .store()
             .by_inode(inode)
@@ -146,7 +167,7 @@ impl Inner {
             .ok_or(Errno::ENOENT)
     }
 
-    fn item_by_id(&self, id: &ItemId) -> Res<Option<Item>> {
+    pub(crate) fn item_by_id(&self, id: &ItemId) -> Res<Option<Item>> {
         self.engine.store().get(id).map_err(errno)
     }
 
@@ -170,14 +191,28 @@ impl Inner {
         }
     }
 
+    /// Pastas virtuais são somente leitura, salvo a raiz (para `rename` para fora do Meu Drive
+    /// dar `EXDEV`, não `EACCES`; criar nela é recusado pelo app) e a lixeira do KIO, que o KIO
+    /// exige `0o700`.
     fn virtual_dir(&self, node: &Node) -> FileAttr {
+        let perm = match node {
+            Node::MountRoot => 0o755,
+            Node::KioTrash | Node::KioFiles | Node::KioInfo => 0o700,
+            _ => 0o555,
+        };
         let ino = self.inodes.ino(node);
-        self.attr(ino, FileType::Directory, 0, 0o555, self.mounted_at)
+        self.attr(ino, FileType::Directory, 0, perm, self.mounted_at)
     }
 
-    fn item_attr(&self, item: &Item) -> Res<FileAttr> {
+    pub(crate) fn item_attr(&self, item: &Item) -> Res<FileAttr> {
         let size = match &item.kind {
             ItemKind::Shortcut { .. } => self.link_target(item)?.len() as u64,
+            // Aberto para escrita: o banco só sabe o tamanho no fechamento, e o kernel usa este
+            // valor para posicionar o `O_APPEND`.
+            ItemKind::File if lock(&self.writers).contains_key(&item.inode) => {
+                std::fs::metadata(self.engine.cache().local_path(&item.id))
+                    .map_or(item.size, |m| m.len())
+            }
             _ => item.size,
         };
         let ino = self.inodes.ino(&Node::Item(item.inode));
@@ -185,26 +220,56 @@ impl Inner {
         Ok(self.attr(ino, kind, size, item_perm(item), time_of(item.modified_ms)))
     }
 
-    fn lost_path(&self, name: &OsStr) -> std::path::PathBuf {
+    pub(crate) fn lost_path(&self, name: &OsStr) -> PathBuf {
         self.engine.lost_and_found().dir().join(name)
     }
 
-    fn lost_attr(&self, name: &OsStr) -> Res<FileAttr> {
-        let meta = std::fs::metadata(self.lost_path(name)).map_err(Errno::from)?;
+    /// Caminho de um nó que é arquivo só local, com o modo dele.
+    pub(crate) fn local_file(&self, node: &Node) -> Option<(PathBuf, u16)> {
+        match node {
+            Node::LostFile(name) => Some((self.lost_path(name), 0o444)),
+            Node::KioInfoFile(name) => Some((self.kio.info_path(name), 0o600)),
+            _ => None,
+        }
+    }
+
+    /// Arquivo local que pode ser alterado; `EROFS` se for só leitura.
+    pub(crate) fn writable_local(&self, node: &Node) -> Res<Option<PathBuf>> {
+        match self.local_file(node) {
+            Some((_, perm)) if perm & 0o200 == 0 => Err(Errno::EROFS),
+            local => Ok(local.map(|(path, _)| path)),
+        }
+    }
+
+    fn local_attr(&self, node: &Node) -> Res<FileAttr> {
+        let (path, perm) = self.local_file(node).ok_or(Errno::ENOENT)?;
+        let meta = std::fs::metadata(path).map_err(Errno::from)?;
         if !meta.is_file() {
             return Err(Errno::ENOENT);
         }
-        let ino = self.inodes.ino(&Node::LostFile(name.into()));
         let mtime = meta.modified().unwrap_or(self.mounted_at);
-        Ok(self.attr(ino, FileType::RegularFile, meta.size(), 0o444, mtime))
+        let ino = self.inodes.ino(node);
+        Ok(self.attr(ino, FileType::RegularFile, meta.size(), perm, mtime))
     }
 
-    fn node_attr(&self, node: &Node) -> Res<FileAttr> {
+    pub(crate) fn node_attr(&self, node: &Node) -> Res<FileAttr> {
         match node {
             Node::Item(inode) => self.item_attr(&self.item(*inode)?),
-            Node::LostFile(name) => self.lost_attr(name),
+            Node::LostFile(_) | Node::KioInfoFile(_) => self.local_attr(node),
             _ => Ok(self.virtual_dir(node)),
         }
+    }
+
+    /// Item em `files/` da lixeira do KIO com este nome.
+    pub(crate) fn kio_item(&self, name: &OsStr) -> Res<Option<Item>> {
+        if let Some(id) = self.kio.remembered(name) {
+            return Ok(self.item_by_id(&id)?.filter(|i| i.trashed));
+        }
+        if !self.kio.has_info(name) {
+            return Ok(None);
+        }
+        let name = name.to_str().ok_or(Errno::ENOENT)?;
+        self.engine.store().lookup_trashed(name).map_err(errno)
     }
 
     /// Caminho relativo do atalho até `.shortcut-targets-by-id/<alvo>/<nome do alvo>`: sobe uma
@@ -240,11 +305,24 @@ impl Inner {
     fn lookup(&self, parent: &Node, name: &OsStr) -> Res<FileAttr> {
         let store = self.engine.store();
         let item = match parent {
+            Node::MountRoot if name == OsStr::new(&self.kio.name) => {
+                return Ok(self.virtual_dir(&Node::KioTrash));
+            }
             Node::MountRoot => {
                 let node = self.layout.lookup_root(name).ok_or(Errno::ENOENT)?;
                 return self.node_attr(&node);
             }
-            Node::LostFound => return self.lost_attr(name),
+            Node::LostFound => return self.local_attr(&Node::LostFile(name.into())),
+            Node::KioTrash => {
+                let node = match name.to_str() {
+                    Some("files") => Node::KioFiles,
+                    Some("info") => Node::KioInfo,
+                    _ => return Err(Errno::ENOENT),
+                };
+                return Ok(self.virtual_dir(&node));
+            }
+            Node::KioFiles => self.kio_item(name)?,
+            Node::KioInfo => return self.local_attr(&Node::KioInfoFile(name.into())),
             Node::ShortcutTargets => {
                 let id = ItemId(name.to_str().ok_or(Errno::ENOENT)?.into());
                 self.item_by_id(&id)?.ok_or(Errno::ENOENT)?;
@@ -262,7 +340,7 @@ impl Inner {
                     .lookup(&dir.id, name.to_str().ok_or(Errno::ENOENT)?)
                     .map_err(errno)?
             }
-            Node::LostFile(_) => return Err(Errno::ENOTDIR),
+            Node::LostFile(_) | Node::KioInfoFile(_) => return Err(Errno::ENOTDIR),
         };
         self.item_attr(&item.ok_or(Errno::ENOENT)?)
     }
@@ -312,20 +390,35 @@ impl Inner {
                 .into_iter()
                 .map(|i| self.item_entry(i))
                 .collect(),
-            Node::LostFound => self
-                .engine
-                .lost_and_found()
-                .list()
-                .into_iter()
-                .filter_map(|path| {
-                    let name = path.file_name()?.to_owned();
-                    Some(Entry {
-                        ino: self.inodes.ino(&Node::LostFile(name.clone())),
-                        kind: FileType::RegularFile,
-                        name,
-                    })
+            Node::LostFound => {
+                self.local_entries(self.engine.lost_and_found().list(), Node::LostFile)
+            }
+            Node::KioTrash => [("files", Node::KioFiles), ("info", Node::KioInfo)]
+                .map(|(name, node)| Entry {
+                    ino: self.inodes.ino(&node),
+                    kind: FileType::Directory,
+                    name: name.into(),
                 })
-                .collect(),
+                .into(),
+            Node::KioFiles => {
+                let mut entries = vec![];
+                for name in self.kio.candidate_names() {
+                    if let Some(item) = self.kio_item(&name)? {
+                        entries.push(Entry {
+                            name,
+                            ..self.item_entry(item)
+                        });
+                    }
+                }
+                entries
+            }
+            Node::KioInfo => {
+                let paths = std::fs::read_dir(self.kio.info_dir())
+                    .map_err(Errno::from)?
+                    .filter_map(|e| Some(e.ok()?.path()))
+                    .collect();
+                self.local_entries(paths, Node::KioInfoFile)
+            }
             // Os alvos aparecem só quando um atalho aponta para eles.
             Node::ShortcutTargets => vec![],
             Node::TargetDir(id) => self
@@ -341,37 +434,74 @@ impl Inner {
                 let children = self.engine.store().children(&dir.id).map_err(errno)?;
                 children.into_iter().map(|i| self.item_entry(i)).collect()
             }
-            Node::LostFile(_) => return Err(Errno::ENOTDIR),
+            Node::LostFile(_) | Node::KioInfoFile(_) => return Err(Errno::ENOTDIR),
         })
     }
 
-    fn handle(&self) -> u64 {
+    fn local_entries(&self, paths: Vec<PathBuf>, node: fn(OsString) -> Node) -> Vec<Entry> {
+        paths
+            .into_iter()
+            .filter_map(|path| {
+                let name = path.file_name()?.to_owned();
+                Some(Entry {
+                    ino: self.inodes.ino(&node(name.clone())),
+                    kind: FileType::RegularFile,
+                    name,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn handle(&self) -> u64 {
         self.next_handle.fetch_add(1, Ordering::Relaxed)
     }
 
-    fn open_file(&self, node: &Node) -> Res<OpenFile> {
-        match node {
-            Node::Item(inode) => {
-                let item = self.item(*inode)?;
-                match &item.kind {
-                    ItemKind::File => Ok(OpenFile::Drive {
-                        id: item.id,
-                        last_end: None,
-                    }),
-                    ItemKind::GoogleDoc { mime } => {
-                        let email = self.engine.account_email().map_err(errno)?;
-                        Ok(OpenFile::Pointer(
-                            pointer_json(&item.id.0, mime, &email).into(),
-                        ))
-                    }
-                    ItemKind::Folder => Err(Errno::EISDIR),
-                    ItemKind::Shortcut { .. } => Err(Errno::EINVAL),
-                }
+    fn open_file(&self, node: &Node, flags: OpenFlags) -> Res<OpenFile> {
+        let write = flags.acc_mode() != OpenAccMode::O_RDONLY;
+        let truncate = flags.0 & libc::O_TRUNC != 0;
+        let local = match write {
+            true => self.writable_local(node)?,
+            false => self.local_file(node).map(|(path, _)| path),
+        };
+        if let Some(path) = local {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(write)
+                .truncate(write && truncate)
+                .open(path)
+                .map_err(Errno::from)?;
+            return Ok(OpenFile::Local(Arc::new(file)));
+        }
+        let Node::Item(inode) = node else {
+            return Err(Errno::EISDIR);
+        };
+        let item = self.item(*inode)?;
+        match &item.kind {
+            ItemKind::File if write => Ok(OpenFile::Write {
+                inode: item.inode,
+                file: self.open_for_write(&item, truncate)?,
+            }),
+            // Com alguém escrevendo, o conteúdo atual é o do arquivo local.
+            ItemKind::File if lock(&self.writers).contains_key(&item.inode) => {
+                let path = self.engine.cache().local_path(&item.id);
+                Ok(OpenFile::Local(Arc::new(
+                    File::open(path).map_err(Errno::from)?,
+                )))
             }
-            Node::LostFile(name) => Ok(OpenFile::Lost(
-                File::open(self.lost_path(name)).map_err(Errno::from)?,
-            )),
-            _ => Err(Errno::EISDIR),
+            ItemKind::File => Ok(OpenFile::Drive {
+                id: item.id,
+                last_end: None,
+            }),
+            // Ponteiro de Documento Google não se edita.
+            ItemKind::GoogleDoc { .. } if write => Err(Errno::EPERM),
+            ItemKind::GoogleDoc { mime } => {
+                let email = self.engine.account_email().map_err(errno)?;
+                Ok(OpenFile::Pointer(
+                    pointer_json(&item.id.0, mime, &email).into(),
+                ))
+            }
+            ItemKind::Folder => Err(Errno::EISDIR),
+            ItemKind::Shortcut { .. } => Err(Errno::EINVAL),
         }
     }
 
@@ -384,7 +514,7 @@ impl Inner {
                 (id.clone(), sequential)
             }
             OpenFile::Pointer(json) => return Ok(slice(json, offset, size)),
-            OpenFile::Lost(file) => {
+            OpenFile::Local(file) | OpenFile::Write { file, .. } => {
                 let mut buf = vec![0; size as usize];
                 let n = file.read_at(&mut buf, offset).map_err(Errno::from)?;
                 buf.truncate(n);
@@ -458,11 +588,7 @@ impl Filesystem for DriveFs {
     }
 
     fn open(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
-        // A gravação chega com a T12; até lá a montagem só lê.
-        if flags.acc_mode() != OpenAccMode::O_RDONLY {
-            return reply.error(Errno::EROFS);
-        }
-        match self.0.node(ino).and_then(|n| self.0.open_file(&n)) {
+        match self.0.node(ino).and_then(|n| self.0.open_file(&n, flags)) {
             Ok(file) => {
                 let fh = self.0.handle();
                 lock(&self.0.files).insert(fh, file);
@@ -499,8 +625,161 @@ impl Filesystem for DriveFs {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        lock(&self.0.files).remove(&fh.0);
+        let file = lock(&self.0.files).remove(&fh.0);
+        if let Some(OpenFile::Write { inode, .. }) = file {
+            self.0.finish_writing(inode);
+        }
         reply.ok();
+    }
+
+    fn create(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+        _flags: i32,
+        reply: ReplyCreate,
+    ) {
+        match self.0.node(parent).and_then(|p| self.0.create(&p, name)) {
+            Ok((attr, file)) => {
+                let fh = self.0.handle();
+                lock(&self.0.files).insert(fh, file);
+                reply.created(
+                    &TTL,
+                    &attr,
+                    Generation(0),
+                    FileHandle(fh),
+                    FopenFlags::empty(),
+                );
+            }
+            Err(e) => reply.error(e),
+        }
+    }
+
+    fn write(
+        &self,
+        _req: &Request,
+        _ino: INodeNo,
+        fh: FileHandle,
+        offset: u64,
+        data: &[u8],
+        _write_flags: WriteFlags,
+        _flags: OpenFlags,
+        _lock_owner: Option<LockOwner>,
+        reply: ReplyWrite,
+    ) {
+        match self.0.write(fh.0, offset, data) {
+            Ok(n) => reply.written(n),
+            Err(e) => reply.error(e),
+        }
+    }
+
+    fn flush(
+        &self,
+        _req: &Request,
+        _ino: INodeNo,
+        fh: FileHandle,
+        _lock_owner: LockOwner,
+        reply: ReplyEmpty,
+    ) {
+        match self.0.flush(fh.0) {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e),
+        }
+    }
+
+    fn fsync(
+        &self,
+        _req: &Request,
+        _ino: INodeNo,
+        fh: FileHandle,
+        _datasync: bool,
+        reply: ReplyEmpty,
+    ) {
+        match self.0.fsync(fh.0) {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e),
+        }
+    }
+
+    fn setattr(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _mode: Option<u32>,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
+        size: Option<u64>,
+        _atime: Option<TimeOrNow>,
+        mtime: Option<TimeOrNow>,
+        _ctime: Option<SystemTime>,
+        fh: Option<FileHandle>,
+        _crtime: Option<SystemTime>,
+        _chgtime: Option<SystemTime>,
+        _bkuptime: Option<SystemTime>,
+        _flags: Option<fuser::BsdFileFlags>,
+        reply: ReplyAttr,
+    ) {
+        // `chmod` e `chown` são ignorados sem erro: o Drive não tem permissões Unix.
+        let result = self
+            .0
+            .node(ino)
+            .and_then(|node| self.0.setattr(&node, fh.map(|f| f.0), size, mtime));
+        match result {
+            Ok(attr) => reply.attr(&TTL, &attr),
+            Err(e) => reply.error(e),
+        }
+    }
+
+    fn mkdir(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+        reply: ReplyEntry,
+    ) {
+        match self.0.node(parent).and_then(|p| self.0.mkdir(&p, name)) {
+            Ok(attr) => reply.entry(&TTL, &attr, Generation(0)),
+            Err(e) => reply.error(e),
+        }
+    }
+
+    fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        match self.0.node(parent).and_then(|p| self.0.unlink(&p, name)) {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e),
+        }
+    }
+
+    fn rmdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        match self.0.node(parent).and_then(|p| self.0.rmdir(&p, name)) {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e),
+        }
+    }
+
+    fn rename(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        name: &OsStr,
+        newparent: INodeNo,
+        newname: &OsStr,
+        flags: RenameFlags,
+        reply: ReplyEmpty,
+    ) {
+        let result = self.0.node(parent).and_then(|from| {
+            let to = self.0.node(newparent)?;
+            self.0.rename(&from, name, &to, newname, flags)
+        });
+        match result {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e),
+        }
     }
 
     fn opendir(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {

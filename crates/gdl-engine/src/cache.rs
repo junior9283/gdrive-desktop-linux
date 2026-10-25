@@ -169,6 +169,17 @@ impl BlockCache {
         self.0.content_dir.join(&id.0)
     }
 
+    /// Abre o conteúdo local para leitura e escrita, criando o arquivo (e a pasta) se preciso.
+    pub fn open_local(&self, id: &ItemId, truncate: bool) -> std::io::Result<std::fs::File> {
+        std::fs::create_dir_all(&self.0.content_dir)?;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(truncate)
+            .open(self.local_path(id))
+    }
+
     fn items(&self) -> MutexGuard<'_, HashMap<ItemId, ItemState>> {
         self.0.items.lock().unwrap_or_else(|e| e.into_inner())
     }

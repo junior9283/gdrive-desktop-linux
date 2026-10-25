@@ -214,6 +214,23 @@ impl FakeDrive {
             .count() as u64
     }
 
+    /// Quantas requisições usaram o método HTTP `method` (`"DELETE"`, `"PATCH"`…).
+    pub fn requests_by_method(&self, method: &str) -> u64 {
+        let state = self.shared.state();
+        state.method_log.iter().filter(|m| *m == method).count() as u64
+    }
+
+    /// IDs dos itens fora da lixeira com o nome `name`.
+    pub fn find_live(&self, name: &str) -> Vec<String> {
+        let state = self.shared.state();
+        state
+            .files
+            .values()
+            .filter(|f| f.name == name && !f.trashed)
+            .map(|f| f.id.clone())
+            .collect()
+    }
+
     /// Emite um código de autorização ligado ao `code_challenge` (S256), como faria a tela de consentimento.
     pub fn issue_code(&self, code_challenge: &str) -> String {
         self.shared.state().issue_code(code_challenge)

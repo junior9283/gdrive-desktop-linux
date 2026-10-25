@@ -50,6 +50,17 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   atalhos do Drive viram links simbólicos; itens sem permissão de edição ficam somente leitura; sem
   internet, o que não foi baixado dá erro de E/S, mas as pastas continuam navegáveis. Atributos
   estendidos `user.gdl.id`, `user.gdl.state` e `user.gdl.web_url`; `df` mostra a cota do Drive.
+- Montagem FUSE (escrita): criar, editar e truncar arquivos (o envio começa 2 s depois do
+  fechamento, para temporários de editores nunca subirem; `fsync` envia na hora), salvar por
+  `rename` por cima mantendo o ID do Drive, criar pastas (sem internet, sobem depois), renomear e
+  mover entre pastas, data de modificação escolhida pelo app mantida (`cp -p`, `touch`), excluir
+  manda para a lixeira do Drive (nunca apaga de vez), a lixeira do Dolphin (`.Trash-<uid>`) é a
+  lixeira do Drive e esvaziá-la não apaga nada no Drive, copiar um ponteiro `.gdoc` cria um atalho
+  para o documento e trazer de volta um arquivo do `Lost and Found` o sobe como novo.
+
+### Corrigido
+- Um arquivo ou pasta criado aqui podia ser criado duas vezes no Drive quando a consulta de
+  mudanças o via antes do fim do envio.
 
 ## [0.0.1] - 2026-10-25
 

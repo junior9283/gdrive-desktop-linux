@@ -45,14 +45,15 @@ impl Default for Intervals {
 }
 
 pub struct Engine {
-    store: Arc<Store>,
-    client: Arc<DriveClient>,
-    cache: BlockCache,
+    pub(crate) store: Arc<Store>,
+    pub(crate) client: Arc<DriveClient>,
+    pub(crate) cache: BlockCache,
     pins: PinManager,
     uploads: UploadWorker,
     poller: ChangePoller,
     lost: LostAndFound,
-    events: broadcast::Sender<EngineEvent>,
+    data_dir: PathBuf,
+    pub(crate) events: broadcast::Sender<EngineEvent>,
     intervals: Intervals,
     paused: watch::Sender<bool>,
 }
@@ -97,6 +98,7 @@ impl Engine {
             ),
             poller: ChangePoller::new(store.clone(), client.clone(), events.clone()),
             lost,
+            data_dir,
             store,
             client,
             cache,
@@ -129,6 +131,11 @@ impl Engine {
 
     pub fn store(&self) -> &Arc<Store> {
         &self.store
+    }
+
+    /// Pasta de dados da conta (banco, `Lost and Found`, arquivos só locais).
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
     }
 
     pub fn lost_and_found(&self) -> &LostAndFound {

@@ -144,6 +144,16 @@ impl Store {
         )
     }
 
+    /// A pasta tem algum filho fora da lixeira.
+    pub fn has_children(&self, parent: &ItemId) -> Result<bool> {
+        let found = self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM items WHERE parent = ?1 AND trashed = 0)",
+            [&parent.0],
+            |r| r.get(0),
+        )?;
+        Ok(found)
+    }
+
     pub fn trashed(&self) -> Result<Vec<Item>> {
         self.query_items(select_items!("WHERE trashed = 1 ORDER BY local_name"), [])
     }
@@ -317,12 +327,12 @@ impl Store {
         id: &ItemId,
         from: LocalState,
         to: LocalState,
-    ) -> Result<()> {
-        self.conn().execute(
+    ) -> Result<bool> {
+        let changed = self.conn().execute(
             "UPDATE items SET local_state = ?3 WHERE id = ?1 AND local_state = ?2",
             params![id.0, from, to],
         )?;
-        Ok(())
+        Ok(changed == 1)
     }
 
     /// Adia o envio sem contar tentativa (sem internet, por exemplo).
@@ -352,6 +362,10 @@ impl Store {
     pub fn replace_id(&self, old: &ItemId, new: &ItemId) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // A consulta de mudanças pode ter trazido o item novo antes do fim do envio: essa cópia
+        // sai e o item local, com o inode que o kernel já conhece, fica com o ID.
+        purge_rows(&tx, new)?;
+        tx.execute("DELETE FROM inodes WHERE item_id = ?1", [&new.0])?;
         for sql in [
             "UPDATE items SET id = ?2 WHERE id = ?1",
             "UPDATE items SET parent = ?2 WHERE parent = ?1",
@@ -370,14 +384,29 @@ impl Store {
     pub fn remove_item(&self, id: &ItemId) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for sql in [
-            "DELETE FROM items WHERE id = ?1",
-            "DELETE FROM ranges WHERE item_id = ?1",
-            "DELETE FROM access WHERE item_id = ?1",
-            "DELETE FROM upload_queue WHERE item_id = ?1",
-        ] {
-            tx.execute(sql, [&id.0])?;
-        }
+        purge_rows(&tx, id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Salvar por cima: `dst` assume o inode de `src` (o nome agora aponta para o inode que o
+    /// kernel conhece) e `src` sai do banco. O inode antigo de `dst` é aposentado.
+    pub fn take_over(&self, src: &ItemId, dst: &ItemId) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let inode: u64 = tx.query_row("SELECT inode FROM items WHERE id = ?1", [&src.0], |r| {
+            r.get(0)
+        })?;
+        purge_rows(&tx, src)?;
+        tx.execute("DELETE FROM inodes WHERE item_id = ?1", [&dst.0])?;
+        tx.execute(
+            "UPDATE inodes SET item_id = ?1 WHERE item_id = ?2",
+            [&dst.0, &src.0],
+        )?;
+        tx.execute(
+            "UPDATE items SET inode = ?1 WHERE id = ?2",
+            params![inode, dst.0],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -506,6 +535,20 @@ fn item_from_row(r: &Row) -> Result<Item> {
         local_state: r.get(17)?,
         pin: r.get(18)?,
     })
+}
+
+/// Apaga as linhas do item em todas as tabelas, menos a do inode (cada chamador decide o destino
+/// dele).
+fn purge_rows(tx: &rusqlite::Transaction<'_>, id: &ItemId) -> Result<()> {
+    for sql in [
+        "DELETE FROM items WHERE id = ?1",
+        "DELETE FROM ranges WHERE item_id = ?1",
+        "DELETE FROM access WHERE item_id = ?1",
+        "DELETE FROM upload_queue WHERE item_id = ?1",
+    ] {
+        tx.execute(sql, [&id.0])?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -722,6 +765,51 @@ mod tests {
         store.finish_job(b).unwrap();
         let job = store.next_job(3000).unwrap().unwrap();
         assert_eq!((job.job_id, job.attempts), (a, 1));
+    }
+
+    #[test]
+    fn take_over_gives_destination_the_source_inode_and_drops_the_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let get = |name: &str| store.get(&id(name)).unwrap().unwrap();
+        store
+            .upsert_items(&[item("doc", Some("root")), item("tmp", Some("root"))])
+            .unwrap();
+        let (old_dst, src) = (get("doc").inode, get("tmp").inode);
+        store.ranges_add(&id("tmp"), 0, 10).unwrap();
+
+        store.take_over(&id("tmp"), &id("doc")).unwrap();
+
+        assert_eq!(get("doc").inode, src);
+        assert!(store.get(&id("tmp")).unwrap().is_none());
+        assert!(store.by_inode(old_dst).unwrap().is_none());
+        assert_eq!(store.by_inode(src).unwrap().unwrap().id, id("doc"));
+        assert!(store.ranges_missing(&id("tmp"), 0, 10).unwrap().len() == 1);
+        // O inode antigo do destino nunca volta.
+        store.upsert_item(&item("novo", Some("root"))).unwrap();
+        assert!(get("novo").inode.0 > src.0);
+    }
+
+    #[test]
+    fn replace_id_drops_the_copy_that_changes_already_brought() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .upsert_items(&[
+                item("local:1", Some("root")),
+                item("filho", Some("local:1")),
+            ])
+            .unwrap();
+        let inode = store.get(&id("local:1")).unwrap().unwrap().inode;
+        // A consulta de mudanças viu a pasta recém-criada antes do fim do envio.
+        store.upsert_item(&item("real", Some("root"))).unwrap();
+        let copy = store.get(&id("real")).unwrap().unwrap().inode;
+
+        store.replace_id(&id("local:1"), &id("real")).unwrap();
+
+        assert_eq!(store.get(&id("real")).unwrap().unwrap().inode, inode);
+        assert!(store.by_inode(copy).unwrap().is_none());
+        assert_eq!(store.children(&id("real")).unwrap().len(), 1);
     }
 
     #[test]

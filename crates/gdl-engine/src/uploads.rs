@@ -45,8 +45,12 @@ pub fn is_local_id(id: &ItemId) -> bool {
     id.0.starts_with(LOCAL_ID_PREFIX)
 }
 
+/// Espera entre fechar um arquivo e enviá-lo: editores gravam um temporário e o renomeiam por
+/// cima do original logo em seguida, e o temporário não deve subir.
+pub const UPLOAD_DELAY_MS: i64 = 2_000;
+
 /// Enfileira o envio do conteúdo local: `Create` para item só local, `Update` para os do Drive.
-fn enqueue_upload(store: &Store, id: &ItemId) -> Result<()> {
+pub(crate) fn enqueue_upload(store: &Store, id: &ItemId, next_try_ms: i64) -> Result<()> {
     let kind = if is_local_id(id) {
         UploadKind::Create
     } else {
@@ -55,7 +59,7 @@ fn enqueue_upload(store: &Store, id: &ItemId) -> Result<()> {
     store.enqueue(NewUploadJob {
         item: id.clone(),
         kind,
-        next_try_ms: 0,
+        next_try_ms,
     })?;
     Ok(())
 }
@@ -100,6 +104,17 @@ pub fn create_local_item(
 /// Registra que o conteúdo local (já gravado em `BlockCache::local_path`) tem `size` bytes e
 /// enfileira o envio. Chamado no último fechamento do arquivo ou num `fsync`.
 pub fn commit_local_write(store: &Store, id: &ItemId, size: u64, modified_ms: i64) -> Result<()> {
+    commit_local_write_at(store, id, size, modified_ms, 0)
+}
+
+/// Como `commit_local_write`, com o envio só a partir de `next_try_ms`.
+pub fn commit_local_write_at(
+    store: &Store,
+    id: &ItemId,
+    size: u64,
+    modified_ms: i64,
+    next_try_ms: i64,
+) -> Result<()> {
     let mut item = store.get(id)?.ok_or(EngineError::NotFound)?;
     item.size = size;
     item.modified_ms = modified_ms;
@@ -114,7 +129,7 @@ pub fn commit_local_write(store: &Store, id: &ItemId, size: u64, modified_ms: i6
         store.ranges_add(id, 0, size)?;
     }
     if !local_only {
-        enqueue_upload(store, id)?;
+        enqueue_upload(store, id, next_try_ms)?;
     }
     Ok(())
 }
@@ -128,7 +143,7 @@ pub fn recover_on_start(store: &Store, cache: &BlockCache) -> Result<usize> {
             tracing::warn!(item = %id.0, "edição pendente sem conteúdo local; nada a enviar");
             continue;
         }
-        enqueue_upload(store, &id)?;
+        enqueue_upload(store, &id, 0)?;
         queued += 1;
     }
     Ok(queued)

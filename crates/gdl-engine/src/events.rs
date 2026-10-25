@@ -23,8 +23,21 @@ pub enum LostReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineEvent {
     SyncStateChanged(SyncSummary),
-    LostAndFound { path: PathBuf, reason: LostReason },
+    LostAndFound {
+        path: PathBuf,
+        reason: LostReason,
+    },
     Offline(bool),
-    DiskLow { free_kb: u64 },
-    UploadFailed { name: String, error: String },
+    DiskLow {
+        free_kb: u64,
+    },
+    UploadFailed {
+        name: String,
+        error: String,
+    },
+    /// Um ponteiro de Documento Google copiado para uma pasta virou atalho (cópia de Documento
+    /// Google não é suportada).
+    CopiedAsShortcut {
+        name: String,
+    },
 }

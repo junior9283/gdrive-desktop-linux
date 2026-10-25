@@ -77,6 +77,50 @@ fn resolve(
     Some(merge(old, new))
 }
 
+/// Aplica ao banco mudanças vindas do Drive (da consulta periódica ou da resposta de uma operação
+/// feita pela montagem). Devolve quantas mudaram o banco.
+pub(crate) fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<usize> {
+    let email = store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
+    // Itens alterados nesta rodada (e se o cache deles cai), gravados juntos no fim. Uma
+    // segunda mudança do mesmo item parte do resultado da primeira.
+    let mut pending: BTreeMap<ItemId, (Item, bool)> = BTreeMap::new();
+    let mut parents = BTreeSet::new();
+    // Itens novos ou que mudaram de pasta: a fixação deles segue a pasta nova.
+    let mut moved = BTreeSet::new();
+    let mut applied = 0;
+    for change in changes {
+        let (id, new) = match change {
+            Change::Upsert(r) => (
+                ItemId(r.id.clone()),
+                Some(item_from_remote(*r, email.as_str())),
+            ),
+            Change::Removed(id) => (ItemId(id), None),
+        };
+        let (old, cleared) = match pending.remove(&id) {
+            Some((item, clear)) => (Some(item), clear),
+            None => (store.get(&id)?, false),
+        };
+        let old_parent = old.as_ref().map(|o| o.parent.clone());
+        if let Some((item, clear)) = resolve(old, new, &mut parents) {
+            if old_parent.as_ref() != Some(&item.parent) {
+                moved.insert(id.clone());
+            }
+            pending.insert(id, (item, clear || cleared));
+            applied += 1;
+        }
+    }
+    let items: Vec<Item> = pending.values().map(|(item, _)| item.clone()).collect();
+    store.upsert_items(&items)?;
+    for (id, _) in pending.iter().filter(|(_, (_, clear))| *clear) {
+        store.ranges_clear(id)?;
+    }
+    store.recompute_local_names(&parents)?;
+    for id in &moved {
+        reconcile(store, id)?;
+    }
+    Ok(applied)
+}
+
 impl ChangePoller {
     pub fn new(
         store: Arc<Store>,
@@ -106,45 +150,8 @@ impl ChangePoller {
             .store
             .kv_get(START_PAGE_TOKEN)?
             .ok_or(EngineError::NotIndexed)?;
-        let email = self.store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
         let (changes, next) = self.client.changes(&token).await?;
-        // Itens alterados nesta rodada (e se o cache deles cai), gravados juntos no fim. Uma
-        // segunda mudança do mesmo item parte do resultado da primeira.
-        let mut pending: BTreeMap<ItemId, (Item, bool)> = BTreeMap::new();
-        let mut parents = BTreeSet::new();
-        // Itens novos ou que mudaram de pasta: a fixação deles segue a pasta nova.
-        let mut moved = BTreeSet::new();
-        let mut applied = 0;
-        for change in changes {
-            let (id, new) = match change {
-                Change::Upsert(r) => (
-                    ItemId(r.id.clone()),
-                    Some(item_from_remote(*r, email.as_str())),
-                ),
-                Change::Removed(id) => (ItemId(id), None),
-            };
-            let (old, cleared) = match pending.remove(&id) {
-                Some((item, clear)) => (Some(item), clear),
-                None => (self.store.get(&id)?, false),
-            };
-            let old_parent = old.as_ref().map(|o| o.parent.clone());
-            if let Some((item, clear)) = resolve(old, new, &mut parents) {
-                if old_parent.as_ref() != Some(&item.parent) {
-                    moved.insert(id.clone());
-                }
-                pending.insert(id, (item, clear || cleared));
-                applied += 1;
-            }
-        }
-        let items: Vec<Item> = pending.values().map(|(item, _)| item.clone()).collect();
-        self.store.upsert_items(&items)?;
-        for (id, _) in pending.iter().filter(|(_, (_, clear))| *clear) {
-            self.store.ranges_clear(id)?;
-        }
-        self.store.recompute_local_names(&parents)?;
-        for id in &moved {
-            reconcile(&self.store, id)?;
-        }
+        let applied = apply_changes(&self.store, changes)?;
         if next != token {
             self.store.kv_set(START_PAGE_TOKEN, &next)?;
         }

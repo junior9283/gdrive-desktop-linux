@@ -1,7 +1,7 @@
 //! Documentos Google aparecem como pequenos arquivos-ponteiro (`.gdoc`, `.gsheet`…) que abrem o
 //! documento no navegador.
 
-pub use gdl_common::gdocs::pointer_extension;
+pub use gdl_common::gdocs::{is_pointer_extension, pointer_extension};
 
 /// Endereço que abre o documento no navegador.
 pub fn open_url(id: &str) -> String {
@@ -20,6 +20,12 @@ pub fn pointer_json(id: &str, mime: &str, email: &str) -> String {
         quoted(email),
         quoted(mime),
     )
+}
+
+/// `doc_id` de um ponteiro montado por `pointer_json`.
+pub fn pointer_doc_id(json: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(json).ok()?;
+    Some(value.get("doc_id")?.as_str()?.into())
 }
 
 #[cfg(test)]
@@ -50,6 +56,15 @@ mod tests {
         ] {
             assert_eq!(pointer_extension(mime), None, "{mime}");
         }
+    }
+
+    #[test]
+    fn doc_id_comes_back_from_the_pointer() {
+        let json = pointer_json("abc", "application/vnd.google-apps.document", "a@b.c");
+        assert_eq!(pointer_doc_id(json.as_bytes()).as_deref(), Some("abc"));
+        assert_eq!(pointer_doc_id(b"texto comum"), None);
+        assert!(is_pointer_extension("gsheet") && is_pointer_extension("glink"));
+        assert!(!is_pointer_extension("odt"));
     }
 
     #[test]

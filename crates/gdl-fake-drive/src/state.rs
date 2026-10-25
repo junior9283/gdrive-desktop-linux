@@ -126,6 +126,8 @@ pub(crate) struct State {
     pub(crate) token_lifetime_s: i64,
     pub(crate) fault: Option<StatusFault>,
     pub(crate) request_log: Vec<String>,
+    /// Método HTTP de cada requisição, na mesma ordem de `request_log`.
+    pub(crate) method_log: Vec<String>,
     pub(crate) downloaded: u64,
     /// Edição a aplicar depois de servir tantas páginas de `files.list`: (páginas, ID, conteúdo).
     pub(crate) edit_during_listing: Option<(u32, String, Vec<u8>)>,
@@ -147,6 +149,7 @@ impl State {
             token_lifetime_s: 3599,
             fault: None,
             request_log: vec![],
+            method_log: vec![],
             downloaded: 0,
             edit_during_listing: None,
         };

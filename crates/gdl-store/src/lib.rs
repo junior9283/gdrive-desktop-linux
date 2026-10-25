@@ -463,7 +463,6 @@ fn item_from_row(r: &Row) -> Result<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     fn id(s: &str) -> ItemId {
         ItemId(s.into())
@@ -840,20 +839,28 @@ mod tests {
     }
 
     #[test]
-    fn ten_thousand_children_list_under_100ms() {
+    fn listing_children_uses_the_parent_index_without_sorting_in_memory() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
         let items: Vec<_> = (0..10_000)
             .map(|n| item(&format!("f{n:05}"), Some("root")))
             .collect();
         store.upsert_items(&items).unwrap();
-        let start = Instant::now();
-        let children = store.children(&id("root")).unwrap();
-        let elapsed = start.elapsed();
-        assert_eq!(children.len(), 10_000);
-        assert!(
-            elapsed.as_millis() < 100,
-            "listar 10 mil itens levou {elapsed:?}"
+        assert_eq!(store.children(&id("root")).unwrap().len(), 10_000);
+        // Desempenho pelo plano da consulta, não pelo relógio: o tempo varia com a carga da máquina.
+        let sql = format!(
+            "EXPLAIN QUERY PLAN {}",
+            select_items!("WHERE parent = ?1 AND trashed = 0 ORDER BY local_name")
         );
+        let conn = store.conn();
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let plan: Vec<String> = stmt
+            .query_map(["root"], |r| r.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let plan = plan.join(" | ");
+        assert!(plan.contains("items_parent_name"), "plano: {plan}");
+        assert!(!plan.contains("TEMP B-TREE"), "plano: {plan}");
     }
 }

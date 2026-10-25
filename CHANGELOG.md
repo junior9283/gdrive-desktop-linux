@@ -16,6 +16,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   válidos no Linux (barra, `.`/`..`, limite de 255 bytes e nomes repetidos).
 - Diretórios XDG, preferências em três camadas (política do administrador > usuário > padrão),
   com as mesmas chaves do app original e gravação atômica, e textos em pt-BR e inglês (Fluent).
+- Banco SQLite por conta: metadados com revisão-base, inodes estáveis que nunca se repetem,
+  intervalos já baixados, fila de envios que sobrevive a reinícios e escolha do que liberar do cache.
 
 ## [0.0.1] - 2026-10-25
 

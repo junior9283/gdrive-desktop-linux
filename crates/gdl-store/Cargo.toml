@@ -8,6 +8,12 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+gdl-common.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

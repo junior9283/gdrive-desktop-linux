@@ -841,3 +841,50 @@ async fn cache_path_change_moves_cache_on_start() {
     let notes = h.proxy.notifications().await.unwrap();
     assert_eq!(notes[0].kind, "cache-moved", "{notes:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn metered_connection_pauses_and_resumes() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.proxy
+        .set_preferences(&[("PauseSyncingOnMeteredConnection", "true")])
+        .await
+        .unwrap();
+
+    // 3: "provavelmente limitada", que também conta.
+    h.set_metered(3).await;
+    status_until(&h, "pausa na conexão limitada", |s| s.paused).await;
+    h.set_metered(2).await;
+    status_until(&h, "retoma ao sair dela", |s| !s.paused).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn metered_pause_does_not_undo_user_pause() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.proxy
+        .set_preferences(&[("PauseSyncingOnMeteredConnection", "true")])
+        .await
+        .unwrap();
+
+    h.proxy.pause().await.unwrap();
+    let engine = h.daemon.engine().await.unwrap();
+    h.set_metered(1).await;
+    wait_until("conexão vista como limitada", || h.daemon.is_metered()).await;
+    h.set_metered(2).await;
+    wait_until("conexão vista como não limitada", || {
+        !h.daemon.is_metered()
+    })
+    .await;
+    assert!(engine.is_paused(), "a pausa do usuário continua");
+
+    // Sem a preferência, a conexão limitada não pausa.
+    h.proxy.resume().await.unwrap();
+    h.proxy
+        .set_preferences(&[("PauseSyncingOnMeteredConnection", "false")])
+        .await
+        .unwrap();
+    h.set_metered(1).await;
+    wait_until("conexão vista como limitada", || h.daemon.is_metered()).await;
+    assert!(!engine.is_paused());
+}

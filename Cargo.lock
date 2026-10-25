@@ -841,6 +841,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
+ "futures-util",
  "gdl-common",
  "gdl-fake-drive",
  "oo7",

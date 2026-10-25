@@ -52,6 +52,13 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         .build()
         .await?;
     daemon.attach(conn.clone()).await?;
+    // A conexão limitada vem do NetworkManager, no barramento do sistema.
+    match zbus::Connection::system().await {
+        Ok(system) => daemon.watch_metered(system),
+        Err(e) => {
+            tracing::info!(erro = %e, "sem barramento do sistema: a conexão limitada não pausa")
+        }
+    }
     // A reconexão (que pode indexar o Drive inteiro) corre em paralelo à espera do SIGTERM.
     let mut term = signal(SignalKind::terminate())?;
     let resume = tokio::spawn({

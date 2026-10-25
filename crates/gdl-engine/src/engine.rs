@@ -63,9 +63,19 @@ pub struct Engine {
     pub(crate) events: broadcast::Sender<EngineEvent>,
     intervals: Intervals,
     paused: watch::Sender<bool>,
+    /// Por que está pausado; `paused` é a soma dos motivos.
+    pause_reasons: std::sync::Mutex<PauseReasons>,
     /// Já avisou desta pausa que uma gravação espera a sincronização voltar.
     saved_while_paused: AtomicBool,
     pub(crate) activity: Arc<ActivityLog>,
+}
+
+/// Motivos da pausa da sincronização.
+#[derive(Debug, Default)]
+struct PauseReasons {
+    user: bool,
+    /// `PauseSyncingOnMeteredConnection` numa conexão limitada.
+    metered: bool,
 }
 
 /// Arquivo (na pasta de dados da conta) com a pasta de cache da última abertura, para saber se
@@ -180,6 +190,7 @@ impl Engine {
             events,
             intervals: Intervals::default(),
             paused: watch::Sender::new(false),
+            pause_reasons: Default::default(),
             saved_while_paused: AtomicBool::new(false),
         })
     }
@@ -291,11 +302,24 @@ impl Engine {
     /// Pausa a sincronização: mudanças, envios e downloads de fixados param; abrir arquivos
     /// continua baixando sob demanda.
     pub fn pause(&self) {
-        self.set_paused(true);
+        self.update_pause(|r| r.user = true);
     }
 
+    /// Retoma, inclusive o que a conexão limitada pausou: a decisão do usuário vale mais.
     pub fn resume(&self) {
-        self.set_paused(false);
+        self.update_pause(|r| *r = PauseReasons::default());
+    }
+
+    /// Pausa (ou desfaz) pela conexão limitada; desfazer não retoma uma pausa do usuário.
+    pub fn set_metered_pause(&self, on: bool) {
+        self.update_pause(|r| r.metered = on);
+    }
+
+    fn update_pause(&self, change: impl FnOnce(&mut PauseReasons)) {
+        let mut reasons = self.pause_reasons.lock().unwrap_or_else(|e| e.into_inner());
+        change(&mut reasons);
+        // Ainda com a trava: duas mudanças seguidas não publicam fora de ordem.
+        self.set_paused(reasons.user || reasons.metered);
     }
 
     pub fn is_paused(&self) -> bool {
@@ -464,6 +488,30 @@ mod tests {
             assert_eq!(mode(&dir), 0o700, "{}", dir.display());
         }
         assert_eq!(mode(&engine.cache.local_path(&id)), 0o600);
+    }
+
+    #[tokio::test]
+    async fn metered_pause_keeps_user_pause_and_yields_to_user_resume() {
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let (engine, _tmp) = crate::testutil::indexed_engine(&fake).await;
+
+        engine.pause();
+        engine.set_metered_pause(true);
+        engine.set_metered_pause(false);
+        assert!(engine.is_paused(), "a pausa do usuário continua");
+
+        engine.resume();
+        engine.set_metered_pause(true);
+        assert!(engine.is_paused());
+        engine.resume();
+        assert!(
+            !engine.is_paused(),
+            "retomar pelo usuário vence a conexão limitada"
+        );
+
+        engine.set_metered_pause(true);
+        engine.set_metered_pause(false);
+        assert!(!engine.is_paused());
     }
 
     #[tokio::test]

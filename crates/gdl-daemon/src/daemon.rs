@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
@@ -14,7 +15,8 @@ use gdl_common::config::{
 use gdl_common::i18n::I18n;
 use gdl_common::names::{create_unique, split_ext};
 use gdl_common::paths::Paths;
-use gdl_drive::client::{Backoff, DriveClient, DriveError, FOLDER_MIME, SHORTCUT_MIME};
+use gdl_drive::Network;
+use gdl_drive::client::{Backoff, Bandwidth, DriveClient, DriveError, FOLDER_MIME, SHORTCUT_MIME};
 use gdl_drive::oauth::{AccessTokens, LoginFlow, OAuthEndpoints};
 use gdl_drive::token_store::{ClientCredentials, TokenSet, TokenStore};
 use gdl_engine::EngineError;
@@ -40,6 +42,7 @@ use gdl_ipc::{
 use crate::dbus::Service;
 use crate::desktop;
 use crate::history::History;
+use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
     self, Notification, Notifier, OPEN_CANCELED, OPEN_LOST_FOUND, OPTIONAL_KINDS, RESUME,
@@ -221,12 +224,35 @@ pub struct Daemon {
     notifier: OnceLock<Notifier>,
     history: History,
     login: Mutex<Option<JoinHandle<()>>>,
+    /// Limites de banda, trocados na hora pelas preferências.
+    bandwidth: Arc<Bandwidth>,
+    /// A conexão atual é limitada (NetworkManager).
+    metered: AtomicBool,
+}
+
+/// `DirectConnection` vence `ProxyServer`; sem nenhum, o proxy do sistema.
+fn network_of(prefs: &Preferences) -> Network {
+    let proxy = prefs
+        .proxy_server
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty());
+    match (prefs.direct_connection, proxy) {
+        (true, _) => Network::Direct,
+        (false, Some(url)) => Network::Proxy(url.into()),
+        (false, None) => Network::System,
+    }
 }
 
 impl Daemon {
     pub fn new(config: Config) -> Result<Arc<Daemon>, ConfigError> {
         let (prefs, _) = load_preferences(&config.paths)?;
+        gdl_drive::set_network(network_of(&prefs));
+        let bandwidth = Arc::new(Bandwidth::default());
+        apply_bandwidth(&bandwidth, &prefs);
         Ok(Arc::new(Daemon {
+            bandwidth,
+            metered: AtomicBool::new(false),
             i18n: I18n::new(&config.lang),
             history: History::load(config.paths.state_dir.join(HISTORY_FILE)),
             prefs: RwLock::new(Arc::new(prefs)),
@@ -337,7 +363,15 @@ impl Daemon {
     /// Relê as preferências, aplica as da área de trabalho e avisa quem mostra.
     async fn preferences_saved(&self) -> Result<(), ServiceError> {
         let (prefs, _) = load_preferences(&self.config.paths).map_err(failed)?;
+        apply_bandwidth(&self.bandwidth, &prefs);
+        // Só a mudança desta preferência reavalia a pausa: mexer em outra não desfaz uma
+        // retomada do usuário.
+        let metered_changed = self.prefs().pause_syncing_on_metered_connection
+            != prefs.pause_syncing_on_metered_connection;
         *self.prefs.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(prefs);
+        if metered_changed {
+            self.apply_metered(self.is_metered()).await;
+        }
         self.apply_autostart();
         if let Some(mount_point) = self.with_account(|a| a.mount_point.clone()).await {
             self.apply_sidebar(&mount_point);
@@ -346,6 +380,50 @@ impl Daemon {
             let _ = Service::preferences_changed(&emitter).await;
         }
         Ok(())
+    }
+
+    /// Observa a conexão limitada no NetworkManager de `conn` (o barramento do sistema). Sem
+    /// NetworkManager, só registra no log.
+    pub fn watch_metered(self: &Arc<Self>, conn: Connection) {
+        let daemon = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let watch = async {
+                let proxy = NetworkManagerProxy::new(&conn).await?;
+                let mut changes = proxy.receive_metered_changed().await;
+                let initial = proxy.metered().await?;
+                if let Some(daemon) = daemon.upgrade() {
+                    daemon.set_metered(is_metered(initial)).await;
+                }
+                while let Some(change) = changes.next().await {
+                    let (Some(daemon), Ok(value)) = (daemon.upgrade(), change.get().await) else {
+                        break;
+                    };
+                    daemon.set_metered(is_metered(value)).await;
+                }
+                zbus::Result::Ok(())
+            };
+            if let Err(e) = watch.await {
+                tracing::info!(erro = %e, "sem NetworkManager: a conexão limitada não pausa");
+            }
+        });
+    }
+
+    pub(crate) fn is_metered(&self) -> bool {
+        self.metered.load(Ordering::SeqCst)
+    }
+
+    /// Guarda o estado novo só depois de aplicá-lo: quem vê `is_metered` já vê a pausa feita.
+    async fn set_metered(&self, metered: bool) {
+        self.apply_metered(metered).await;
+        self.metered.store(metered, Ordering::SeqCst);
+    }
+
+    /// Pausa na conexão limitada (com `PauseSyncingOnMeteredConnection`); o motor só retoma ao
+    /// sair dela se a pausa não for do usuário.
+    async fn apply_metered(&self, metered: bool) {
+        if let Some(engine) = self.engine().await {
+            engine.set_metered_pause(metered && self.prefs().pause_syncing_on_metered_connection);
+        }
     }
 
     /// `AutoStartOnLogin` em `~/.config/autostart`.
@@ -682,7 +760,8 @@ impl Daemon {
             config.api.upload.clone(),
             Arc::new(access),
         )
-        .with_backoff(config.backoff);
+        .with_backoff(config.backoff)
+        .with_bandwidth(self.bandwidth.clone());
         let prefs = self.prefs();
         let engine = self.open_engine(&prefs, &email, client).await?;
         let engine = Arc::new(engine.with_intervals(config.intervals));
@@ -719,6 +798,7 @@ impl Daemon {
             _session: session,
         });
         self.apply_sidebar(&mount_point);
+        self.apply_metered(self.is_metered()).await;
         if moved {
             let path = mount_point.display().to_string();
             self.notify(&Notification {
@@ -1296,4 +1376,10 @@ fn copy_unique(src: &mut std::fs::File, dir: &Path, name: &str) -> std::io::Resu
     })?;
     std::io::copy(src, &mut dst)?;
     Ok(())
+}
+
+/// `BandwidthRxKBPS`/`BandwidthTxKBPS` nos baldes.
+fn apply_bandwidth(bandwidth: &Bandwidth, prefs: &Preferences) {
+    bandwidth.rx.set_rate(prefs.bandwidth_rx_kbps);
+    bandwidth.tx.set_rate(prefs.bandwidth_tx_kbps);
 }

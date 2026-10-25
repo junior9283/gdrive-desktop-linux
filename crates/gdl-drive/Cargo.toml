@@ -12,6 +12,7 @@ async-trait.workspace = true
 axum.workspace = true
 base64.workspace = true
 bytes.workspace = true
+futures-util.workspace = true
 gdl-common.workspace = true
 oo7.workspace = true
 rand.workspace = true

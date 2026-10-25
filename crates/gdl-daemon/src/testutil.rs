@@ -18,6 +18,7 @@ use zbus::{Connection, Guid};
 
 use crate::daemon::{Api, Config, Daemon};
 use crate::dbus::Service;
+use crate::metered::NETWORK_MANAGER_PATH;
 use crate::notify::NOTIFICATIONS_PATH;
 use gdl_ipc::{OBJECT_PATH, ServiceProxy};
 
@@ -66,6 +67,20 @@ impl FakeNotifications {
     }
 }
 
+/// NetworkManager falso: só a propriedade `Metered` (NMMetered).
+#[derive(Default)]
+pub(crate) struct FakeNetworkManager {
+    metered: u32,
+}
+
+#[zbus::interface(name = "org.freedesktop.NetworkManager")]
+impl FakeNetworkManager {
+    #[zbus(property)]
+    fn metered(&self) -> u32 {
+        self.metered
+    }
+}
+
 pub(crate) struct Harness {
     pub fake: FakeDrive,
     pub daemon: Arc<Daemon>,
@@ -73,7 +88,7 @@ pub(crate) struct Harness {
     pub tokens: Arc<MemoryStore>,
     pub home: PathBuf,
     notes: Arc<Mutex<Vec<Note>>>,
-    _client: Connection,
+    client: Connection,
     _server: Connection,
     dir: tempfile::TempDir,
 }
@@ -101,7 +116,7 @@ impl Harness {
             tokens,
             home,
             notes,
-            _client: client,
+            client,
             _server: server,
             dir,
         }
@@ -120,7 +135,7 @@ impl Harness {
         )
         .await;
         (self.daemon, self.proxy) = (daemon, proxy);
-        (self._client, self._server) = (client, server);
+        (self.client, self._server) = (client, server);
         self.daemon.resume_saved_account().await.unwrap();
     }
 
@@ -165,6 +180,23 @@ impl Harness {
     /// As pastas do serviço deste teste.
     pub fn paths(&self) -> Paths {
         Paths::for_test(self.dir.path())
+    }
+
+    /// Troca a `Metered` do NetworkManager falso e avisa a mudança.
+    pub async fn set_metered(&self, metered: u32) {
+        let iface = self
+            .client
+            .object_server()
+            .interface::<_, FakeNetworkManager>(NETWORK_MANAGER_PATH)
+            .await
+            .unwrap();
+        iface.get_mut().await.metered = metered;
+        iface
+            .get()
+            .await
+            .metered_changed(iface.signal_emitter())
+            .await
+            .unwrap();
     }
 
     pub fn notes(&self) -> Vec<Note> {
@@ -286,10 +318,13 @@ async fn serve(
         .p2p()
         .serve_at(NOTIFICATIONS_PATH, FakeNotifications(notes.clone()))
         .unwrap()
+        .serve_at(NETWORK_MANAGER_PATH, FakeNetworkManager::default())
+        .unwrap()
         .build();
     let (server, client) = tokio::join!(server, client);
     let (server, client) = (server.unwrap(), client.unwrap());
     daemon.attach(server.clone()).await.unwrap();
+    daemon.watch_metered(server.clone());
     let proxy = ServiceProxy::new(&client).await.unwrap();
     (daemon, proxy, client, server)
 }

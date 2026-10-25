@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use gdl_common::time::rfc3339;
-use reqwest::header::{CONTENT_RANGE, CONTENT_TYPE, LOCATION, RANGE};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, LOCATION, RANGE};
 use reqwest::{Method, RequestBuilder, StatusCode};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -19,6 +19,7 @@ pub use crate::model::*;
 use crate::oauth::AccessTokenProvider;
 use crate::retry::with_backoff;
 pub use crate::retry::{Backoff, DriveError};
+pub use crate::throttle::Bandwidth;
 
 pub type Result<T> = std::result::Result<T, DriveError>;
 
@@ -26,6 +27,8 @@ pub type Result<T> = std::result::Result<T, DriveError>;
 pub const RESUMABLE_THRESHOLD: u64 = 8 * 1024 * 1024;
 /// Tamanho de cada trecho do upload retomável (múltiplo de 256 KiB, como a API exige).
 const CHUNK: usize = 8 * 1024 * 1024;
+/// Pedaço do corpo enviado com limite de banda: o ritmo fica uniforme dentro de um trecho.
+const THROTTLE_SLICE: usize = 64 * 1024;
 /// Quantos resultados a pesquisa do Drive traz.
 pub const SEARCH_LIMIT: usize = 50;
 
@@ -71,6 +74,7 @@ pub struct DriveClient {
     upload_base: Url,
     tokens: Arc<dyn AccessTokenProvider>,
     backoff: Backoff,
+    bandwidth: Arc<Bandwidth>,
 }
 
 /// Converte a resposta de erro da API no `DriveError` correspondente.
@@ -130,7 +134,50 @@ impl DriveClient {
             upload_base,
             tokens,
             backoff: Backoff::default(),
+            bandwidth: Arc::default(),
         }
+    }
+
+    /// Os baldes de banda (compartilhados com quem troca os limites).
+    pub fn with_bandwidth(mut self, bandwidth: Arc<Bandwidth>) -> DriveClient {
+        self.bandwidth = bandwidth;
+        self
+    }
+
+    /// Põe `data` como corpo do pedido; com limite de upload, passa pelo balde de
+    /// `THROTTLE_SLICE` em `THROTTLE_SLICE` (com o tamanho declarado, para não virar chunked).
+    fn upload_body(&self, request: RequestBuilder, data: Bytes) -> RequestBuilder {
+        if !self.bandwidth.tx.is_limited() {
+            return request.body(data);
+        }
+        let request = request.header(CONTENT_LENGTH, data.len());
+        let stream = futures_util::stream::unfold(
+            (self.bandwidth.clone(), data),
+            |(bandwidth, mut rest)| async move {
+                if rest.is_empty() {
+                    return None;
+                }
+                let slice = rest.split_to(rest.len().min(THROTTLE_SLICE));
+                bandwidth.tx.take(slice.len()).await;
+                Some((Ok::<_, std::io::Error>(slice), (bandwidth, rest)))
+            },
+        );
+        request.body(reqwest::Body::wrap_stream(stream))
+    }
+
+    /// O corpo da resposta, lido pelo balde de download.
+    async fn download_body(&self, mut resp: reqwest::Response) -> Result<Bytes> {
+        if !self.bandwidth.rx.is_limited() {
+            return Ok(resp.bytes().await?);
+        }
+        // O tamanho declarado só como palpite, com teto: um cabeçalho errado não reserva demais.
+        let len = resp.content_length().unwrap_or_default() as usize;
+        let mut body = BytesMut::with_capacity(len.min(CHUNK));
+        while let Some(piece) = resp.chunk().await? {
+            self.bandwidth.rx.take(piece.len()).await;
+            body.extend_from_slice(&piece);
+        }
+        Ok(body.freeze())
     }
 
     /// Troca o recuo (nos testes, para não esperar segundos).
@@ -362,7 +409,7 @@ impl DriveClient {
                         resp.status()
                     )));
                 }
-                Ok(resp.bytes().await?)
+                self.download_body(resp).await
             },
         )
         .await
@@ -619,11 +666,12 @@ impl DriveClient {
         let body = Bytes::from(body);
         let content_type = format!("multipart/related; boundary={boundary}");
         self.file(|| {
-            self.http
+            let request = self
+                .http
                 .request(method.clone(), url.clone())
                 .query(&[("uploadType", "multipart"), ("fields", FILE_FIELDS)])
-                .header(CONTENT_TYPE, &content_type)
-                .body(body.clone())
+                .header(CONTENT_TYPE, &content_type);
+            self.upload_body(request, body.clone())
         })
         .await
     }
@@ -733,13 +781,11 @@ impl DriveClient {
             pos = Some(offset + len as u64);
             let chunk = buf.split().freeze();
             let last = offset + len as u64 - 1;
-            let resp = self
+            let request = self
                 .http
                 .put(session_url)
-                .header(CONTENT_RANGE, format!("bytes {offset}-{last}/{size}"))
-                .body(chunk)
-                .send()
-                .await?;
+                .header(CONTENT_RANGE, format!("bytes {offset}-{last}/{size}"));
+            let resp = self.upload_body(request, chunk).send().await?;
             match resp.status() {
                 StatusCode::PERMANENT_REDIRECT => offset = received_bytes(&resp),
                 s if s.is_success() => return Ok(resp.json().await?),
@@ -995,6 +1041,105 @@ mod tests {
         let got = client(&fake).download_range(&id, 100, 200).await.unwrap();
         assert_eq!(got.as_ref(), &data[100..200]);
         assert_eq!(fake.downloaded_bytes(), 100);
+    }
+
+    /// O download passa pelo balde de download (o ritmo do balde é testado em `throttle`).
+    #[tokio::test]
+    async fn download_respects_rx_limit() {
+        let fake = FakeDrive::start().await;
+        let data = vec![7u8; 300_000];
+        let id = fake.add_file(&fake.root_id(), "a.bin", data.clone());
+        let bandwidth = Arc::new(Bandwidth::default());
+        // Alto o bastante para não esperar de verdade.
+        bandwidth.rx.set_rate(Some(1_000_000));
+        let c = client(&fake).with_bandwidth(bandwidth.clone());
+
+        let got = c.download_range(&id, 0, 300_000).await.unwrap();
+
+        assert_eq!(got.as_ref(), &data[..]);
+        assert_eq!(bandwidth.rx.taken(), 300_000);
+        assert_eq!(bandwidth.tx.taken(), 0);
+    }
+
+    /// O upload (multipart e retomável) passa pelo balde de upload, e o servidor recebe tudo.
+    #[tokio::test]
+    async fn upload_respects_tx_limit() {
+        let fake = FakeDrive::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (small, small_data) = temp_file(&dir, "pequeno", MIB);
+        let (large, large_data) = temp_file(&dir, "grande", 9 * MIB);
+        let bandwidth = Arc::new(Bandwidth::default());
+        bandwidth.tx.set_rate(Some(10_000_000));
+        let c = client(&fake).with_bandwidth(bandwidth.clone());
+        let root = fake.root_id();
+
+        let a = c
+            .upload_new(&root, "p.bin", &small, 0, &NoSession, None)
+            .await
+            .unwrap();
+        let b = c
+            .upload_new(&root, "g.bin", &large, 0, &NoSession, None)
+            .await
+            .unwrap();
+
+        assert_eq!(fake.content(&a.id), small_data);
+        assert_eq!(fake.content(&b.id), large_data);
+        // O multipart conta o corpo inteiro (com os cabeçalhos das partes).
+        assert!(
+            bandwidth.tx.taken() >= 10 * MIB as u64,
+            "{}",
+            bandwidth.tx.taken()
+        );
+        assert_eq!(bandwidth.rx.taken(), 0);
+    }
+
+    /// Roda num processo à parte (`direct_connection_ignores_proxy_env`), com o proxy do sistema
+    /// apontando para uma porta fechada.
+    #[tokio::test]
+    #[ignore = "roda como subprocesso de direct_connection_ignores_proxy_env"]
+    async fn proxy_env_child() {
+        let fake = FakeDrive::start().await;
+        let root = fake.root_id();
+
+        crate::set_network(crate::Network::System);
+        let err = client(&fake).get(&root).await.unwrap_err();
+        assert!(
+            matches!(err, DriveError::Offline),
+            "o proxy do sistema vale: {err:?}"
+        );
+
+        // O próprio simulado atende como proxy (aceita a URL completa no pedido).
+        crate::set_network(crate::Network::Proxy(fake.base_url().to_string()));
+        client(&fake)
+            .get(&root)
+            .await
+            .expect("o proxy manual substitui o do sistema");
+
+        crate::set_network(crate::Network::Direct);
+        client(&fake).get(&root).await.unwrap();
+    }
+
+    #[test]
+    fn direct_connection_ignores_proxy_env() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy = format!("http://{}", closed.local_addr().unwrap());
+        drop(closed);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "client::tests::proxy_env_child"])
+            .env("HTTP_PROXY", &proxy)
+            .env("HTTPS_PROXY", &proxy)
+            .env("ALL_PROXY", &proxy)
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy")
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{log}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(log.contains("1 passed"), "{log}");
     }
 
     #[tokio::test]

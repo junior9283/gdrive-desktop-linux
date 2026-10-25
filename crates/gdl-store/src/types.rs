@@ -56,6 +56,14 @@ pub enum ItemKind {
 }
 
 impl ItemKind {
+    /// Extensão do arquivo-ponteiro local; só Documentos Google têm.
+    pub fn pointer_extension(&self) -> Option<&'static str> {
+        match self {
+            ItemKind::GoogleDoc { mime } => gdl_common::gdocs::pointer_extension(mime),
+            _ => None,
+        }
+    }
+
     /// Colunas `kind`, `mime` e `target_id` do banco.
     pub(crate) fn to_columns(&self) -> (&'static str, Option<&str>, Option<&str>) {
         match self {

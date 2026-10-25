@@ -155,29 +155,43 @@ impl Store {
         )
     }
 
-    /// Refaz os nomes locais dos filhos de `parent`: mapeia para nomes válidos no Linux e
-    /// numera os repetidos por ordem de criação.
-    pub fn recompute_local_names(&self, parent: &ItemId) -> Result<()> {
+    /// Refaz os nomes locais dos filhos de cada pasta de `parents`, numa transação só: mapeia
+    /// para nomes válidos no Linux (com a extensão do ponteiro nos Documentos Google) e numera os
+    /// repetidos por ordem de criação.
+    pub fn recompute_local_names<'a>(
+        &self,
+        parents: impl IntoIterator<Item = &'a ItemId>,
+    ) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let siblings = tx
-            .prepare_cached(
-                "SELECT id, remote_name, created_ms FROM items WHERE parent = ?1 AND trashed = 0",
-            )?
-            .query_map([&parent.0], |r| {
-                Ok(Sibling {
-                    id: r.get(0)?,
-                    name: names::to_local(&r.get::<_, String>(1)?),
-                    created: r.get(2)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
         {
+            let mut select = tx.prepare_cached(
+                "SELECT id, remote_name, created_ms, kind, mime, target_id FROM items \
+                 WHERE parent = ?1 AND trashed = 0",
+            )?;
             let mut update = tx.prepare_cached(
                 "UPDATE items SET local_name = ?2 WHERE id = ?1 AND local_name <> ?2",
             )?;
-            for (id, local) in names::dedupe(&siblings) {
-                update.execute([id, local])?;
+            for parent in parents {
+                let siblings = select
+                    .query_map([&parent.0], |r| {
+                        let remote: String = r.get(1)?;
+                        let kind =
+                            ItemKind::from_columns(r.get_ref(3)?.as_str()?, r.get(4)?, r.get(5)?);
+                        let name = match kind.as_ref().and_then(ItemKind::pointer_extension) {
+                            Some(ext) => format!("{remote}.{ext}"),
+                            None => remote,
+                        };
+                        Ok(Sibling {
+                            id: r.get(0)?,
+                            name: names::to_local(&name),
+                            created: r.get(2)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                for (id, local) in names::dedupe(&siblings) {
+                    update.execute([id, local])?;
+                }
             }
         }
         tx.commit()?;
@@ -489,11 +503,31 @@ mod tests {
         let mut slash = item("3", Some("root"));
         slash.remote_name = "a/b".into();
         store.upsert_items(&[old, new, slash]).unwrap();
-        store.recompute_local_names(&id("root")).unwrap();
+        store.recompute_local_names(&[id("root")]).unwrap();
         let name = |s| store.get(&id(s)).unwrap().unwrap().local_name;
         assert_eq!(name("1"), "x.txt");
         assert_eq!(name("2"), "x (1).txt");
         assert_eq!(name("3"), "a\u{2215}b");
+    }
+
+    #[test]
+    fn google_docs_keep_their_pointer_extension() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let mut doc = item("1", Some("root"));
+        doc.remote_name = "Plano".into();
+        doc.created_ms = 1;
+        doc.kind = ItemKind::GoogleDoc {
+            mime: "application/vnd.google-apps.spreadsheet".into(),
+        };
+        let mut twin = doc.clone();
+        twin.id = id("2");
+        twin.created_ms = 2;
+        store.upsert_items(&[doc, twin]).unwrap();
+        store.recompute_local_names(&[id("root")]).unwrap();
+        let name = |s| store.get(&id(s)).unwrap().unwrap().local_name;
+        assert_eq!(name("1"), "Plano.gsheet");
+        assert_eq!(name("2"), "Plano (1).gsheet");
     }
 
     #[test]

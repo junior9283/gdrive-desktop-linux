@@ -688,6 +688,18 @@ dependencies = [
 [[package]]
 name = "gdl-engine"
 version = "0.1.0-dev"
+dependencies = [
+ "async-trait",
+ "gdl-common",
+ "gdl-drive",
+ "gdl-fake-drive",
+ "gdl-store",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "gdl-fake-drive"

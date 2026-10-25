@@ -127,6 +127,8 @@ pub(crate) struct State {
     pub(crate) fault: Option<StatusFault>,
     pub(crate) request_log: Vec<String>,
     pub(crate) downloaded: u64,
+    /// Edição a aplicar depois de servir tantas páginas de `files.list`: (páginas, ID, conteúdo).
+    pub(crate) edit_during_listing: Option<(u32, String, Vec<u8>)>,
 }
 
 impl State {
@@ -146,6 +148,7 @@ impl State {
             fault: None,
             request_log: vec![],
             downloaded: 0,
+            edit_during_listing: None,
         };
         state.root_id = state.add("", "My Drive", FOLDER_MIME, Vec::new(), None);
         state.file_mut(&state.root_id.clone()).parents.clear();

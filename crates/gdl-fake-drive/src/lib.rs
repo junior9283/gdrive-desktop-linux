@@ -124,6 +124,12 @@ impl FakeDrive {
         self.shared.state().set_content(id, bytes, None);
     }
 
+    /// Como `modify_remote`, mas só depois de servir `pages` páginas de `files.list`: simula uma
+    /// edição feita enquanto o app ainda está listando o Drive.
+    pub fn modify_remote_after_list_pages(&self, id: &str, bytes: Vec<u8>, pages: u32) {
+        self.shared.state().edit_during_listing = Some((pages, id.into(), bytes));
+    }
+
     pub fn trash_remote(&self, id: &str) {
         let mut state = self.shared.state();
         state.file_mut(id).trashed = true;

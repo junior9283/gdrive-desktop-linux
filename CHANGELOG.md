@@ -26,6 +26,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - Cliente da Drive API v3: listagem paginada, metadados, download por intervalo, pastas, atalhos,
   lixeira, mudanças e upload multipart ou retomável (continua de onde parou após queda ou
   reinício), com recuo exponencial nas falhas passageiras e renovação do acesso após um 401.
+- Indexação inicial do Meu Drive e consulta de mudanças a cada 15 s: edições remotas atualizam o
+  banco e descartam o cache antigo, edições locais pendentes viram conflito em vez de serem
+  sobrescritas, e Documentos Google aparecem como ponteiros `.gdoc`, `.gsheet`, `.gslides`…
 
 ## [0.0.1] - 2026-10-25
 

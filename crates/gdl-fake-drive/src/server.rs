@@ -142,7 +142,7 @@ async fn list(State(shared): Shr, Query(params): Params) -> Response {
         .get("pageToken")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    let state = shared.state();
+    let mut state = shared.state();
     let mut hits = state
         .files
         .values()
@@ -152,6 +152,13 @@ async fn list(State(shared): Shr, Query(params): Params) -> Response {
     let mut body = json!({ "kind": "drive#fileList", "files": files });
     if hits.next().is_some() {
         body["nextPageToken"] = (offset + size).to_string().into();
+    }
+    if let Some((pages, ..)) = &mut state.edit_during_listing {
+        *pages -= 1;
+        if *pages == 0 {
+            let (_, id, bytes) = state.edit_during_listing.take().unwrap();
+            state.set_content(&id, bytes, None);
+        }
     }
     Json(body).into_response()
 }

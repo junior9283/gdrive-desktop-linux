@@ -8,6 +8,18 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+gdl-common.workspace = true
+gdl-drive.workspace = true
+gdl-store.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+gdl-fake-drive.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

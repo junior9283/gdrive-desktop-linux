@@ -10,3 +10,4 @@
 *.exe
 *.dll
 *.sys
+/crates/gdl-ui/gen/

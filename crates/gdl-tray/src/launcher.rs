@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use gdl_ipc::UiProxy;
+use gdl_ipc::{UiProxy, nobody_there};
 use zbus::Connection;
 
 /// O programa da janela.
@@ -71,16 +71,6 @@ pub fn exe_dir() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
 }
 
-/// Ninguém atende a janela: o nome não tem dono (ou, ponto a ponto, não há o objeto).
-fn nobody_there(e: &zbus::Error) -> bool {
-    const NOBODY: [&str; 3] = [
-        "org.freedesktop.DBus.Error.ServiceUnknown",
-        "org.freedesktop.DBus.Error.NameHasNoOwner",
-        "org.freedesktop.DBus.Error.UnknownObject",
-    ];
-    matches!(e, zbus::Error::MethodError(name, ..) if NOBODY.contains(&name.as_str()))
-}
-
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
@@ -99,7 +89,7 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
         // Um barramento ponto a ponto sem ninguém do outro lado servindo a janela.
-        let (server, client) = crate::testutil::p2p_pair().await;
+        let (server, client) = gdl_ipc::testing::p2p_pair().await;
         // `object_server()` liga o servidor de objetos do outro lado, que passa a responder
         // "objeto desconhecido" (como o barramento real responde "nome sem dono"); sem ele, o
         // pedido ficaria sem resposta.

@@ -133,7 +133,7 @@ impl Hotkey {
 
 #[cfg(test)]
 mod tests {
-    use zbus::connection::Builder;
+    use gdl_ipc::testing::PrivateBus;
 
     use super::*;
 
@@ -161,60 +161,13 @@ mod tests {
         }
     }
 
-    /// Barramento de sessão próprio do teste, sem ativação de serviços: ninguém responde pelo
-    /// portal.
-    struct PrivateBus {
-        daemon: std::process::Child,
-        _dir: tempfile::TempDir,
-    }
-
-    impl PrivateBus {
-        async fn start() -> (PrivateBus, Connection) {
-            use std::io::BufRead;
-            let dir = tempfile::tempdir().unwrap();
-            let config = dir.path().join("bus.conf");
-            std::fs::write(
-                &config,
-                format!(
-                    "<busconfig><type>session</type><listen>unix:dir={}</listen>\
-                     <policy context=\"default\"><allow send_destination=\"*\"/>\
-                     <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>",
-                    dir.path().display()
-                ),
-            )
-            .unwrap();
-            let mut daemon = std::process::Command::new("dbus-daemon")
-                .arg(format!("--config-file={}", config.display()))
-                .args(["--nofork", "--print-address=1"])
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .expect("dbus-daemon");
-            let mut address = String::new();
-            std::io::BufReader::new(daemon.stdout.take().unwrap())
-                .read_line(&mut address)
-                .unwrap();
-            let conn = Builder::address(address.trim())
-                .unwrap()
-                .build()
-                .await
-                .unwrap();
-            (PrivateBus { daemon, _dir: dir }, conn)
-        }
-    }
-
-    impl Drop for PrivateBus {
-        fn drop(&mut self) {
-            let _ = self.daemon.kill();
-            let _ = self.daemon.wait();
-        }
-    }
-
     /// Sem portal, a resposta vem logo ("nome sem dono"), sem esperar `PORTAL_TIMEOUT`.
     const QUICK: Duration = Duration::from_secs(2);
 
     #[tokio::test]
     async fn missing_portal_is_not_fatal() {
-        let (_bus, conn) = PrivateBus::start().await;
+        let bus = PrivateBus::start();
+        let conn = bus.connect().await;
         let start = std::time::Instant::now();
 
         let result = Hotkey::register(&conn, DEFAULT_TRIGGER, "Pesquisar", || {}).await;
@@ -229,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn point_to_point_connection_is_not_a_bus() {
-        let (_server, client) = crate::testutil::p2p_pair().await;
+        let (_server, client) = gdl_ipc::testing::p2p_pair().await;
 
         let result = Hotkey::register(&client, DEFAULT_TRIGGER, "Pesquisar", || {}).await;
 

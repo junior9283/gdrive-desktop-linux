@@ -24,6 +24,7 @@ tracing-subscriber.workspace = true
 zbus.workspace = true
 
 [dev-dependencies]
+gdl-ipc = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 
 [lints]

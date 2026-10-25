@@ -1,0 +1,51 @@
+/* Tokens do Material 3 (cores do esquema a partir do azul #3b78d8, tipografia e formas). As cores
+   têm as duas versões em `light-dark()`: valem as do sistema (`prefers-color-scheme`), salvo se
+   `data-theme` no <html> (preferência `UITheme`) forçar uma delas. */
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: block;
+}
+
+:root {
+  color-scheme: light dark;
+  --md-primary: light-dark(#2f5fae, #adc6ff);
+  --md-on-primary: light-dark(#ffffff, #002e69);
+  --md-primary-container: light-dark(#d8e2ff, #0f4794);
+  --md-on-primary-container: light-dark(#001a42, #d8e2ff);
+  --md-secondary-container: light-dark(#dce2f9, #3c4758);
+  --md-on-secondary-container: light-dark(#141b2c, #dce2f9);
+  --md-error: light-dark(#ba1a1a, #ffb4ab);
+  --md-on-error: light-dark(#ffffff, #690005);
+  --md-error-container: light-dark(#ffdad6, #93000a);
+  --md-on-error-container: light-dark(#410002, #ffdad6);
+  --md-surface: light-dark(#f9f9ff, #111318);
+  --md-surface-container-low: light-dark(#f3f3fa, #1a1b20);
+  --md-surface-container: light-dark(#ededf4, #1e1f25);
+  --md-surface-container-high: light-dark(#e7e8ee, #282a2f);
+  --md-on-surface: light-dark(#1a1b20, #e2e2e9);
+  --md-on-surface-variant: light-dark(#44474f, #c5c6d0);
+  --md-outline: light-dark(#757780, #8f9099);
+  --md-outline-variant: light-dark(#c5c6d0, #44474f);
+
+  --md-font: 'Inter', system-ui, sans-serif;
+  --md-body-medium: 400 14px/20px var(--md-font);
+  --md-body-large: 400 16px/24px var(--md-font);
+  --md-title-medium: 500 16px/24px var(--md-font);
+  --md-title-large: 400 22px/28px var(--md-font);
+  --md-label-large: 500 14px/20px var(--md-font);
+
+  --md-shape-small: 8px;
+  --md-shape-medium: 12px;
+  --md-shape-full: 999px;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}

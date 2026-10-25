@@ -107,13 +107,7 @@ fn describe(e: ServiceError, i18n: &I18n) -> String {
         {
             i18n.tr("cli-no-service", &[("error", name.as_str())])
         }
-        ServiceError::ZBus(e) => e.to_string(),
-        ServiceError::PendingUploads(message)
-        | ServiceError::NotLoggedIn(message)
-        | ServiceError::NotFound(message)
-        | ServiceError::InvalidArgs(message)
-        | ServiceError::Managed(message)
-        | ServiceError::Failed(message) => message,
+        e => e.into_message(),
     }
 }
 

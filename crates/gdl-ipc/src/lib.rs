@@ -4,6 +4,9 @@
 use serde::{Deserialize, Serialize};
 use zbus::zvariant::Type;
 
+#[cfg(feature = "testing")]
+pub mod testing;
+
 pub const BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1";
 pub const OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1";
 /// A janela (`gdrive-desktop-linux-ui`), que fica com este nome enquanto está aberta.
@@ -21,6 +24,16 @@ pub trait Ui {
     /// Mostra a janela na tela `screen` (`home`, `onboarding`, `search`, `offline`, `errors`,
     /// `preferences`, `about`).
     fn open(&self, screen: &str) -> zbus::Result<()>;
+}
+
+/// Ninguém atende do outro lado: o nome não tem dono (ou, ponto a ponto, não há o objeto).
+pub fn nobody_there(e: &zbus::Error) -> bool {
+    const NOBODY: [&str; 3] = [
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "org.freedesktop.DBus.Error.NameHasNoOwner",
+        "org.freedesktop.DBus.Error.UnknownObject",
+    ];
+    matches!(e, zbus::Error::MethodError(name, ..) if NOBODY.contains(&name.as_str()))
 }
 
 /// Resposta de `Status`; sem conta conectada, tudo vazio.
@@ -200,6 +213,19 @@ impl ServiceError {
             ServiceError::InvalidArgs(_) => "InvalidArgs",
             ServiceError::Managed(_) => "Managed",
             ServiceError::Failed(_) => "Failed",
+        }
+    }
+
+    /// A descrição que o serviço mandou (para `ZBus`, a do erro do D-Bus).
+    pub fn into_message(self) -> String {
+        match self {
+            ServiceError::ZBus(e) => e.to_string(),
+            ServiceError::PendingUploads(m)
+            | ServiceError::NotLoggedIn(m)
+            | ServiceError::NotFound(m)
+            | ServiceError::InvalidArgs(m)
+            | ServiceError::Managed(m)
+            | ServiceError::Failed(m) => m,
         }
     }
 }

@@ -6,6 +6,8 @@ use unic_langid::LanguageIdentifier;
 
 const PT_BR: &str = include_str!("../../../locales/pt-BR/main.ftl");
 const EN: &str = include_str!("../../../locales/en/main.ftl");
+const UI_PT_BR: &str = include_str!("../../../locales/pt-BR/ui.ftl");
+const UI_EN: &str = include_str!("../../../locales/en/ui.ftl");
 
 /// Idioma do sistema, pelas variáveis `LC_ALL`, `LC_MESSAGES` e `LANG`, nessa ordem.
 pub fn env_lang() -> String {
@@ -15,7 +17,22 @@ pub fn env_lang() -> String {
         .unwrap_or_default()
 }
 
-/// Textos do app num idioma: pt-BR quando o idioma do sistema começa com `pt`, senão inglês.
+/// O idioma dos textos para `lang` (formato de `LANG`, como `pt_BR.UTF-8`): `pt-BR` quando ele
+/// começa com `pt`, senão `en`.
+pub fn language(lang: &str) -> &'static str {
+    match lang.split(['_', '-', '.', '@']).next() {
+        Some("pt") => "pt-BR",
+        _ => "en",
+    }
+}
+
+/// O arquivo `ui.ftl` (textos da janela) do idioma `language`.
+pub fn ui_source(language: &str) -> &'static str {
+    if language == "pt-BR" { UI_PT_BR } else { UI_EN }
+}
+
+/// Textos do app (`main.ftl`) no idioma de `language`; os da janela (`ui.ftl`) vão crus para
+/// o front-end (`ui_source`).
 pub struct I18n {
     bundle: FluentBundle<FluentResource>,
 }
@@ -23,17 +40,13 @@ pub struct I18n {
 impl I18n {
     /// `lang` no formato das variáveis `LANG`/`LC_MESSAGES`, como `pt_BR.UTF-8`.
     pub fn new(lang: &str) -> I18n {
-        let language = lang.split(['_', '-', '.', '@']).next().unwrap_or_default();
-        let (id, source) = if language == "pt" {
-            ("pt-BR", PT_BR)
-        } else {
-            ("en", EN)
-        };
+        let id = language(lang);
+        let main = if id == "pt-BR" { PT_BR } else { EN };
         let langid: LanguageIdentifier = id.parse().expect("identificador de idioma fixo");
         let mut bundle = FluentBundle::new_concurrent(vec![langid]);
         bundle.set_use_isolating(false);
         let resource =
-            FluentResource::try_new(source.to_string()).expect("arquivo .ftl embutido válido");
+            FluentResource::try_new(main.to_string()).expect("arquivo .ftl embutido válido");
         bundle
             .add_resource(resource)
             .expect("chaves .ftl sem duplicatas");
@@ -95,6 +108,14 @@ mod tests {
         assert_eq!(i18n.tr_count("tray-syncing", 1), "Sincronizando 1 arquivo");
         assert_eq!(i18n.tr_count("tray-syncing", 3), "Sincronizando 3 arquivos");
         assert_eq!(i18n.tr_count("tray-paused", 0), "Pausado");
+    }
+
+    #[test]
+    fn language_is_pt_br_or_english() {
+        assert_eq!(language("pt_PT.UTF-8"), "pt-BR");
+        assert!(ui_source("pt-BR").contains("window-about = Sobre"));
+        assert!(ui_source("en").contains("window-about = About"));
+        assert_eq!(language(""), "en");
     }
 
     #[test]

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "As telas: os comandos próprios e o básico do Tauri (eventos, versão do app).",
+  "windows": ["*"],
+  "permissions": ["core:default"]
+}

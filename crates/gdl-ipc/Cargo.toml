@@ -7,8 +7,14 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Apoio aos testes dos outros crates: barramentos de mentira.
+testing = ["dep:tempfile", "dep:tokio"]
+
 [dependencies]
 serde.workspace = true
+tempfile = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 zbus.workspace = true
 
 [lints]

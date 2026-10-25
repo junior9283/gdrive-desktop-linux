@@ -3,5 +3,3 @@
 pub mod hotkey;
 pub mod launcher;
 pub mod model;
-#[cfg(test)]
-mod testutil;

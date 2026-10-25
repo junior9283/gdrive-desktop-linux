@@ -26,6 +26,30 @@ pub struct Status {
     pub remaining_secs: i64,
 }
 
+/// Um aviso do histórico (`Notifications`), o mais novo primeiro.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct NotificationItem {
+    pub id: u64,
+    /// Família do aviso: `lost-and-found`, `offline`, `disk-low`, `quota-full`, `upload-failed`,
+    /// `copied-as-shortcut`, `mount-moved`, `resume-syncing` ou `upload-canceled`.
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub time_ms: i64,
+    pub read: bool,
+    /// Ação do botão (`open-lost-found`, `open-canceled`, `resume`); vazio sem botão.
+    pub action_key: String,
+    pub action_label: String,
+}
+
+/// Uma família de aviso que o usuário pode desligar (`NotificationSettings`).
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct NotificationSetting {
+    pub kind: String,
+    pub label: String,
+    pub enabled: bool,
+}
+
 /// Uma linha de `Errors`.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SyncErrorItem {
@@ -82,6 +106,8 @@ pub enum ServiceError {
     NotLoggedIn(String),
     NotFound(String),
     InvalidArgs(String),
+    /// A preferência (nomeada) é definida pela política do administrador.
+    Managed(String),
     Failed(String),
 }
 
@@ -96,6 +122,7 @@ impl ServiceError {
             ServiceError::NotLoggedIn(_) => "NotLoggedIn",
             ServiceError::NotFound(_) => "NotFound",
             ServiceError::InvalidArgs(_) => "InvalidArgs",
+            ServiceError::Managed(_) => "Managed",
             ServiceError::Failed(_) => "Failed",
         }
     }
@@ -117,6 +144,12 @@ pub trait Service {
     /// A atividade de sincronização, a mais recente primeiro (até 500 itens).
     fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError>;
     fn errors(&self) -> Result<Vec<SyncErrorItem>, ServiceError>;
+    fn notifications(&self) -> Result<Vec<NotificationItem>, ServiceError>;
+    fn mark_notifications_read(&self) -> Result<(), ServiceError>;
+    fn dismiss_notification(&self, id: u64) -> Result<(), ServiceError>;
+    fn invoke_notification_action(&self, id: u64, key: &str) -> Result<(), ServiceError>;
+    fn notification_settings(&self) -> Result<Vec<NotificationSetting>, ServiceError>;
+    fn set_notification_enabled(&self, kind: &str, enabled: bool) -> Result<(), ServiceError>;
     fn retry(&self, item_id: &str) -> Result<(), ServiceError>;
     /// `canceled` ou `too-late`.
     fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError>;
@@ -135,6 +168,9 @@ pub trait Service {
     /// A atividade mudou (no máximo um a cada 250 ms).
     #[zbus(signal)]
     fn activity_changed(&self) -> zbus::Result<()>;
+    /// O histórico de notificações mudou (aviso novo, lido ou dispensado).
+    #[zbus(signal)]
+    fn notifications_changed(&self) -> zbus::Result<()>;
 }
 
 #[cfg(test)]

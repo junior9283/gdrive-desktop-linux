@@ -94,6 +94,15 @@ pub enum EngineEvent {
     CopiedAsShortcut {
         name: String,
     },
+    /// Uma gravação foi registrada com a sincronização pausada (no máximo um por pausa): ela só
+    /// sobe quando o usuário retomar.
+    SavedWhilePaused {
+        name: String,
+    },
+    /// O usuário cancelou o envio; a versão local foi para `Uploads cancelados`.
+    UploadCanceled {
+        name: String,
+    },
 }
 
 #[cfg(test)]

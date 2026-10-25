@@ -110,10 +110,20 @@ impl Engine {
                 }
             }
         }
-        self.commit_write(id, size, modified_ms, upload)
+        if self.commit_write(id, size, modified_ms, upload)? {
+            self.note_saved_while_paused(&item.local_name);
+        }
+        Ok(())
     }
 
-    fn commit_write(&self, id: &ItemId, size: u64, modified_ms: i64, upload: Upload) -> Result<()> {
+    /// `false` se o arquivo nunca sobe (ver `commit_local_write_at`).
+    fn commit_write(
+        &self,
+        id: &ItemId,
+        size: u64,
+        modified_ms: i64,
+        upload: Upload,
+    ) -> Result<bool> {
         let next_try_ms = match upload {
             Upload::Soon => now_ms() + UPLOAD_DELAY_MS,
             Upload::Now => 0,
@@ -290,6 +300,7 @@ impl Engine {
                 std::fs::rename(self.cache.local_path(src), self.cache.local_path(dst))?;
                 self.store.take_over(src, dst)?;
                 self.commit_write(dst, source.size, source.modified_ms, Upload::Soon)
+                    .map(drop)
             })
             .await?;
         self.store.recompute_local_names(source.parent.as_ref())?;

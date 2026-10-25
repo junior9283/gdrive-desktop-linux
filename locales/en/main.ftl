@@ -31,6 +31,16 @@ notify-upload-failed-title = Upload failed
 notify-upload-failed-body = { $name }: { $error }
 notify-shortcut-title = Shortcut created
 notify-shortcut-body = Google Docs can't be copied, so the shortcut { $name } was created instead.
+notify-paused-title = Syncing is paused
+notify-paused-body = { $name } was saved on this computer and will be uploaded when you resume syncing.
+notify-paused-action = Resume
+notify-canceled-title = Upload canceled
+notify-canceled-body = Your version of { $name } is kept in Canceled uploads.
+notify-canceled-action = View files
+notify-kind-copied-as-shortcut = Google Docs copied as shortcuts
+notify-kind-mount-moved = Drive folder opened in another place
+notify-kind-resume-syncing = Files saved while syncing is paused
+notify-kind-offline = No internet connection
 
 # Signing in and out
 login-rejected = The account { $email } isn't allowed on this computer.

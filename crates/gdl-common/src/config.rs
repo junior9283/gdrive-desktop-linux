@@ -2,11 +2,11 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::fs::write_atomic;
 use crate::paths::Paths;
 
 #[derive(Debug, thiserror::Error)]
@@ -100,6 +100,7 @@ preferences! {
     "DisableMirroredMyDrive" => disable_mirrored_my_drive: bool = false;
     "DisableOnboardingDialog" => disable_onboarding_dialog: bool = false;
     "DisableSSLValidation" => disable_ssl_validation: bool = false;
+    "DoNotShowNotifications" => do_not_show_notifications: Vec<String> = Vec::new();
     "MinFreeDiskSpaceKBytes" => min_free_disk_space_kbytes: u64 = 512_000;
     "OpenOfficeFilesInDocs" => open_office_files_in_docs: bool = true;
     "PauseSyncingOnMeteredConnection" => pause_syncing_on_metered_connection: bool = false;
@@ -194,11 +195,7 @@ pub fn save_user_preference(
         path: path.clone(),
         source,
     };
-    fs::create_dir_all(&paths.config_dir).map_err(io)?;
-    let mut tmp = tempfile::NamedTempFile::new_in(&paths.config_dir).map_err(io)?;
-    tmp.write_all(table.to_string().as_bytes()).map_err(io)?;
-    tmp.persist(&path).map_err(|e| io(e.error))?;
-    Ok(())
+    write_atomic(&path, table.to_string().as_bytes()).map_err(io)
 }
 
 #[cfg(test)]

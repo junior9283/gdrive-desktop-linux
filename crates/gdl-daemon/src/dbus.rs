@@ -3,7 +3,10 @@
 use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
-use gdl_ipc::{AccountInfo, ActivityItem, ServiceError, Status, SyncErrorItem};
+use gdl_ipc::{
+    AccountInfo, ActivityItem, NotificationItem, NotificationSetting, ServiceError, Status,
+    SyncErrorItem,
+};
 use zbus::object_server::SignalEmitter;
 
 use crate::daemon::Daemon;
@@ -56,6 +59,34 @@ impl Service {
         self.daemon.retry(item_id).await
     }
 
+    async fn notifications(&self) -> Vec<NotificationItem> {
+        self.daemon.notifications()
+    }
+
+    async fn mark_notifications_read(&self) {
+        self.daemon.mark_notifications_read().await
+    }
+
+    async fn dismiss_notification(&self, id: u64) -> Result<(), ServiceError> {
+        self.daemon.dismiss_notification(id).await
+    }
+
+    async fn invoke_notification_action(&self, id: u64, key: &str) -> Result<(), ServiceError> {
+        self.daemon.invoke_notification_action(id, key).await
+    }
+
+    async fn notification_settings(&self) -> Vec<NotificationSetting> {
+        self.daemon.notification_settings()
+    }
+
+    async fn set_notification_enabled(
+        &self,
+        kind: &str,
+        enabled: bool,
+    ) -> Result<(), ServiceError> {
+        self.daemon.set_notification_enabled(kind, enabled)
+    }
+
     async fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError> {
         self.daemon.cancel_upload(item_id).await
     }
@@ -98,4 +129,7 @@ impl Service {
 
     #[zbus(signal)]
     pub async fn activity_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn notifications_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 }

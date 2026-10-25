@@ -2,10 +2,16 @@
 
 pub mod daemon;
 pub mod dbus;
+pub mod history;
 pub mod mount;
 pub mod notify;
 
 pub use daemon::{Api, Config, Daemon};
+
+/// Trava que não fica inutilizável se uma thread entrou em pânico com ela.
+pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
 pub use dbus::Service;
 
 #[cfg(test)]

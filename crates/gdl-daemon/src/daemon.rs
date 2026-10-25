@@ -1,12 +1,13 @@
 //! Estado do serviço: a conta conectada (motor e montagem), o login e a saída da conta.
 
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use gdl_common::browser;
-use gdl_common::config::{ConfigError, Preferences, load_preferences};
+use gdl_common::config::{ConfigError, Preferences, load_preferences, save_user_preference};
 use gdl_common::i18n::I18n;
 use gdl_common::names::{create_unique, split_ext};
 use gdl_common::paths::Paths;
@@ -16,6 +17,7 @@ use gdl_drive::token_store::{ClientCredentials, TokenSet, TokenStore};
 use gdl_engine::engine::{Engine, Intervals};
 use gdl_engine::errors::ErrorSource;
 use gdl_engine::events::{EngineEvent, SyncState};
+use gdl_engine::kept::KeptFolder;
 use gdl_fs::DriveFs;
 use gdl_store::{Inode, ItemId, ItemKind};
 use tokio::sync::broadcast;
@@ -25,11 +27,18 @@ use url::Url;
 use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 
-use gdl_ipc::{AccountInfo, ActivityItem, OBJECT_PATH, ServiceError, Status, SyncErrorItem};
+use gdl_ipc::{
+    AccountInfo, ActivityItem, NotificationItem, NotificationSetting, OBJECT_PATH, ServiceError,
+    Status, SyncErrorItem,
+};
 
 use crate::dbus::Service;
+use crate::history::History;
+use crate::lock;
 use crate::mount;
-use crate::notify::{self, Notification, Notifier, OPEN_LOST_FOUND};
+use crate::notify::{
+    self, Notification, Notifier, OPEN_CANCELED, OPEN_LOST_FOUND, OPTIONAL_KINDS, RESUME,
+};
 
 /// Quanto o login espera o retorno do navegador.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
@@ -39,6 +48,8 @@ const CURRENT_ACCOUNT: &str = "current-account";
 const ACTIVITY_SIGNAL_GAP: Duration = Duration::from_millis(250);
 /// Foto da conta, no diretório de dados dela.
 const PHOTO_FILE: &str = "photo.png";
+/// Histórico das notificações, na pasta de estado.
+const HISTORY_FILE: &str = "notifications.json";
 /// De quanto em quanto tempo `logout finish` confere se os envios terminaram.
 const FINISH_POLL: Duration = Duration::from_secs(1);
 
@@ -96,6 +107,9 @@ pub struct Daemon {
     account: tokio::sync::Mutex<Option<Account>>,
     conn: OnceLock<Connection>,
     notifier: OnceLock<Notifier>,
+    history: History,
+    /// Famílias de aviso desligadas pelo usuário (`DoNotShowNotifications`).
+    muted: Mutex<BTreeSet<String>>,
     login: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -104,6 +118,8 @@ impl Daemon {
         let (prefs, _) = load_preferences(&config.paths)?;
         Ok(Arc::new(Daemon {
             i18n: I18n::new(&config.lang),
+            history: History::load(config.paths.state_dir.join(HISTORY_FILE)),
+            muted: Mutex::new(prefs.do_not_show_notifications.iter().cloned().collect()),
             prefs,
             config,
             account: tokio::sync::Mutex::default(),
@@ -126,8 +142,8 @@ impl Daemon {
                 let Some(daemon) = daemon.upgrade() else {
                     break;
                 };
-                if signal.args().is_ok_and(|a| a.action_key == OPEN_LOST_FOUND) {
-                    daemon.open_lost_and_found().await;
+                if let Ok(args) = signal.args() {
+                    daemon.on_desktop_action(args.id, &args.action_key).await;
                 }
             }
         });
@@ -179,17 +195,112 @@ impl Daemon {
         });
     }
 
+    /// Mostra o aviso e o guarda no histórico, a menos que a família dele esteja desligada.
     async fn notify(&self, note: &Notification) {
-        if let Some(notifier) = self.notifier.get() {
-            notifier.send(note).await;
+        if lock(&self.muted).contains(note.kind_id) {
+            return;
+        }
+        let id = self.history.push(note);
+        self.emit_notifications_changed().await;
+        let Some(notifier) = self.notifier.get() else {
+            return;
+        };
+        if let Some(desktop_id) = notifier.send(note).await {
+            self.history.set_desktop_id(id, desktop_id);
         }
     }
 
-    async fn open_lost_and_found(&self) {
-        if let Some(engine) = self.engine().await {
-            let dir = engine.lost_and_found().dir().display().to_string();
-            self.open(dir);
+    /// Botão de um aviso clicado no servidor de notificações.
+    async fn on_desktop_action(&self, desktop_id: u32, key: &str) {
+        let id = self.history.by_desktop_id(desktop_id);
+        if let Err(e) = self.run_action(key).await {
+            tracing::warn!(erro = %e, acao = key, "ação do aviso falhou");
         }
+        if let Some(id) = id
+            && self.history.mark_read(id)
+        {
+            self.emit_notifications_changed().await;
+        }
+    }
+
+    async fn run_action(&self, key: &str) -> Result<(), ServiceError> {
+        let folder = match key {
+            RESUME => return self.set_paused(false).await,
+            OPEN_LOST_FOUND => KeptFolder::LostAndFound,
+            OPEN_CANCELED => KeptFolder::CanceledUploads,
+            _ => return Err(ServiceError::InvalidArgs(key.into())),
+        };
+        let engine = self.connected_engine().await?;
+        self.open(engine.kept().get(folder).dir().display().to_string());
+        Ok(())
+    }
+
+    pub fn notifications(&self) -> Vec<NotificationItem> {
+        self.history.items()
+    }
+
+    pub async fn mark_notifications_read(&self) {
+        if self.history.mark_all_read() {
+            self.emit_notifications_changed().await;
+        }
+    }
+
+    pub async fn dismiss_notification(&self, id: u64) -> Result<(), ServiceError> {
+        if !self.history.dismiss(id) {
+            return Err(ServiceError::NotFound(id.to_string()));
+        }
+        self.emit_notifications_changed().await;
+        Ok(())
+    }
+
+    /// O botão `key` do aviso `id` do histórico: executa a ação e marca o aviso como lido.
+    pub async fn invoke_notification_action(&self, id: u64, key: &str) -> Result<(), ServiceError> {
+        let note = self
+            .history
+            .get(id)
+            .ok_or_else(|| ServiceError::NotFound(id.to_string()))?;
+        if key.is_empty() || note.action_key != key {
+            return Err(ServiceError::InvalidArgs(key.into()));
+        }
+        self.run_action(key).await?;
+        self.history.mark_read(id);
+        self.emit_notifications_changed().await;
+        Ok(())
+    }
+
+    /// Os avisos que o usuário pode desligar, com o estado de cada um.
+    pub fn notification_settings(&self) -> Vec<NotificationSetting> {
+        let muted = lock(&self.muted);
+        OPTIONAL_KINDS
+            .iter()
+            .map(|kind| NotificationSetting {
+                kind: kind.to_string(),
+                label: self.i18n.tr(&format!("notify-kind-{kind}"), &[]),
+                enabled: !muted.contains(*kind),
+            })
+            .collect()
+    }
+
+    /// Liga ou desliga uma família de aviso e grava a preferência `DoNotShowNotifications`.
+    pub fn set_notification_enabled(&self, kind: &str, enabled: bool) -> Result<(), ServiceError> {
+        if !OPTIONAL_KINDS.contains(&kind) {
+            return Err(ServiceError::InvalidArgs(kind.into()));
+        }
+        let mut muted = lock(&self.muted);
+        let mut wanted = muted.clone();
+        match enabled {
+            true => wanted.remove(kind),
+            false => wanted.insert(kind.into()),
+        };
+        let list = toml::Value::try_from(&wanted).map_err(failed)?;
+        save_user_preference(&self.config.paths, "DoNotShowNotifications", list).map_err(|e| {
+            match e {
+                ConfigError::Managed(key) => ServiceError::Managed(key),
+                e => failed(e),
+            }
+        })?;
+        *muted = wanted;
+        Ok(())
     }
 
     fn emitter(&self) -> Option<SignalEmitter<'static>> {
@@ -201,6 +312,12 @@ impl Daemon {
     async fn emit_status_changed(&self) {
         if let Some(emitter) = self.emitter() {
             let _ = Service::status_changed(&emitter).await;
+        }
+    }
+
+    async fn emit_notifications_changed(&self) {
+        if let Some(emitter) = self.emitter() {
+            let _ = Service::notifications_changed(&emitter).await;
         }
     }
 
@@ -335,10 +452,11 @@ impl Daemon {
         if moved {
             let path = mount_point.display().to_string();
             self.notify(&Notification {
+                kind_id: "mount-moved",
                 summary: self.i18n.tr("notify-title", &[]),
                 body: self.i18n.tr("mount-moved", &[("path", &path)]),
                 action: None,
-                kind: None,
+                replaces_key: None,
             })
             .await;
         }

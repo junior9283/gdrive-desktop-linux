@@ -153,6 +153,11 @@ impl Harness {
         self.home.join("Google Drive").join("Meu Drive")
     }
 
+    /// As pastas do serviço deste teste.
+    pub fn paths(&self) -> Paths {
+        Paths::for_test(self.dir.path())
+    }
+
     pub fn notes(&self) -> Vec<Note> {
         self.notes.lock().unwrap().clone()
     }

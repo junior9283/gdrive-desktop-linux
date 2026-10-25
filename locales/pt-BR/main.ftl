@@ -31,6 +31,16 @@ notify-upload-failed-title = Falha no envio
 notify-upload-failed-body = { $name }: { $error }
 notify-shortcut-title = Atalho criado
 notify-shortcut-body = Documentos Google não podem ser copiados; no lugar da cópia ficou o atalho { $name }.
+notify-paused-title = Sincronização pausada
+notify-paused-body = { $name } foi gravado neste computador e sobe quando você retomar a sincronização.
+notify-paused-action = Retomar
+notify-canceled-title = Envio cancelado
+notify-canceled-body = A sua versão de { $name } ficou guardada em Uploads cancelados.
+notify-canceled-action = Ver arquivos
+notify-kind-copied-as-shortcut = Documentos Google copiados como atalho
+notify-kind-mount-moved = Pasta do Drive aberta em outro lugar
+notify-kind-resume-syncing = Arquivos gravados com a sincronização pausada
+notify-kind-offline = Sem conexão com a internet
 
 # Login e saída da conta
 login-rejected = A conta { $email } não é permitida neste computador.

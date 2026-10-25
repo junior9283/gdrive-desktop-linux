@@ -189,17 +189,18 @@ pub fn create_local_item(
 /// Registra que o conteúdo local (já gravado em `BlockCache::local_path`) tem `size` bytes e
 /// enfileira o envio. Chamado no último fechamento do arquivo ou num `fsync`.
 pub fn commit_local_write(store: &Store, id: &ItemId, size: u64, modified_ms: i64) -> Result<()> {
-    commit_local_write_at(store, id, size, modified_ms, 0)
+    commit_local_write_at(store, id, size, modified_ms, 0).map(drop)
 }
 
-/// Como `commit_local_write`, com o envio só a partir de `next_try_ms`.
+/// Como `commit_local_write`, com o envio só a partir de `next_try_ms`; `false` se o arquivo
+/// nunca sobe (trava ou temporário de editor).
 pub fn commit_local_write_at(
     store: &Store,
     id: &ItemId,
     size: u64,
     modified_ms: i64,
     next_try_ms: i64,
-) -> Result<()> {
+) -> Result<bool> {
     let local_only = store.modify(|batch| -> Result<bool> {
         let mut item = batch.get(id)?.ok_or(EngineError::NotFound)?;
         item.size = size;
@@ -220,7 +221,7 @@ pub fn commit_local_write_at(
     if !local_only {
         enqueue_upload(store, id, next_try_ms, None)?;
     }
-    Ok(())
+    Ok(!local_only)
 }
 
 /// Na partida do serviço: os envios que esperavam a rede tentam de novo na hora, e toda edição
@@ -690,6 +691,9 @@ impl UploadWorker {
             false => self.client.get(&item.id.0).await.ok(),
         };
         self.drop_local_version(item, remote, false).await?;
+        let _ = self.events.send(EngineEvent::UploadCanceled {
+            name: activity.name.clone(),
+        });
         self.activity.record(Activity {
             state: ActivityState::UploadCanceled,
             ..activity
@@ -1205,7 +1209,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_new_file_moves_it_to_canceled_uploads() {
-        let s = setup(Env::new().await).await;
+        let mut s = setup(Env::new().await).await;
         s.env.fake.inject(Fault::Offline);
         let local = s.write_new(&s.env.root(), "novo.txt", b"rascunho");
         assert_eq!(s.run().await, Some(UploadOutcome::Offline));
@@ -1221,6 +1225,10 @@ mod tests {
         assert_eq!(kept_name(&canceled[0].0), "novo");
         assert_eq!(canceled[0].1, b"rascunho");
         assert!(s.preserved().is_empty(), "não é Lost and Found");
+        let canceled_event = EngineEvent::UploadCanceled {
+            name: "novo.txt".into(),
+        };
+        assert!(std::iter::from_fn(|| s.events.try_recv().ok()).any(|e| e == canceled_event));
         s.env.fake.clear_faults();
         s.env.store.wake_network_waiters(i64::MAX).unwrap();
         while s.run().await.is_some() {}

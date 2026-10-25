@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gdl_common::config::Preferences;
@@ -60,6 +61,8 @@ pub struct Engine {
     pub(crate) events: broadcast::Sender<EngineEvent>,
     intervals: Intervals,
     paused: watch::Sender<bool>,
+    /// Já avisou desta pausa que uma gravação espera a sincronização voltar.
+    saved_while_paused: AtomicBool,
     pub(crate) activity: Arc<ActivityLog>,
 }
 
@@ -114,6 +117,7 @@ impl Engine {
             events,
             intervals: Intervals::default(),
             paused: watch::Sender::new(false),
+            saved_while_paused: AtomicBool::new(false),
         })
     }
 
@@ -237,10 +241,21 @@ impl Engine {
 
     fn set_paused(&self, paused: bool) {
         // `send_replace` avisa os laços, que acordam na hora em vez de no fim do intervalo.
-        if self.paused.send_replace(paused) != paused
-            && let Ok(summary) = self.summary()
-        {
+        if self.paused.send_replace(paused) == paused {
+            return;
+        }
+        self.saved_while_paused.store(false, Ordering::Relaxed);
+        if let Ok(summary) = self.summary() {
             let _ = self.events.send(EngineEvent::SyncStateChanged(summary));
+        }
+    }
+
+    /// Avisa (uma vez por pausa) que `name` foi gravado e só sobe quando a sincronização voltar.
+    pub(crate) fn note_saved_while_paused(&self, name: &str) {
+        if self.is_paused() && !self.saved_while_paused.swap(true, Ordering::Relaxed) {
+            let _ = self
+                .events
+                .send(EngineEvent::SavedWhilePaused { name: name.into() });
         }
     }
 

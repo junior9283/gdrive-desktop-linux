@@ -112,6 +112,7 @@ fn describe(e: ServiceError, i18n: &I18n) -> String {
         | ServiceError::NotLoggedIn(message)
         | ServiceError::NotFound(message)
         | ServiceError::InvalidArgs(message)
+        | ServiceError::Managed(message)
         | ServiceError::Failed(message) => message,
     }
 }

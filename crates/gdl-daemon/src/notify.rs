@@ -1,6 +1,7 @@
 //! Notificações da área de trabalho (`org.freedesktop.Notifications`) para o que o usuário precisa
 //! saber: edição guardada em Lost and Found, sem internet, disco quase cheio, armazenamento cheio,
-//! falha de envio e cópia de Documento Google que virou atalho.
+//! falha de envio, cópia de Documento Google que virou atalho, gravação com a sincronização
+//! pausada e envio cancelado.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -14,6 +15,19 @@ pub const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 
 /// Ação da notificação do Lost and Found que abre a pasta.
 pub const OPEN_LOST_FOUND: &str = "open-lost-found";
+/// Ação do aviso de envio cancelado que abre a pasta de cancelados.
+pub const OPEN_CANCELED: &str = "open-canceled";
+/// Ação do aviso de gravação com a sincronização pausada que a retoma.
+pub const RESUME: &str = "resume";
+
+/// Os avisos que o usuário pode desligar (Preferências > Notificações); os outros avisam de
+/// algo que ele precisa saber e sempre aparecem.
+pub const OPTIONAL_KINDS: [&str; 4] = [
+    "copied-as-shortcut",
+    "mount-moved",
+    "resume-syncing",
+    "offline",
+];
 
 #[zbus::proxy(
     interface = "org.freedesktop.Notifications",
@@ -40,27 +54,31 @@ pub trait Notifications {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notification {
+    /// Família do aviso (`NotificationItem::kind`), para o histórico e o "não mostrar de novo".
+    pub kind_id: &'static str,
     pub summary: String,
     pub body: String,
     /// Chave e rótulo do botão.
     pub action: Option<(&'static str, String)>,
-    /// Aviso que substitui o anterior da mesma chave em vez de abrir outro: um por estado (sem
-    /// internet, armazenamento cheio) e um por arquivo com falha de envio; `None` abre sempre.
-    pub kind: Option<String>,
+    /// Aviso que substitui o anterior da mesma chave (na área de trabalho e no histórico) em vez
+    /// de abrir outro: um por estado (sem internet, armazenamento cheio) e um por arquivo com
+    /// falha de envio; `None` abre sempre.
+    pub replaces_key: Option<String>,
 }
 
 /// O aviso de um evento do motor; `None` para o que não merece interromper o usuário.
 pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
-    let note = |summary: &'static str, body: String| Notification {
+    let note = |kind_id: &'static str, summary: &'static str, body: String| Notification {
+        kind_id,
         summary: i18n.tr(summary, &[]),
         body,
         action: None,
-        kind: None,
+        replaces_key: None,
     };
     // Avisos de estado: o novo substitui o anterior do mesmo tipo.
-    let state = |summary: &'static str, body: String| Notification {
-        kind: Some(summary.to_string()),
-        ..note(summary, body)
+    let state = |kind_id: &'static str, summary: &'static str, body: String| Notification {
+        replaces_key: Some(kind_id.to_string()),
+        ..note(kind_id, summary, body)
     };
     Some(match event {
         EngineEvent::LostAndFound { path, reason } => {
@@ -73,6 +91,7 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
             Notification {
                 action: Some((OPEN_LOST_FOUND, i18n.tr("notify-lost-found-action", &[]))),
                 ..note(
+                    "lost-and-found",
                     "notify-lost-found-title",
                     i18n.tr(
                         "notify-lost-found-body",
@@ -81,21 +100,29 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
                 )
             }
         }
-        EngineEvent::Offline(true) => {
-            state("notify-offline-title", i18n.tr("notify-offline-body", &[]))
-        }
+        EngineEvent::Offline(true) => state(
+            "offline",
+            "notify-offline-title",
+            i18n.tr("notify-offline-body", &[]),
+        ),
         EngineEvent::DiskLow { free_kb } => state(
+            "disk-low",
             "notify-disk-low-title",
             i18n.tr(
                 "notify-disk-low-body",
                 &[("free", &(free_kb / 1024).to_string())],
             ),
         ),
-        EngineEvent::QuotaFull => state("notify-quota-title", i18n.tr("notify-quota-body", &[])),
+        EngineEvent::QuotaFull => state(
+            "quota-full",
+            "notify-quota-title",
+            i18n.tr("notify-quota-body", &[]),
+        ),
         EngineEvent::UploadFailed { name, error } => Notification {
             // Cada nova tentativa do mesmo arquivo atualiza o aviso dele.
-            kind: Some(format!("upload-failed:{name}")),
+            replaces_key: Some(format!("upload-failed:{name}")),
             ..note(
+                "upload-failed",
                 "notify-upload-failed-title",
                 i18n.tr(
                     "notify-upload-failed-body",
@@ -104,9 +131,26 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
             )
         },
         EngineEvent::CopiedAsShortcut { name } => note(
+            "copied-as-shortcut",
             "notify-shortcut-title",
             i18n.tr("notify-shortcut-body", &[("name", name)]),
         ),
+        EngineEvent::SavedWhilePaused { name } => Notification {
+            action: Some((RESUME, i18n.tr("notify-paused-action", &[]))),
+            ..state(
+                "resume-syncing",
+                "notify-paused-title",
+                i18n.tr("notify-paused-body", &[("name", name)]),
+            )
+        },
+        EngineEvent::UploadCanceled { name } => Notification {
+            action: Some((OPEN_CANCELED, i18n.tr("notify-canceled-action", &[]))),
+            ..note(
+                "upload-canceled",
+                "notify-canceled-title",
+                i18n.tr("notify-canceled-body", &[("name", name)]),
+            )
+        },
         EngineEvent::Offline(false) | EngineEvent::SyncStateChanged(_) => return None,
     })
 }
@@ -130,20 +174,20 @@ impl Notifier {
     }
 
     fn shown(&self) -> std::sync::MutexGuard<'_, HashMap<String, u32>> {
-        self.shown.lock().unwrap_or_else(|e| e.into_inner())
+        crate::lock(&self.shown)
     }
 
     pub fn proxy(&self) -> &NotificationsProxy<'static> {
         &self.proxy
     }
 
-    /// Mostra o aviso (no lugar do anterior do mesmo tipo). Sem servidor de notificações, só
-    /// registra no log.
-    pub async fn send(&self, note: &Notification) {
+    /// Mostra o aviso (no lugar do anterior do mesmo tipo) e devolve o ID que o servidor deu.
+    /// Sem servidor de notificações, só registra no log.
+    pub async fn send(&self, note: &Notification) -> Option<u32> {
         let replaces = note
-            .kind
+            .replaces_key
             .as_ref()
-            .and_then(|kind| self.shown().get(kind).copied())
+            .and_then(|key| self.shown().get(key).copied())
             .unwrap_or(0);
         let actions: Vec<&str> = note
             .action
@@ -163,13 +207,15 @@ impl Notifier {
                 -1,
             )
             .await;
-        match (sent, &note.kind) {
-            (Ok(id), Some(kind)) => {
-                self.shown().insert(kind.clone(), id);
+        match (sent, &note.replaces_key) {
+            (Ok(id), Some(key)) => {
+                self.shown().insert(key.clone(), id);
+                Some(id)
             }
-            (Ok(_), None) => {}
+            (Ok(id), None) => Some(id),
             (Err(e), _) => {
                 tracing::warn!(erro = %e, aviso = %note.summary, "notificação não enviada");
+                None
             }
         }
     }
@@ -210,9 +256,16 @@ mod tests {
             EngineEvent::CopiedAsShortcut {
                 name: "Plano".into(),
             },
+            EngineEvent::SavedWhilePaused {
+                name: "a.txt".into(),
+            },
+            EngineEvent::UploadCanceled {
+                name: "a.txt".into(),
+            },
         ] {
             let note = for_event(&event, &i18n).unwrap();
             assert!(!note.summary.starts_with("notify-"), "{event:?} sem texto");
+            assert!(!note.body.starts_with("notify-"), "{event:?} sem texto");
         }
         assert_eq!(for_event(&EngineEvent::Offline(false), &i18n), None);
         assert_eq!(
@@ -221,11 +274,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn every_optional_kind_has_a_label() {
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            for kind in OPTIONAL_KINDS {
+                let key = format!("notify-kind-{kind}");
+                assert_ne!(i18n.tr(&key, &[]), key, "{lang}: {kind} sem rótulo");
+            }
+        }
+    }
+
     /// Bug: a falha de envio de um arquivo substituía o aviso da falha de outro.
     #[test]
     fn upload_failures_replace_only_the_same_file() {
         let i18n = I18n::new("en");
-        let kind = |event: EngineEvent| for_event(&event, &i18n).unwrap().kind;
+        let kind = |event: EngineEvent| for_event(&event, &i18n).unwrap().replaces_key;
         let failed = |name: &str| EngineEvent::UploadFailed {
             name: name.into(),
             error: "x".into(),

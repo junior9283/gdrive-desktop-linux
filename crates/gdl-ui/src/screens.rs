@@ -6,6 +6,9 @@ pub struct Screen {
     pub name: &'static str,
     pub width: f64,
     pub height: f64,
+    /// Janela flutuante: sem decoração, centralizada, por cima das outras e fora da barra de
+    /// tarefas (a pesquisa rápida).
+    pub floating: bool,
 }
 
 const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
@@ -13,6 +16,7 @@ const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
         name,
         width,
         height,
+        floating: false,
     }
 }
 
@@ -20,7 +24,10 @@ pub const SCREENS: [Screen; 8] = [
     screen("home", 900.0, 640.0),
     screen("onboarding", 560.0, 640.0),
     screen("preferences", 760.0, 640.0),
-    screen("search", 640.0, 460.0),
+    Screen {
+        floating: true,
+        ..screen("search", 640.0, 460.0)
+    },
     screen("errors", 560.0, 600.0),
     screen("offline", 640.0, 560.0),
     screen("about", 480.0, 420.0),
@@ -69,6 +76,16 @@ mod tests {
         assert!(from_args(args(&["--open", "x"])).is_err());
         assert!(from_args(args(&["--open"])).is_err());
         assert!(from_args(args(&["--outro"])).is_err());
+    }
+
+    #[test]
+    fn only_search_floats() {
+        let floating: Vec<_> = SCREENS
+            .iter()
+            .filter(|s| s.floating)
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(floating, ["search"]);
     }
 
     #[test]

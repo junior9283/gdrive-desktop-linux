@@ -1,0 +1,74 @@
+/* Arquivos off-line: a barra de uso, a trilha de pastas, os itens (que rolam) e as ações. */
+
+.offline {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100vh;
+  padding: 24px;
+}
+
+.usage-bar {
+  display: flex;
+  height: 12px;
+  border-radius: var(--md-shape-full);
+  overflow: hidden;
+  background: var(--md-surface-container-high);
+}
+
+.segment-offline {
+  background: var(--md-primary);
+}
+
+.segment-cache {
+  background: var(--md-outline);
+}
+
+.segment-free {
+  background: var(--md-surface-container-high);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font: var(--md-body-medium);
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--md-shape-full);
+  border: 1px solid var(--md-outline-variant);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.crumbs button:disabled {
+  color: var(--md-on-surface);
+  opacity: 1;
+}
+
+.offline .items {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.offline-items button.name {
+  padding: 0;
+  text-align: start;
+}

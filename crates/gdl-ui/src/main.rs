@@ -38,10 +38,16 @@ fn show(app: &AppHandle, screen: &Screen, arg: Option<&str>) -> tauri::Result<()
         query.extend(url::form_urlencoded::byte_serialize(arg.as_bytes()));
     }
     let url = WebviewUrl::App(query.into());
-    WebviewWindowBuilder::new(app, screen.name, url)
+    let mut builder = WebviewWindowBuilder::new(app, screen.name, url)
         .title(title)
         .inner_size(screen.width, screen.height)
-        .build()?;
+        .decorations(!screen.floating)
+        .always_on_top(screen.floating)
+        .skip_taskbar(screen.floating);
+    if screen.floating {
+        builder = builder.center();
+    }
+    builder.build()?;
     Ok(())
 }
 

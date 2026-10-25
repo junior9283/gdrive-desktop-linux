@@ -1,7 +1,10 @@
 #!/bin/sh
 # Testes de ponta a ponta da janela: o serviço de teste (Drive simulado, conta conectada), a
 # janela num servidor gráfico próprio (Xvfb) e num barramento de sessão próprio, comandada pelo
-# tauri-driver. Nada aparece na tela de quem roda. Sai com 77 (pulado) sem o WebKitWebDriver.
+# tauri-driver, com o openbox cuidando do foco das janelas (sem gerenciador de janelas, o Xvfb
+# tira o foco da janela em momentos aleatórios). Nada aparece na tela de quem roda. Sai com 77
+# (pulado) sem o WebKitWebDriver, o tauri-driver ou o openbox.
+# Um argumento filtra os testes pelo nome (`scripts/e2e.sh search`).
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -14,11 +17,17 @@ if [ "${1:-}" != "--inside" ]; then
     echo "e2e pulado: falta o tauri-driver (cargo install tauri-driver --locked)" >&2
     exit 77
   fi
-  cargo build -q -p gdl-ui -p gdl-daemon --example e2e-daemon
+  if ! command -v openbox >/dev/null 2>&1; then
+    echo "e2e pulado: falta o openbox (pacote openbox)" >&2
+    exit 77
+  fi
+  cargo build -q -p gdl-ui -p gdl-tray --bins
+  cargo build -q -p gdl-daemon --example e2e-daemon
   cargo test -q -p gdl-ui --test e2e --no-run
   exec env -u DISPLAY -u WAYLAND_DISPLAY \
-    dbus-run-session --config-file=scripts/e2e-bus.conf -- xvfb-run -a -s "-screen 0 1920x1080x24" "$0" --inside
+    dbus-run-session --config-file=scripts/e2e-bus.conf -- xvfb-run -a -s "-screen 0 1920x1080x24" "$0" --inside "$@"
 fi
+shift
 
 # Daqui para baixo: dentro do barramento e do Xvfb.
 work=$(mktemp -d)
@@ -34,8 +43,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+openbox --sm-disable > "$work/wm.log" 2>&1 &
+pids="$pids $!"
+# O que o "navegador" do serviço de teste abriu, o estado do armazenamento simulado e onde os
+# testes acham a bandeja.
+export GDL_E2E_OPENED="$work/opened" GDL_E2E_QUOTA="$work/quota" GDL_E2E_BIN="$PWD/target/debug"
 target/debug/examples/e2e-daemon > "$work/daemon.out" 2> "$work/daemon.log" &
 pids="$pids $!"
+export GDL_E2E_DAEMON_PID=$!
 tauri-driver --port 4444 > "$work/driver.log" 2>&1 &
 pids="$pids $!"
 
@@ -50,4 +65,4 @@ until grep -q pronto "$work/daemon.out" 2>/dev/null; do
   sleep 0.1
 done
 
-GDL_E2E_WEBDRIVER=http://127.0.0.1:4444 cargo test -q -p gdl-ui --test e2e -- --ignored --test-threads=1
+GDL_E2E_WEBDRIVER=http://127.0.0.1:4444 cargo test -q -p gdl-ui --test e2e -- --ignored --test-threads=1 "$@"

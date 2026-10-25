@@ -127,6 +127,26 @@ export function popupMenu(anchor, items) {
   menu.querySelector('button:not([disabled])')?.focus();
 }
 
+// O botão "⋮" de uma linha: abre `popupMenu` com os itens de `items()`, montados no clique.
+export function menuButton(label, items) {
+  const button = el('button', { class: 'icon-button row-menu', 'aria-label': label }, icon('more_vert'));
+  button.addEventListener('click', () => popupMenu(button, items()));
+  return button;
+}
+
+// A paginação de `paginate`: o que vier em `extra` (o tamanho da página), "Mostrando X–Y de Z" e
+// as setas, que chamam `go(-1)` ou `go(1)`.
+export function pager(t, page, go, ...extra) {
+  return el(
+    'div',
+    { class: 'pager' },
+    ...extra,
+    el('span', {}, t('showing', page)),
+    el('button', { class: 'icon-button', 'aria-label': t('page-previous'), disabled: page.page <= 1, onclick: () => go(-1) }, icon('chevron_left')),
+    el('button', { class: 'icon-button', 'aria-label': t('page-next'), disabled: page.page >= page.pages, onclick: () => go(1) }, icon('chevron_right')),
+  );
+}
+
 // Aviso curto no rodapé da janela.
 export function toast(text) {
   const note = el('div', { class: 'toast', role: 'status' }, text);

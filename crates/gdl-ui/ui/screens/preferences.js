@@ -3,6 +3,7 @@
 // chave da política aparece bloqueada. A lógica fica em `preferences/model.js`.
 
 import { attempt, choice, el, stylesheet, toast } from '../components.js';
+import { screenArg } from '../router.js';
 import { disconnect } from './home/disconnect.js';
 import {
   diff, fromPrefs, gbToKb, hotkeyFrom, kbToGb, numberOrNull, proxyMode, proxyPatch, validate,
@@ -14,7 +15,7 @@ const DEFAULT_HOTKEY = 'Ctrl+Alt+G';
 const SOON = { version: '0.4' };
 
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
-const screen = { root: null, ctx: null, tab: 'drive', listening: null };
+const screen = { root: null, ctx: null, tab: 'drive', listening: null, listeningArg: null };
 // O que veio do serviço e o que o usuário mudou.
 const form = { original: {}, edited: {}, managed: new Set(), limits: {}, mount: '', restartDue: false };
 // Os pedaços que mudam sem redesenhar e a conferência de cada campo com linha de erro.
@@ -31,8 +32,18 @@ export async function render(root, ctx) {
       .then((changed) => changed && draw())
       .catch(() => {});
   });
+  screen.listeningArg ??= listenArg(ctx);
   await Promise.all([loadPrefs(), loadContext(), css]);
   draw();
+}
+
+// A aba pedida por quem abriu a janela: `?arg=` ao abrir, `screen-arg` com ela já aberta.
+function listenArg({ api }) {
+  const tab = screenArg(location.search);
+  if (TABS[tab]) screen.tab = tab;
+  return api.on('screen-arg', (wanted) => {
+    if (TABS[wanted] && ui.tabs) showTab(wanted);
+  });
 }
 
 // As preferências do serviço; `true` se algo mudou.

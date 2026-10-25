@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 
 /// A chave do elemento nas respostas do WebDriver.
 const ELEMENT: &str = "element-6066-11e4-a52e-4f735466cecf";
+/// As teclas Enter e seta para baixo no WebDriver.
+const ENTER: &str = "\u{E007}";
+const DOWN: &str = "\u{E015}";
 
 struct Session {
     http: reqwest::Client,
@@ -66,7 +69,10 @@ impl Session {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        panic!("não apareceu: {css}");
+        let page = self
+            .eval("return location.href + ' | ' + document.body.innerText.slice(0, 300)")
+            .await;
+        panic!("não apareceu: {css}; a janela mostrava {page}");
     }
 
     /// O texto renderizado de `css` (`innerText`). O "texto do elemento" do WebDriver dá vazio
@@ -100,6 +106,13 @@ impl Session {
         let id = self.find(css).await;
         self.post(&format!("element/{id}/clear"), json!({})).await;
         self.post(&format!("element/{id}/value"), json!({ "text": text }))
+            .await;
+    }
+
+    /// Digita `keys` no elemento `css`, sem apagar o que ele tem (`ENTER`, `DOWN`…).
+    async fn keys(&self, css: &str, keys: &str) {
+        let id = self.find(css).await;
+        self.post(&format!("element/{id}/value"), json!({ "text": keys }))
             .await;
     }
 
@@ -192,9 +205,17 @@ async fn service() -> ServiceProxy<'static> {
 
 /// Espera o `Status` do serviço satisfazer `done`.
 async fn status_until(service: &ServiceProxy<'_>, what: &str, done: impl Fn(&Status) -> bool) {
+    until(what, async || {
+        done(&service.status().await.unwrap()).then_some(())
+    })
+    .await;
+}
+
+/// Espera `probe` dar `Some` (até 15 s, de 100 em 100 ms) e devolve o valor.
+async fn until<T>(what: &str, mut probe: impl AsyncFnMut() -> Option<T>) -> T {
     for _ in 0..150 {
-        if done(&service.status().await.unwrap()) {
-            return;
+        if let Some(value) = probe().await {
+            return value;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -383,4 +404,193 @@ async fn saving_restart_key_shows_restart_banner() {
     assert!(pending.contains("pendentes"), "{pending}");
     assert!(banner.contains("reiniciar"), "{banner}");
     assert_eq!(saved.value, (2u64 * 1024 * 1024).to_string());
+}
+
+/// Espera o "navegador" do serviço de teste anotar um endereço ou caminho que contenha `wanted`.
+async fn opened(wanted: &str) -> String {
+    let file = std::env::var("GDL_E2E_OPENED").expect("rode pelo scripts/e2e.sh");
+    until(&format!("o serviço abrir {wanted:?}"), async || {
+        let opened = std::fs::read_to_string(&file).unwrap_or_default();
+        opened
+            .lines()
+            .find(|l| l.contains(wanted))
+            .map(str::to_string)
+    })
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn search_finds_by_name_and_opens() {
+    // Um arquivo lido pela montagem fica entre os recentes (o teste do primeiro uso, que roda
+    // antes, refaz a conta e zera o banco local).
+    let mount = service().await.status().await.unwrap().mount_point;
+    let notes = std::path::Path::new(&mount).join("Meu Drive/notas.txt");
+    tokio::task::spawn_blocking(move || std::fs::read(notes))
+        .await
+        .unwrap()
+        .unwrap();
+    let session = Session::open("search").await;
+    // Campo vazio: as sugestões recentes.
+    let recent = session.wait_text(".results", "notas.txt").await;
+
+    session.fill(".search-field", "relat").await;
+    let results = session.wait_text(".results", "relatório.pdf").await;
+    session.keys(".search-field", DOWN).await;
+    session.keys(".search-field", ENTER).await;
+    let path = opened("relatório.pdf").await;
+
+    assert!(results.contains("Documentos"), "o caminho: {results}");
+    assert!(recent.contains("Recentes"), "{recent}");
+    assert!(
+        path.ends_with("Google Drive/Meu Drive/Documentos/relatório.pdf"),
+        "{path}"
+    );
+}
+
+/// O armazenamento do Drive simulado cheio enquanto existir (sinais do `e2e-daemon`). Ao sair,
+/// libera o espaço e refaz os envios barrados, para um teste que falhou no meio não deixar a
+/// cota cheia para os outros.
+struct QuotaFull;
+
+impl QuotaFull {
+    async fn start() -> QuotaFull {
+        QuotaFull::set("USR1", "full").await;
+        QuotaFull
+    }
+
+    /// Manda `signal` ao serviço de teste e espera ele confirmar `state` em `$GDL_E2E_QUOTA`.
+    async fn set(signal: &str, state: &str) {
+        let var = |name| std::env::var(name).expect("rode pelo scripts/e2e.sh");
+        let (pid, file) = (var("GDL_E2E_DAEMON_PID"), var("GDL_E2E_QUOTA"));
+        let status = std::process::Command::new("kill")
+            .args([&format!("-{signal}"), &pid])
+            .status()
+            .unwrap();
+        assert!(status.success(), "kill -{signal} {pid}");
+        until(&format!("armazenamento {state}"), async || {
+            (std::fs::read_to_string(&file).ok()? == state).then_some(())
+        })
+        .await;
+    }
+}
+
+impl Drop for QuotaFull {
+    fn drop(&mut self) {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                QuotaFull::set("USR2", "free").await;
+                let service = service().await;
+                for error in service.errors().await.unwrap_or_default() {
+                    if error.category == "quota" {
+                        let _ = service.retry(&error.item_id).await;
+                    }
+                }
+            })
+        });
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn errors_list_groups_and_retries() {
+    let service = service().await;
+    let _quota = QuotaFull::start().await;
+    let mount = service.status().await.unwrap().mount_point;
+    let file = std::path::Path::new(&mount).join("Meu Drive/sem-espaco.txt");
+    tokio::task::spawn_blocking(move || std::fs::write(file, b"cheio"))
+        .await
+        .unwrap()
+        .unwrap();
+    status_until(&service, "erro de cota", |s| s.errors >= 1).await;
+    let session = Session::open("errors").await;
+
+    let group = session
+        .wait_text(".error-group[data-category='quota']", "sem-espaco.txt")
+        .await;
+    // Só libera o espaço: quem refaz o envio é o "Tentar de novo" da tela.
+    QuotaFull::set("USR2", "free").await;
+    session
+        .click(".error-group[data-category='quota'] .row-menu")
+        .await;
+    session.click("[data-action='retry']").await;
+    status_until(&service, "envio refeito", |s| {
+        s.errors == 0 && s.pending_uploads == 0
+    })
+    .await;
+    let empty = session.wait_text(".errors", "Nenhum erro").await;
+
+    assert!(group.contains("Armazenamento"), "{group}");
+    assert!(!empty.contains("sem-espaco.txt"), "{empty}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn offline_screen_removes_offline_access() {
+    let service = service().await;
+    let session = Session::open("offline").await;
+
+    let usage = session.wait_text(".usage", "Off-line").await;
+    session.wait_text(".offline-items", "notas.txt").await;
+    session
+        .click(".offline-items [data-name='notas.txt'] .remove-offline")
+        .await;
+    let after = session.wait_text(".offline", "Nenhum arquivo").await;
+
+    assert!(usage.contains("Livre"), "{usage}");
+    assert_eq!(service.offline_summary().await.unwrap().pinned_count, 0);
+    assert!(!after.contains("notas.txt"), "{after}");
+}
+
+/// A bandeja do `scripts/e2e.sh`, encerrada no fim do teste.
+struct TrayProcess(std::process::Child);
+
+impl Drop for TrayProcess {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn tray_publishes_menu() {
+    let bin = std::env::var("GDL_E2E_BIN").expect("rode pelo scripts/e2e.sh");
+    let _tray = TrayProcess(
+        std::process::Command::new(format!("{bin}/gdrive-desktop-linux-tray"))
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let conn = zbus::Connection::session().await.unwrap();
+    let dbus = zbus::fdo::DBusProxy::new(&conn).await.unwrap();
+
+    let item = until("a bandeja publicar o StatusNotifierItem", async || {
+        let names = dbus.list_names().await.unwrap();
+        names
+            .into_iter()
+            .find(|n| n.starts_with("org.kde.StatusNotifierItem-"))
+    })
+    .await;
+    // O menu da conta conectada chega quando a bandeja lê o estado do serviço.
+    let layout = until("o menu da conta conectada", async || {
+        let reply = conn
+            .call_method(
+                Some(item.as_str()),
+                "/MenuBar",
+                Some("com.canonical.dbusmenu"),
+                "GetLayout",
+                &(0i32, -1i32, Vec::<String>::new()),
+            )
+            .await
+            .unwrap();
+        let body = reply.body();
+        let structure: zbus::zvariant::Structure = body.deserialize().unwrap();
+        let layout = zbus::zvariant::Value::from(structure).to_string();
+        layout.contains("Arquivos off-line").then_some(layout)
+    })
+    .await;
+
+    assert!(layout.contains("\"Pesquisar\""), "{layout}");
+    assert!(layout.contains("Sair"), "{layout}");
 }

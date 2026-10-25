@@ -1,6 +1,6 @@
 // Atividade de sincronização: tabela ordenável e paginada, com o menu de cada linha.
 
-import { attempt, el, icon, popupMenu, toast } from '../../components.js';
+import { attempt, el, menuButton, pager, toast } from '../../components.js';
 import { formatAgo, formatSize } from '../../format.js';
 import { paginate, sortRows } from './model.js';
 
@@ -37,8 +37,7 @@ function content(ctx, rows, draw) {
     );
   const now = Date.now();
   const body = page.rows.map((row) => {
-    const menu = el('button', { class: 'icon-button', 'aria-label': t('row-menu') }, icon('more_vert'));
-    menu.addEventListener('click', () => rowMenu(menu, row, ctx));
+    const menu = menuButton(t('row-menu'), () => rowMenu(row, ctx));
     const state = row.percent >= 0 && row.state === 'uploading'
       ? t('activity-uploading-percent', { percent: row.percent })
       : t(`activity-${row.state}`);
@@ -62,7 +61,7 @@ function content(ctx, rows, draw) {
     table.page = 1;
     draw();
   });
-  const go = (delta) => () => {
+  const go = (delta) => {
     table.page += delta;
     draw();
   };
@@ -78,20 +77,14 @@ function content(ctx, rows, draw) {
       ),
       el('tbody', {}, body),
     ),
-    el(
-      'div',
-      { class: 'pager' },
-      el('label', {}, t('page-size'), size),
-      el('span', {}, t('showing', page)),
-      el('button', { class: 'icon-button', 'aria-label': t('page-previous'), disabled: page.page <= 1, onclick: go(-1) }, icon('chevron_left')),
-      el('button', { class: 'icon-button', 'aria-label': t('page-next'), disabled: page.page >= page.pages, onclick: go(1) }, icon('chevron_right')),
-    ),
+    pager(t, page, go, el('label', {}, t('page-size'), size)),
   ];
 }
 
-function rowMenu(anchor, row, { api, t }) {
+// Os itens do menu de uma linha.
+function rowMenu(row, { api, t }) {
   const id = row.item_id;
-  popupMenu(anchor, [
+  return [
     { id: 'open-folder', label: t('row-open-folder'), disabled: !id,
       action: () => attempt(api.call('open_item', { item_id: id, target: 'folder' })) },
     { id: 'open-web', label: t('row-open-web'), disabled: !id,
@@ -104,5 +97,5 @@ function rowMenu(anchor, row, { api, t }) {
     { id: 'cancel-upload', label: t('row-cancel-upload'), disabled: !CANCELABLE.has(row.state),
       action: () => attempt(api.call('cancel_upload', { item_id: id }), (result) =>
         toast(t(result === 'too-late' ? 'upload-finished-first' : 'upload-canceled'))) },
-  ]);
+  ];
 }

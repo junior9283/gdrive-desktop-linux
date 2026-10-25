@@ -1,0 +1,26 @@
+/* Lista de erros: os grupos rolam e o Concluído fica no rodapé. */
+
+.errors {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100vh;
+  padding: 24px;
+}
+
+.errors .groups {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  overflow-y: auto;
+}
+
+.error-group h2 {
+  margin: 0 0 4px;
+  font: var(--md-title-medium);
+}
+
+.error-group > p {
+  margin: 0 0 8px;
+}

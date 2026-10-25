@@ -274,3 +274,54 @@ pref-invalid-proxy = Use um endereço como http://servidor:porta (http, https, s
 notification-settings-title = Preferências de notificação
 notification-settings-text = Escolha quais avisos o app mostra. Os de erro grave e de conta sempre aparecem.
 notification-settings-empty = Nenhum aviso pode ser desligado.
+
+# Pesquisa rápida
+search-recent = Recentes
+search-none = Nenhum item corresponde a "{ $query }".
+search-failed = A pesquisa não deu certo: { $error }
+
+# Lista de erros
+errors-title = Erros de sincronização
+errors-empty = Nenhum erro de sincronização.
+errors-done = Concluído
+errors-count = { $count ->
+    [one] 1 item
+   *[other] { $count } itens
+}
+error-category-quota = Armazenamento cheio
+error-category-quota-text = Libere espaço no Google Drive ou aumente o armazenamento: os envios continuam depois.
+error-category-upload-limit = Limite diário de upload atingido
+error-category-upload-limit-text = O Google Drive aceita até 750 GB de envios por dia. Os envios continuam amanhã.
+error-category-no-permission = Sem permissão para editar
+error-category-no-permission-text = A sua versão ficou guardada em Lost and Found.
+error-category-too-large = Arquivo grande demais
+error-category-too-large-text = O arquivo passa do tamanho que o Google Drive aceita.
+error-category-cloud-missing = O item não existe mais no Google Drive
+error-category-cloud-missing-text = Ele foi excluído ou deixou de ser compartilhado com você.
+error-category-local-missing = O arquivo não existe mais no computador
+error-category-local-missing-text = Ele foi apagado ou movido antes de subir.
+error-category-lost-and-found = Guardados em Lost and Found
+error-category-lost-and-found-text = Versões locais que não puderam subir, guardadas para você revisar.
+error-category-unknown = Outros erros
+error-category-unknown-text = Tente de novo; se continuar, veja o erro técnico de cada item.
+
+# Arquivos off-line
+offline-title = Arquivos off-line
+offline-usage = Uso do disco
+offline-usage-offline = Off-line
+offline-usage-cache = Cache
+offline-usage-free = Livre
+offline-state-on = Disponível off-line
+offline-state-mixed = Parte do conteúdo off-line
+offline-remove = Remover acesso off-line
+offline-removed = Acesso off-line removido
+offline-folder-empty = Nada nesta pasta está disponível off-line.
+offline-clear-cache = Limpar cache
+offline-cache-cleared = { $size } liberados
+offline-clear-offline = Limpar arquivos off-line
+offline-clear-title = Limpar os arquivos off-line?
+offline-clear-body = Eles deixam de estar disponíveis sem internet e saem do computador. Nada é excluído do Google Drive.
+offline-clear-confirm = Limpar
+offline-cleared = Arquivos off-line removidos do computador
+offline-cache-settings = Configurações de cache
+offline-refresh = Atualizar

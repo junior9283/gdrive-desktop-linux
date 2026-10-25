@@ -274,3 +274,54 @@ pref-invalid-proxy = Use an address like http://server:port (http, https, socks5
 notification-settings-title = Notification preferences
 notification-settings-text = Choose which notices the app shows. Serious errors and account notices always appear.
 notification-settings-empty = No notice can be turned off.
+
+# Quick search
+search-recent = Recent
+search-none = No items match "{ $query }".
+search-failed = The search didn't work: { $error }
+
+# Error list
+errors-title = Sync errors
+errors-empty = No sync errors.
+errors-done = Done
+errors-count = { $count ->
+    [one] 1 item
+   *[other] { $count } items
+}
+error-category-quota = Storage full
+error-category-quota-text = Free up space in Google Drive or get more storage: uploads resume afterwards.
+error-category-upload-limit = Daily upload limit reached
+error-category-upload-limit-text = Google Drive accepts up to 750 GB of uploads per day. Uploads resume tomorrow.
+error-category-no-permission = No permission to edit
+error-category-no-permission-text = Your version was kept in Lost and Found.
+error-category-too-large = File too large
+error-category-too-large-text = The file is larger than Google Drive accepts.
+error-category-cloud-missing = The item no longer exists in Google Drive
+error-category-cloud-missing-text = It was deleted or is no longer shared with you.
+error-category-local-missing = The file no longer exists on this computer
+error-category-local-missing-text = It was deleted or moved before it was uploaded.
+error-category-lost-and-found = Kept in Lost and Found
+error-category-lost-and-found-text = Local versions that couldn't be uploaded, kept for you to review.
+error-category-unknown = Other errors
+error-category-unknown-text = Try again; if it keeps happening, check each item's technical error.
+
+# Offline files
+offline-title = Offline files
+offline-usage = Disk usage
+offline-usage-offline = Offline
+offline-usage-cache = Cache
+offline-usage-free = Free
+offline-state-on = Available offline
+offline-state-mixed = Some content offline
+offline-remove = Remove offline access
+offline-removed = Offline access removed
+offline-folder-empty = Nothing in this folder is available offline.
+offline-clear-cache = Clear cache
+offline-cache-cleared = { $size } freed
+offline-clear-offline = Clear offline files
+offline-clear-title = Clear offline files?
+offline-clear-body = They will no longer be available without internet and will leave this computer. Nothing is deleted from Google Drive.
+offline-clear-confirm = Clear
+offline-cleared = Offline files removed from this computer
+offline-cache-settings = Cache settings
+offline-refresh = Refresh

@@ -119,35 +119,8 @@
   margin-top: 32px;
 }
 
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--md-outline-variant);
-}
-
-.list li > div:first-child {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
 .list .unread .name {
   font-weight: 600;
-}
-
-.name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .row-actions {
@@ -185,14 +158,6 @@
   padding: 0;
   color: inherit;
   font: var(--md-label-large);
-}
-
-.pager {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  padding-top: 8px;
 }
 
 .pager label {

@@ -14,6 +14,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - Plano de implementação da versão 0.1 (motor) em `docs/superpowers/plans/`.
 - Workspace Rust (8 crates), CI no GitHub Actions e mapeamento de nomes do Drive para nomes
   válidos no Linux (barra, `.`/`..`, limite de 255 bytes e nomes repetidos).
+- Diretórios XDG, preferências em três camadas (política do administrador > usuário > padrão),
+  com as mesmas chaves do app original e gravação atômica, e textos em pt-BR e inglês (Fluent).
 
 ## [0.0.1] - 2026-10-25
 

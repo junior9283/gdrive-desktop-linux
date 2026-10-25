@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { I18n } from '../i18n.js';
+import { readFileSync } from 'node:fs';
+import { I18n, parseFtl } from '../i18n.js';
+
+const locale = (lang) => new URL(`../../../../locales/${lang}/ui.ftl`, import.meta.url);
 
 const pt = new I18n(
   {
@@ -40,4 +43,21 @@ test('chave ausente devolve a chave', () => {
 
 test('variável ausente fica com o nome', () => {
   assert.equal(pt.t('hello'), 'Olá, $name!');
+});
+
+test('parseFtl guarda as seleções cruas', () => {
+  const map = parseFtl(
+    '# comentário\nsimple = Olá, { $name }!\n\nfiles = { $count ->\n    [one] 1 arquivo\n   *[other] { $count } arquivos\n}\n',
+  );
+  assert.deepEqual(map, {
+    simple: 'Olá, { $name }!',
+    files: '{ $count ->\n[one] 1 arquivo\n*[other] { $count } arquivos\n}',
+  });
+});
+
+test('os dois ui.ftl têm as mesmas chaves e formatam', () => {
+  const pt = parseFtl(readFileSync(locale('pt-BR'), 'utf8'));
+  const en = parseFtl(readFileSync(locale('en'), 'utf8'));
+  assert.deepEqual(Object.keys(pt).sort(), Object.keys(en).sort());
+  assert.equal(new I18n(pt, 'pt-BR').t('about-version', { version: '1.2' }), 'Versão 1.2');
 });

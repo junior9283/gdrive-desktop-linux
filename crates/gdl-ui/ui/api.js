@@ -40,7 +40,11 @@ export function createApi(tauri) {
     version: () => invoke('plugin:app|version'),
     copy: (text) => invoke('clipboard_write', { text }),
     closeWindow: () => invoke('close_window'),
-    openScreen: (screen) => invoke('open_screen', { screen }),
+    openScreen: (screen, arg = null) => invoke('open_screen', { screen, arg }),
+    // Um endereço da tabela fixa do Rust (`drive-web`, `storage`, `privacy`…).
+    openLink: (name) => invoke('open_link', { name }),
+    // Uma pasta escolhida no seletor do sistema, ou `null`.
+    pickFolder: (title) => invoke('pick_folder', { title }),
   };
   return api;
 }

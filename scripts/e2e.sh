@@ -17,13 +17,15 @@ if [ "${1:-}" != "--inside" ]; then
   cargo build -q -p gdl-ui -p gdl-daemon --example e2e-daemon
   cargo test -q -p gdl-ui --test e2e --no-run
   exec env -u DISPLAY -u WAYLAND_DISPLAY \
-    dbus-run-session --config-file=scripts/e2e-bus.conf -- xvfb-run -a "$0" --inside
+    dbus-run-session --config-file=scripts/e2e-bus.conf -- xvfb-run -a -s "-screen 0 1920x1080x24" "$0" --inside
 fi
 
 # Daqui para baixo: dentro do barramento e do Xvfb.
 work=$(mktemp -d)
 export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data" XDG_CACHE_HOME="$work/cache"
 export NO_AT_BRIDGE=1
+# Os testes conferem os textos em pt-BR.
+export LANG=pt_BR.UTF-8 LC_ALL=pt_BR.UTF-8
 pids=""
 cleanup() {
   for pid in $pids; do kill "$pid" 2>/dev/null || true; done

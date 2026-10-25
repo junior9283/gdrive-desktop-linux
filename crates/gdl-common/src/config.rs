@@ -187,6 +187,12 @@ pub fn load_preferences(
     Ok((policy.over(user).over(defaults).resolve(), managed))
 }
 
+/// O navegador de `DefaultWebBrowser` (`None`: o padrão do usuário, também com as preferências
+/// ilegíveis).
+pub fn default_web_browser(paths: &Paths) -> Option<PathBuf> {
+    load_preferences(paths).ok()?.0.default_web_browser
+}
+
 /// Preferências que só valem depois de reiniciar o serviço (cache, montagem e rede); as
 /// outras valem na hora.
 const RESTART_KEYS: &[&str] = &[
@@ -346,6 +352,18 @@ mod tests {
         assert_eq!(prefs.default_mount_point, Some("/b".into()));
         assert!(managed.contains("ContentCacheMaxKbytes"));
         assert!(!managed.contains("DefaultMountPoint"));
+    }
+
+    #[test]
+    fn default_web_browser_comes_from_the_preferences() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        assert_eq!(default_web_browser(&paths), None);
+        write(
+            &paths.etc_dir.join("policies.toml"),
+            "DefaultWebBrowser = \"/usr/bin/firefox\"\n",
+        );
+        assert_eq!(default_web_browser(&paths), Some("/usr/bin/firefox".into()));
     }
 
     #[test]

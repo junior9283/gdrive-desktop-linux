@@ -3,21 +3,20 @@
 
 import { api } from './api.js';
 import { el, icon } from './components.js';
-import { I18n } from './i18n.js';
+import { I18n, parseFtl } from './i18n.js';
 import { currentScreen } from './router.js';
 
 // As telas que já existem; as outras mostram o aviso de "em construção".
-const READY = new Set(['about']);
+const READY = new Set(['about', 'home']);
 
 const screen = currentScreen(location.search);
 // Os textos e o código da tela chegam juntos.
-const [{ locale, messages }, module] = await Promise.all([
+const [{ locale, source }, module] = await Promise.all([
   api.strings(),
   import(READY.has(screen) ? `./screens/${screen}.js` : './screens/pending.js'),
 ]);
-const i18n = new I18n(messages, locale);
+const i18n = new I18n(parseFtl(source), locale);
 document.documentElement.lang = locale;
-document.title = i18n.t(`window-${screen}`);
 
 const root = el('div', { id: 'screen' });
 const banner = el(
@@ -25,10 +24,11 @@ const banner = el(
   { class: 'banner', role: 'status', hidden: true },
   icon('cloud_off'),
   el('span', {}, i18n.t('service-unavailable')),
+  el('button', { onclick: () => show() }, i18n.t('action-retry')),
 );
 document.body.append(banner, root);
 
-const context = { api, i18n, locale };
+const context = { api, locale, t: i18n.t };
 
 async function render() {
   try {

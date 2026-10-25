@@ -1,0 +1,37 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseFtl } from '../i18n.js';
+
+const ui = fileURLToPath(new URL('..', import.meta.url));
+const locale = (lang) =>
+  parseFtl(readFileSync(new URL(`../../../../locales/${lang}/ui.ftl`, import.meta.url), 'utf8'));
+
+// Os arquivos .js das telas (fora os testes).
+function sources(dir = ui) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return entry.name === 'tests' ? [] : sources(path);
+    return entry.name.endsWith('.js') ? [path] : [];
+  });
+}
+
+test('toda chave usada nas telas existe nos dois idiomas', () => {
+  const used = new Set();
+  for (const file of sources()) {
+    for (const [, key] of readFileSync(file, 'utf8').matchAll(/\bt\('([a-z0-9-]+)'/g)) used.add(key);
+  }
+  // As montadas com o nome da visão ou do estado.
+  for (const view of ['start', 'activity', 'offline', 'shared', 'notifications', 'links']) used.add(`view-${view}`);
+  for (const state of [
+    'upload-queued', 'uploading', 'uploaded', 'upload-canceling', 'upload-canceled', 'upload-failed',
+    'downloading', 'downloaded', 'trashing', 'trashed', 'restoring', 'restored',
+  ]) used.add(`activity-${state}`);
+  for (const lang of ['pt-BR', 'en']) {
+    const messages = locale(lang);
+    const missing = [...used].filter((key) => !(key in messages));
+    assert.deepEqual(missing, [], lang);
+  }
+});

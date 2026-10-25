@@ -106,3 +106,13 @@ tray-quit = Quit
 tray-sign-in = Sign in
 tray-start-service = Start the service
 tray-hotkey-search = Open Google Drive search
+
+# Window titles (gdl-ui)
+window-home = Google Drive
+window-onboarding = Sign in
+window-preferences = Preferences
+window-search = Search
+window-errors = Error list
+window-offline = Offline files
+window-about = About
+window-notification-settings = Notification preferences

@@ -4,7 +4,12 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use gdl_common::i18n::env_lang;
+use ashpd::desktop::file_chooser::SelectedFiles;
+use gdl_common::browser;
+use gdl_common::config::default_web_browser;
+use gdl_common::i18n::{I18n, env_lang};
+use gdl_common::links;
+use gdl_common::paths::Paths;
 use gdl_ui::bridge::{Bridge, Emit, RECONNECT, UiError};
 use gdl_ui::screens::{self, Screen};
 use gdl_ui::single::{Requests, SingleInstance};
@@ -13,16 +18,25 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use zbus::Connection;
 
-/// Mostra a tela `screen`: traz para a frente a janela dela, ou abre uma.
-fn show(app: &AppHandle, screen: &Screen) -> tauri::Result<()> {
+/// Mostra a tela `screen`: traz para a frente a janela dela, ou abre uma. `arg` vai para a tela
+/// (o texto da pesquisa, por exemplo): na query `?arg=` ou, com a janela já aberta, no evento
+/// `screen-arg`.
+fn show(app: &AppHandle, screen: &Screen, arg: Option<&str>) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(screen.name) {
+        if let Some(arg) = arg {
+            window.emit_to(screen.name, "screen-arg", arg)?;
+        }
         window.unminimize()?;
         window.show()?;
         return window.set_focus();
     }
-    let strings = app.state::<UiStrings>();
-    let title = strings.title(screen).unwrap_or(screen.name);
-    let url = WebviewUrl::App(format!("index.html?screen={}", screen.name).into());
+    let title = app.state::<I18n>().tr(&screen.title_key(), &[]);
+    let mut query = format!("index.html?screen={}", screen.name);
+    if let Some(arg) = arg {
+        query.push_str("&arg=");
+        query.extend(url::form_urlencoded::byte_serialize(arg.as_bytes()));
+    }
+    let url = WebviewUrl::App(query.into());
     WebviewWindowBuilder::new(app, screen.name, url)
         .title(title)
         .inner_size(screen.width, screen.height)
@@ -30,8 +44,8 @@ fn show(app: &AppHandle, screen: &Screen) -> tauri::Result<()> {
     Ok(())
 }
 
-fn show_named(app: &AppHandle, name: &str) -> Result<(), String> {
-    show(app, screens::find(name)?).map_err(|e| e.to_string())
+fn show_named(app: &AppHandle, name: &str, arg: Option<&str>) -> Result<(), String> {
+    show(app, screens::find(name)?, arg).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -63,12 +77,49 @@ fn close_window(window: WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_screen(app: AppHandle, screen: String) -> Result<(), String> {
-    show_named(&app, &screen)
+fn open_screen(app: AppHandle, screen: String, arg: Option<String>) -> Result<(), String> {
+    show_named(&app, &screen, arg.as_deref())
 }
 
-/// Fica com o nome da janela e devolve a ponte e os pedidos de tela; `None` se outra janela já
-/// estava aberta (e recebeu o pedido).
+/// Abre no navegador o endereço de `name` (a tabela fixa de `gdl_common::links`), com o
+/// navegador de `DefaultWebBrowser` se o administrador definiu um.
+#[tauri::command]
+async fn open_link(name: String) -> Result<(), String> {
+    let url = links::url(&name).ok_or_else(|| format!("link desconhecido: {name}"))?;
+    let browser = default_web_browser(&Paths::from_env());
+    tauri::async_runtime::spawn_blocking(move || browser::open(&url, browser.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Pede uma pasta ao usuário pelo portal (o seletor do próprio ambiente); `None` se ele cancelou.
+#[tauri::command]
+async fn pick_folder(
+    bridge: State<'_, Arc<Bridge>>,
+    title: String,
+) -> Result<Option<String>, String> {
+    let request = SelectedFiles::open_file()
+        .title(title.as_str())
+        .directory(true)
+        .modal(true)
+        .connection(Some(bridge.connection().clone()))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let files = match request.response() {
+        Ok(files) => files,
+        Err(ashpd::Error::Response(ashpd::desktop::ResponseError::Cancelled)) => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    let path = files
+        .uris()
+        .first()
+        .and_then(|uri| url::Url::parse(uri.as_str()).ok()?.to_file_path().ok());
+    Ok(path.map(|p| p.display().to_string()))
+}
+
+/// Fica com o nome da janela; `None` se outra janela já estava aberta (e recebeu o pedido).
 async fn start(screen: &Screen) -> zbus::Result<Option<(Bridge, Requests)>> {
     let conn = Connection::session().await?;
     match SingleInstance::claim(&conn, screen.name).await? {
@@ -96,19 +147,24 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let lang = env_lang();
     let result = tauri::Builder::default()
         .manage(bridge.clone())
-        .manage(UiStrings::new(&env_lang()))
+        // Os títulos das janelas (Rust) e os textos das telas (JavaScript).
+        .manage(I18n::new(&lang))
+        .manage(UiStrings::new(&lang))
         .invoke_handler(tauri::generate_handler![
             call,
             strings,
             clipboard_write,
             close_window,
-            open_screen
+            open_screen,
+            open_link,
+            pick_folder
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            show(&handle, screen)?;
+            show(&handle, screen, None)?;
             let emit: Emit = Arc::new({
                 let handle = handle.clone();
                 move |name, payload| {
@@ -128,7 +184,7 @@ fn main() -> ExitCode {
             tauri::async_runtime::spawn(bridge.watch(RECONNECT, emit));
             tauri::async_runtime::spawn(async move {
                 while let Some(name) = requests.recv().await {
-                    if let Err(e) = show_named(&handle, &name) {
+                    if let Err(e) = show_named(&handle, &name, None) {
                         tracing::warn!(erro = %e, "pedido de tela recusado");
                     }
                 }

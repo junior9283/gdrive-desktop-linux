@@ -113,8 +113,8 @@ mod tests {
     #[test]
     fn language_is_pt_br_or_english() {
         assert_eq!(language("pt_PT.UTF-8"), "pt-BR");
-        assert!(ui_source("pt-BR").contains("window-about = Sobre"));
-        assert!(ui_source("en").contains("window-about = About"));
+        assert!(ui_source("pt-BR").contains("about-name ="));
+        assert_eq!(I18n::new("pt_BR").tr("window-about", &[]), "Sobre");
         assert_eq!(language(""), "en");
     }
 

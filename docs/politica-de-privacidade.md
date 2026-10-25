@@ -1,0 +1,33 @@
+# Política de Privacidade
+
+O gdrive-desktop-linux é um cliente **não oficial** do Google Drive, de código aberto (GPL-3.0). Ele
+não tem ligação com o Google nem é aprovado por ele.
+
+## O que o app guarda no seu computador
+
+- **Metadados dos arquivos** (nomes, pastas, tamanhos, datas e revisões) num banco local, para
+  mostrar a pasta do Drive sem consultar a internet a cada acesso.
+- **O conteúdo que você abriu ou marcou como off-line**, no cache, até ele ser liberado.
+- **O token de acesso da conta**, no Secret Service do seu ambiente (o "chaveiro" do KDE ou do
+  GNOME), nunca em arquivo de texto.
+- **Preferências e registros** do app, nas pastas de configuração e de estado do seu usuário.
+
+## Com quem o app conversa
+
+Só com as APIs do Google Drive e do login do Google, usando o Client ID que **você** criou no seu
+projeto do Google Cloud (veja o [guia do Client ID](guia-client-id.md)). O projeto não tem
+servidores próprios e não recebe nenhum dado seu.
+
+## O que o app não faz
+
+- Não envia estatísticas de uso nem telemetria.
+- O relatório automático de erros fica **desligado**; nada é enviado sem você ligar.
+- A interface e o ícone na bandeja não acessam a internet: tudo passa pelo serviço local.
+
+## Como apagar os dados
+
+Desconecte a conta pela janela principal (menu da conta → Desconectar). O app remove o token, o
+cache e os arquivos off-line daquela conta. As preferências ficam em
+`~/.config/gdrive-desktop-linux` e podem ser apagadas à mão.
+
+Os dados no Google Drive seguem as regras do próprio Google.

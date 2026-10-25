@@ -1,8 +1,9 @@
 //! Testes de ponta a ponta da janela, pelo WebDriver do `tauri-driver`. Rodam só pelo
 //! `scripts/e2e.sh` (que sobe o Xvfb, o barramento, o serviço de teste e o driver).
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use gdl_ipc::{ServiceProxy, Status, UiProxy};
 use serde_json::{Value, json};
 
 /// A chave do elemento nas respostas do WebDriver.
@@ -54,21 +55,69 @@ impl Session {
         self.request(reqwest::Method::POST, path, Some(body)).await
     }
 
-    /// O texto do elemento `css`, esperando ele aparecer (a tela monta depois de carregar).
-    async fn text(&self, css: &str) -> String {
+    /// O elemento `css`, esperando ele aparecer (a tela monta depois de carregar).
+    async fn find(&self, css: &str) -> String {
         for _ in 0..100 {
             let found = self
                 .post("element", json!({ "using": "css selector", "value": css }))
                 .await;
             if let Some(id) = found[ELEMENT].as_str() {
-                let text = self
-                    .request(reqwest::Method::GET, &format!("element/{id}/text"), None)
-                    .await;
-                return text.as_str().unwrap_or_default().to_string();
+                return id.to_string();
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         panic!("não apareceu: {css}");
+    }
+
+    /// O texto renderizado de `css` (`innerText`). O "texto do elemento" do WebDriver dá vazio
+    /// para um nome cortado com reticências (`overflow: hidden`), que ele julga escondido.
+    async fn text(&self, css: &str) -> String {
+        let id = self.find(css).await;
+        let text = self
+            .post(
+                "execute/sync",
+                json!({ "script": "return arguments[0].innerText", "args": [{ ELEMENT: id }] }),
+            )
+            .await;
+        text.as_str().unwrap_or_default().to_string()
+    }
+
+    /// Espera o texto de `css` conter `wanted`.
+    async fn wait_text(&self, css: &str, wanted: &str) -> String {
+        let mut last = String::new();
+        for _ in 0..150 {
+            last = self.text(css).await;
+            if last.contains(wanted) {
+                return last;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("{css}: esperava {wanted:?}, ficou {last:?}");
+    }
+
+    async fn click(&self, css: &str) {
+        let id = self.find(css).await;
+        self.post(&format!("element/{id}/click"), json!({})).await;
+    }
+
+    /// A janela que apareceu depois da primeira.
+    async fn new_window(&self) -> String {
+        let first = self.request(reqwest::Method::GET, "window", None).await;
+        for _ in 0..150 {
+            let handles = self
+                .request(reqwest::Method::GET, "window/handles", None)
+                .await;
+            let other = handles
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|h| **h != first);
+            if let Some(handle) = other.and_then(Value::as_str) {
+                return handle.to_string();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("a janela nova não apareceu");
     }
 
     /// Roda `script` na página (uma promessa é esperada).
@@ -76,13 +125,29 @@ impl Session {
         self.post("execute/sync", json!({ "script": script, "args": [] }))
             .await
     }
-
-    async fn close(self) {
-        let _ = self.http.delete(&self.base).send().await;
-    }
 }
 
-#[tokio::test]
+/// Fecha a sessão mesmo se o teste falhou no meio, e espera a janela soltar o nome no barramento
+/// (senão a próxima sessão daria com ela e sairia como segunda instância).
+impl Drop for Session {
+    fn drop(&mut self) {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let _ = self.http.delete(&self.base).send().await;
+                let conn = zbus::Connection::session().await.unwrap();
+                let dbus = zbus::fdo::DBusProxy::new(&conn).await.unwrap();
+                for _ in 0..100 {
+                    let name = gdl_ipc::UI_BUS_NAME.try_into().unwrap();
+                    if !dbus.name_has_owner(name).await.unwrap_or(false) {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+        });
+    }
+}
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn about_window_opens_and_shows_version() {
     let session = Session::open("about").await;
@@ -97,7 +162,6 @@ async fn about_window_opens_and_shows_version() {
              [...fs].some(f => f.family.includes('Inter') && f.status === 'loaded'))",
         )
         .await;
-    session.close().await;
 
     assert!(
         version.contains(env!("CARGO_PKG_VERSION")),
@@ -110,4 +174,105 @@ async fn about_window_opens_and_shows_version() {
         "aviso: {unofficial}"
     );
     assert_eq!(inter, Value::Bool(true));
+}
+
+/// O serviço de teste, pelo barramento do `scripts/e2e.sh`.
+async fn service() -> ServiceProxy<'static> {
+    let conn = zbus::Connection::session().await.unwrap();
+    ServiceProxy::new(&conn).await.unwrap()
+}
+
+/// Espera o `Status` do serviço satisfazer `done`.
+async fn status_until(service: &ServiceProxy<'_>, what: &str, done: impl Fn(&Status) -> bool) {
+    for _ in 0..150 {
+        if done(&service.status().await.unwrap()) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("esperando: {what}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn home_shows_synced_and_activity() {
+    let session = Session::open("home").await;
+
+    session
+        .wait_text(".header-title", "Sincronização concluída")
+        .await;
+    session.click("[data-view='activity']").await;
+    // O arquivo que o serviço de teste gravou pela montagem.
+    let row = session
+        .wait_text(".activity-table tbody", "enviado-pelo-teste.txt")
+        .await;
+
+    assert!(row.contains("Enviado"), "{row}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn pause_button_toggles() {
+    let service = service().await;
+    let session = Session::open("home").await;
+    session.wait_text(".header-pause", "Pausar").await;
+
+    session.click(".header-pause").await;
+    session
+        .wait_text(".header-title", "Sincronização pausada")
+        .await;
+    let paused = service.status().await.unwrap().paused;
+    session.click(".header-pause").await;
+    session.wait_text(".header-pause", "Pausar").await;
+
+    assert!(paused);
+    assert!(!service.status().await.unwrap().paused);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn quit_asks_when_syncing() {
+    let service = service().await;
+    // Pausado, um arquivo novo fica esperando o envio.
+    service.pause().await.unwrap();
+    let mount = service.status().await.unwrap().mount_point;
+    let file = std::path::Path::new(&mount).join("Meu Drive/na-fila.txt");
+    tokio::task::spawn_blocking(move || std::fs::write(file, b"esperando"))
+        .await
+        .unwrap()
+        .unwrap();
+    status_until(&service, "envio na fila", |s| s.pending_uploads > 0).await;
+    let session = Session::open("home").await;
+
+    session.click(".more-button").await;
+    session.click("[data-action='quit']").await;
+    let question = session.text("dialog[open] .dialog-body").await;
+    session.click("dialog[open] .dialog-cancel").await;
+    let still_up = service.status().await.is_ok();
+    service.resume().await.unwrap();
+
+    assert!(question.contains("1"), "{question}");
+    assert!(still_up);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn opens_in_under_1500ms() {
+    let session = Session::open("about").await;
+    session.text(".about-version").await;
+    let conn = zbus::Connection::session().await.unwrap();
+    let ui = UiProxy::new(&conn).await.unwrap();
+
+    let start = Instant::now();
+    ui.open("home").await.unwrap();
+    let handle = session.new_window().await;
+    session.post("window", json!({ "handle": handle })).await;
+    // O cabeçalho e os cartões do Início: o que o usuário espera ver.
+    let title = session.text(".header-title").await;
+    let cards = session.text(".view .cards").await;
+    let elapsed = start.elapsed();
+
+    assert!(!title.is_empty());
+    assert!(!cards.is_empty());
+    assert!(elapsed < Duration::from_millis(1500), "{elapsed:?}");
 }

@@ -1,6 +1,29 @@
 // O pedaço do Fluent que os arquivos `ui.ftl` usam: `{ $var }` e seleção
 // (`{ $count -> [0] … [one] … *[other] … }`) por valor exato ou por categoria
-// de plural (`Intl.PluralRules`). As mensagens chegam cruas do Rust (`strings`).
+// de plural (`Intl.PluralRules`). O arquivo chega cru do Rust (`strings`).
+
+// `chave = valor` de cada mensagem; as linhas recuadas (e o `}` que fecha uma
+// seleção, que o Fluent aceita sem recuo) continuam o valor, com `\n`.
+// Comentários e linhas em branco ficam de fora.
+export function parseFtl(source) {
+  const messages = {};
+  let key = null;
+  for (const line of source.split('\n')) {
+    if (!line.trim() || line.startsWith('#')) continue;
+    if (/^[\s}]/.test(line)) {
+      if (key !== null) {
+        const value = messages[key];
+        messages[key] = value ? `${value}\n${line.trim()}` : line.trim();
+      }
+      continue;
+    }
+    const at = line.indexOf('=');
+    if (at < 0) continue;
+    key = line.slice(0, at).trim();
+    messages[key] = line.slice(at + 1).trim();
+  }
+  return messages;
+}
 
 export class I18n {
   constructor(messages, locale) {
@@ -9,11 +32,12 @@ export class I18n {
     this.plural = new Intl.PluralRules(locale);
   }
 
-  // O texto de `key` com `args`; a própria chave se ela não existir.
-  t(key, args = {}) {
+  // O texto de `key` com `args`; a própria chave se ela não existir. Campo com seta para poder
+  // ser passado solto (`const { t } = ctx`).
+  t = (key, args = {}) => {
     const pattern = this.messages[key];
     return pattern === undefined ? key : this.render(pattern, args);
-  }
+  };
 
   render(pattern, args) {
     let out = '';

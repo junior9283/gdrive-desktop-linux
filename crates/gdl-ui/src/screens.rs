@@ -17,7 +17,7 @@ const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
 }
 
 pub const SCREENS: [Screen; 8] = [
-    screen("home", 380.0, 560.0),
+    screen("home", 900.0, 640.0),
     screen("onboarding", 560.0, 640.0),
     screen("preferences", 760.0, 640.0),
     screen("search", 640.0, 460.0),
@@ -26,6 +26,13 @@ pub const SCREENS: [Screen; 8] = [
     screen("about", 480.0, 420.0),
     screen("notification-settings", 480.0, 520.0),
 ];
+
+impl Screen {
+    /// A chave do título da janela no `main.ftl`.
+    pub fn title_key(&self) -> String {
+        format!("window-{}", self.name)
+    }
+}
 
 pub fn find(name: &str) -> Result<&'static Screen, String> {
     SCREENS
@@ -66,9 +73,9 @@ mod tests {
 
     #[test]
     fn every_screen_has_a_title() {
-        let strings = crate::strings::UiStrings::new("pt_BR");
+        let i18n = gdl_common::i18n::I18n::new("pt_BR");
         for screen in &SCREENS {
-            assert!(strings.title(screen).is_some(), "{}", screen.name);
+            assert_ne!(i18n.tr(&screen.title_key(), &[]), screen.title_key());
         }
     }
 }

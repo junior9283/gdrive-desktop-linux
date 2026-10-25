@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use futures_util::StreamExt;
 use gdl_common::browser;
-use gdl_common::config::load_preferences;
+use gdl_common::config::default_web_browser;
 use gdl_common::i18n::I18n;
 use gdl_common::paths::Paths;
 use gdl_common::time::rfc3339;
@@ -93,9 +93,7 @@ fn open_pointer(file: &Path, i18n: &I18n) -> Res {
     let json = std::fs::read(file).map_err(failed)?;
     // O endereço sai do ID, nunca do campo `url`: um ponteiro forjado não abre outra coisa.
     let id = pointer_doc_id(&json).ok_or_else(not_pointer)?;
-    let launcher = load_preferences(&Paths::from_env())
-        .ok()
-        .and_then(|(prefs, _)| prefs.default_web_browser);
+    let launcher = default_web_browser(&Paths::from_env());
     browser::open(&open_url(&id), launcher.as_deref()).map_err(failed)
 }
 

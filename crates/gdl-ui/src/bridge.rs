@@ -88,6 +88,11 @@ impl Bridge {
         })
     }
 
+    /// O barramento de sessão (o mesmo do serviço), para os portais.
+    pub fn connection(&self) -> &Connection {
+        self.service.inner().connection()
+    }
+
     /// O serviço respondeu na última tentativa.
     pub fn is_up(&self) -> bool {
         self.up.load(Ordering::Relaxed)

@@ -6,8 +6,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use gdl_common::config::{Preferences, load_preferences};
+use gdl_common::config::{Preferences, default_web_browser, load_preferences};
 use gdl_common::i18n::I18n;
+use gdl_common::links::DRIVE_WEB;
 use gdl_common::paths::Paths;
 use gdl_ipc::{BUS_NAME, ServiceProxy, Status};
 use gdl_tray::hotkey::{DEFAULT_TRIGGER, Hotkey};
@@ -21,8 +22,6 @@ use zbus::Connection;
 
 type Error = Box<dyn std::error::Error>;
 
-/// Endereço do Meu Drive na web.
-const DRIVE_WEB: &str = "https://drive.google.com/drive/my-drive";
 /// Sem serviço, de quanto em quanto tempo tentar de novo.
 const RETRY: Duration = Duration::from_secs(5);
 /// Troca de quadro da animação de "sincronizando".
@@ -163,7 +162,7 @@ impl App {
                 None => Ok(()),
             },
             Action::OpenWeb => {
-                let browser = preferences().and_then(|p| p.default_web_browser);
+                let browser = default_web_browser(&Paths::from_env());
                 open_outside(DRIVE_WEB.into(), browser).await
             }
             Action::Pause => self.service.pause().await.map_err(Error::from),

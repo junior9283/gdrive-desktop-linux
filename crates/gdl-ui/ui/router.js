@@ -4,3 +4,8 @@
 export function currentScreen(search) {
   return new URLSearchParams(search).get('screen') ?? 'home';
 }
+
+// O argumento da tela (`?arg=`), como o texto da pesquisa; `null` sem argumento.
+export function screenArg(search) {
+  return new URLSearchParams(search).get('arg');
+}

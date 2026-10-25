@@ -73,6 +73,13 @@ async fn main() -> Result<(), Error> {
     if !signal_ok {
         return Err("o login falhou".into());
     }
+    // Um envio pela montagem, para a atividade de sincronização ter o que mostrar.
+    let mount = proxy.status().await?.mount_point;
+    let file = std::path::Path::new(&mount).join("Meu Drive/enviado-pelo-teste.txt");
+    tokio::task::spawn_blocking(move || std::fs::write(file, b"oi")).await??;
+    while proxy.status().await?.pending_uploads > 0 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     println!("pronto");
 
     let mut term = signal(SignalKind::terminate())?;

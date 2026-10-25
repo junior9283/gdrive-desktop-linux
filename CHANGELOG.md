@@ -7,6 +7,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Adicionado
+- Documento de design com o catálogo de funcionalidades, a arquitetura, o roteiro e os testes
+  (`docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md`).
+- README: diferenças conhecidas em relação ao app oficial.
+
 ## [0.0.1] - 2026-10-25
 
 ### Adicionado

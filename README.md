@@ -64,8 +64,17 @@ especificação em [`docs/`](docs/).
 
 - **Atualizações vindas da nuvem:** chegam em segundos, mas não na hora. O app oficial usa um canal
   de notificação interno do Google que não está disponível para terceiros.
-- **Login:** é feito com um aplicativo OAuth próprio do projeto, nunca com a identidade do app
-  oficial.
+- **Login:** nunca usa a identidade do app oficial. Nas versões 0.x, cada usuário cria o próprio
+  Client ID no Google Cloud (haverá um guia passo a passo em `docs/`).
+- **Backups de pastas:** a API pública não cria a seção "Computadores" do Drive. Os backups ficam em
+  `Meu Drive/Computadores/<nome-do-computador>/`, e a pasta do app mostra "Computadores" como no
+  original.
+- **Sem o limite de 4 GB por arquivo** da unidade virtual do Windows: aqui o limite é o da nuvem.
+- **Ficam fora:** presença em tempo real do Office, plugins do Outlook/Meet e backup para o Google
+  Fotos (descontinuado pelo próprio Google).
+
+A especificação completa está em
+[`docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md`](docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md).
 
 ## Roteiro
 

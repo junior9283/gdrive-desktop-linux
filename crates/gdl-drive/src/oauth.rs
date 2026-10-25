@@ -87,8 +87,6 @@ impl From<reqwest::Error> for AuthError {
 pub enum LoginError {
     #[error("o login não foi concluído a tempo")]
     Timeout,
-    #[error("resposta de login que não corresponde a este pedido")]
-    StateMismatch,
     #[error("o acesso à conta foi recusado")]
     Denied,
     #[error(
@@ -251,14 +249,11 @@ impl LoginFlow {
     }
 }
 
-/// O que o retorno do navegador significa: `?code=…&state=…` ou `?error=…&state=…`.
-fn parse_callback(params: &HashMap<String, String>, expected_state: &str) -> CallbackResult {
-    if params.get("state").map(String::as_str) != Some(expected_state) {
-        Err(LoginError::StateMismatch)
-    } else if params.contains_key("error") {
-        Err(LoginError::Denied)
-    } else {
-        params.get("code").cloned().ok_or(LoginError::Denied)
+/// O que o retorno do navegador significa: `?code=…` ou `?error=…` (o `state` já conferido).
+fn parse_callback(params: &HashMap<String, String>) -> CallbackResult {
+    match params.get("code") {
+        Some(code) if !params.contains_key("error") => Ok(code.clone()),
+        _ => Err(LoginError::Denied),
     }
 }
 
@@ -277,7 +272,12 @@ async fn on_redirect(
     State(cb): State<Arc<Callback>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let result = parse_callback(&params, &cb.state);
+    // Retorno sem o `state` deste login (forjado por outro programa ou página): recusa sem encerrar o
+    // fluxo, para não deixar ninguém derrubar o login da pessoa.
+    if params.get("state") != Some(&cb.state) {
+        return (StatusCode::BAD_REQUEST, result_page(&cb.i18n, false)).into_response();
+    }
+    let result = parse_callback(&params);
     let ok = result.is_ok();
     // Só o primeiro retorno conta; um segundo acesso à mesma URL mostra a falha.
     let delivered = cb
@@ -456,21 +456,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wrong_state_is_rejected() {
+    async fn wrong_state_is_rejected_without_ending_the_login() {
         let fake = FakeDrive::start().await;
         let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
         let redirect: Url = param(&flow.auth_url(), "redirect_uri")
             .unwrap()
             .parse()
             .unwrap();
-        let resp = reqwest::get(format!("{redirect}?code=abc&state=outro"))
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
-        assert!(matches!(
-            flow.wait(Duration::from_secs(5)).await,
-            Err(LoginError::StateMismatch)
-        ));
+        for forged in ["?code=abc&state=outro", "?error=access_denied", "?code=abc"] {
+            let resp = reqwest::get(format!("{redirect}{forged}")).await.unwrap();
+            assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST, "{forged}");
+        }
+        // Retornos forjados não derrubam o login: o retorno legítimo ainda funciona.
+        assert!(approve_in_browser(&flow).await.status().is_success());
+        assert_eq!(
+            flow.wait(Duration::from_secs(5)).await.unwrap().email,
+            fake.email()
+        );
     }
 
     #[tokio::test]

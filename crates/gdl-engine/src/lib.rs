@@ -1,5 +1,6 @@
 //! Motor de sincronização: índice, mudanças, cache, envio e off-line.
 
+pub mod cache;
 pub mod changes;
 pub mod events;
 pub mod gdocs;

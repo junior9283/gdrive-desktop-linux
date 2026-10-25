@@ -8,9 +8,11 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+bytes.workspace = true
 gdl-common.workspace = true
 gdl-drive.workspace = true
 gdl-store.workspace = true
+rustix.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

@@ -319,6 +319,15 @@ impl Store {
         Ok(())
     }
 
+    /// Total de bytes de conteúdo no cache, somando os intervalos de todos os itens.
+    pub fn cached_bytes(&self) -> Result<u64> {
+        Ok(self.conn().query_row(
+            "SELECT COALESCE(SUM(end - start), 0) FROM ranges",
+            [],
+            |r| r.get(0),
+        )?)
+    }
+
     pub fn touch_access(&self, id: &ItemId, now_ms: i64) -> Result<()> {
         self.conn().execute(
             "INSERT INTO access (item_id, last_access_ms) VALUES (?1, ?2) \

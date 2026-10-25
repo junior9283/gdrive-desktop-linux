@@ -29,6 +29,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - Indexação inicial do Meu Drive e consulta de mudanças a cada 15 s: edições remotas atualizam o
   banco e descartam o cache antigo, edições locais pendentes viram conflito em vez de serem
   sobrescritas, e Documentos Google aparecem como ponteiros `.gdoc`, `.gsheet`, `.gslides`…
+- Cache do conteúdo em blocos de 1 MiB, baixado sob demanda: um salto para o meio de um vídeo
+  baixa só os blocos perto do ponto lido, a leitura sequencial antecipa os próximos 8 MiB, o que já
+  está no cache abre sem internet, e o cache respeita o tamanho máximo e o espaço livre mínimo
+  (nunca libera itens fixados ou com edição local).
 
 ## [0.0.1] - 2026-10-25
 

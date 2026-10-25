@@ -2,10 +2,12 @@
 
 pub mod cache;
 pub mod changes;
+pub mod engine;
 pub mod events;
 pub mod gdocs;
 pub mod indexer;
 pub mod lost_found;
+pub mod pins;
 #[cfg(test)]
 mod testutil;
 pub mod uploads;

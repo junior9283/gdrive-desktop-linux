@@ -398,6 +398,46 @@ impl Store {
         Ok(())
     }
 
+    /// Muda o estado de fixação de vários itens numa transação.
+    pub fn set_pins(&self, ids: &[ItemId], pin: PinState) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        {
+            let mut stmt = tx.prepare_cached("UPDATE items SET pin = ?1 WHERE id = ?2")?;
+            for id in ids {
+                stmt.execute(params![pin, id.0])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Arquivos fixados, fora da lixeira e sem edição local, que ainda não estão inteiros no
+    /// cache (nunca baixados ou descartados por uma revisão nova).
+    pub fn incomplete_pinned_files(&self) -> Result<Vec<ItemId>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT i.id FROM items i \
+             WHERE i.pin != ?1 AND i.kind = 'file' AND i.trashed = 0 AND i.local_state = ?2 \
+             AND i.size > (SELECT COALESCE(SUM(r.end - r.start), 0) FROM ranges r \
+                           WHERE r.item_id = i.id) \
+             ORDER BY i.id",
+        )?;
+        let rows = stmt.query_map(params![PinState::None, LocalState::Clean], |r| {
+            Ok(ItemId(r.get(0)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Envios na fila e quantos deles já falharam ao menos uma vez.
+    pub fn queue_stats(&self) -> Result<(u32, u32)> {
+        Ok(self.conn().query_row(
+            "SELECT COUNT(*), COUNT(*) FILTER (WHERE attempts > 0) FROM upload_queue",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
+    }
+
     /// Total de bytes de conteúdo no cache, somando os intervalos de todos os itens.
     pub fn cached_bytes(&self) -> Result<u64> {
         Ok(self.conn().query_row(

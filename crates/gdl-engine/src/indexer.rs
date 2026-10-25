@@ -164,13 +164,7 @@ mod tests {
             "a primeira página veio antes da edição"
         );
 
-        let (tx, _rx) = tokio::sync::broadcast::channel(16);
-        let poller = crate::changes::ChangePoller::new(
-            env.store.clone(),
-            env.client.clone(),
-            tx,
-            std::time::Duration::from_secs(15),
-        );
+        let (poller, _) = env.poller();
         assert!(poller.run_once().await.unwrap() >= 1);
         let item = env.item(early);
         assert_eq!(item.size, 4);

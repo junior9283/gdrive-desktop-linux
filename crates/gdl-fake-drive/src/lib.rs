@@ -130,6 +130,13 @@ impl FakeDrive {
         self.shared.state().edit_during_listing = Some((pages, id.into(), bytes));
     }
 
+    /// Simula outra pessoa movendo o item para outra pasta.
+    pub fn move_remote(&self, id: &str, new_parent: &str) {
+        let mut state = self.shared.state();
+        state.file_mut(id).parents = vec![new_parent.into()];
+        state.record_change(id);
+    }
+
     pub fn trash_remote(&self, id: &str) {
         let mut state = self.shared.state();
         state.file_mut(id).trashed = true;

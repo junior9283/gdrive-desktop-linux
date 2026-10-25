@@ -38,6 +38,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   fila espera sem gastar tentativas. Se a nuvem mudou, apagou ou negou permissão, a edição local
   vai para `Lost and Found` com data e hora no nome, e o caminho original fica com a versão da
   nuvem. Travas e temporários de editores (`.~lock.*#`, `*.swp`…) nunca sobem.
+- Disponível off-line: fixar uma pasta baixa tudo o que está dentro, inclusive o que chegar ou for
+  movido para ela depois, e baixa de novo o que for editado na nuvem; o que está fixado abre sem
+  internet e nunca sai do cache. Desfixar libera espaço, mas mantém o que foi fixado à parte.
+- Serviço do motor com pausa: pausado, não consulta mudanças, não envia e não baixa fixados (abrir
+  arquivos continua funcionando); ao retomar, volta na hora. Resumo com envios pendentes, falhas,
+  pausa, conexão e hora da última sincronização.
 
 ## [0.0.1] - 2026-10-25
 

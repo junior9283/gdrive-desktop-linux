@@ -11,6 +11,8 @@ use gdl_store::{Item, ItemId, LocalState, Store};
 use tokio::sync::broadcast;
 
 use crate::cache::{BlockCache, FreeSpace};
+use crate::changes::ChangePoller;
+use crate::events::EngineEvent;
 
 struct TestToken;
 
@@ -34,6 +36,17 @@ impl FreeSpace for Plenty {
     }
 }
 
+/// Cliente do Drive simulado com recuo de milissegundos.
+pub(crate) fn fast_client(fake: &FakeDrive, tries: u32) -> DriveClient {
+    DriveClient::new(fake.base_url(), fake.upload_url(), Arc::new(TestToken)).with_backoff(
+        Backoff {
+            base: Duration::from_millis(1),
+            max: Duration::from_millis(2),
+            tries,
+        },
+    )
+}
+
 pub(crate) struct Env {
     pub fake: FakeDrive,
     pub store: Arc<Store>,
@@ -51,16 +64,11 @@ impl Env {
         let fake = FakeDrive::start().await;
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(Store::open(&dir.path().join("conta.db")).unwrap());
-        let client = DriveClient::new(fake.base_url(), fake.upload_url(), Arc::new(TestToken))
-            .with_backoff(Backoff {
-                base: Duration::from_millis(1),
-                max: Duration::from_millis(2),
-                tries,
-            });
+        let client = Arc::new(fast_client(&fake, tries));
         Env {
             fake,
             store,
-            client: Arc::new(client),
+            client,
             _dir: dir,
         }
     }
@@ -73,14 +81,26 @@ impl Env {
         self.dir().join("conta.db")
     }
 
+    /// Consulta de mudanças sobre o banco do ambiente, com o receptor dos avisos.
+    pub fn poller(&self) -> (ChangePoller, broadcast::Receiver<EngineEvent>) {
+        let (tx, rx) = broadcast::channel(16);
+        let poller = ChangePoller::new(self.store.clone(), self.client.clone(), tx);
+        (poller, rx)
+    }
+
     /// Cache sem limite de tamanho sobre `store`, na pasta do ambiente.
     pub fn cache_for(&self, store: Arc<Store>) -> BlockCache {
+        self.cache_limited(store, None)
+    }
+
+    /// Cache com limite de `max_kbytes`.
+    pub fn cache_limited(&self, store: Arc<Store>, max_kbytes: Option<u64>) -> BlockCache {
         let (tx, _) = broadcast::channel(16);
         BlockCache::with_free_space(
             store,
             self.client.clone(),
             self.dir().join("cache"),
-            None,
+            max_kbytes,
             512_000,
             tx,
             Arc::new(Plenty),
@@ -102,4 +122,15 @@ impl Env {
         item.size = local_size;
         self.store.upsert_item(&item).unwrap();
     }
+}
+
+/// Espera até `done` ficar verdadeiro, falhando o teste depois de 10 s.
+pub(crate) async fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !done() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("esperando: {what}"));
 }

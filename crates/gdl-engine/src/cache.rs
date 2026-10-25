@@ -41,6 +41,13 @@ pub enum CacheError {
     Io(#[from] std::io::Error),
 }
 
+impl CacheError {
+    /// Sem rede ou sem espaço: passa sozinho, e quem chamou só precisa tentar depois.
+    pub fn is_transient(&self) -> bool {
+        matches!(self, CacheError::Offline | CacheError::DiskFull)
+    }
+}
+
 impl From<DriveError> for CacheError {
     fn from(e: DriveError) -> CacheError {
         match e {
@@ -355,7 +362,7 @@ mod tests {
     use super::*;
     use crate::events::EngineEvent;
     use crate::indexer::initial_index;
-    use crate::testutil::Env;
+    use crate::testutil::{Env, wait_until};
 
     const MIB: usize = 1024 * 1024;
 
@@ -443,19 +450,14 @@ mod tests {
         s.cache.read(id, 0, 65536).await.unwrap();
         s.cache.read(id, 65536, 65536).await.unwrap();
         let wanted = (131072 + 8 * MIB) as u64;
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while !s
-                .env
+        wait_until("leitura antecipada dos próximos 8 MiB", || {
+            s.env
                 .store
                 .ranges_missing(id, 0, wanted)
                 .unwrap()
                 .is_empty()
-            {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
         })
-        .await
-        .expect("leitura antecipada dos próximos 8 MiB");
+        .await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
             s.env.fake.downloaded_bytes() <= 10 * MIB as u64,

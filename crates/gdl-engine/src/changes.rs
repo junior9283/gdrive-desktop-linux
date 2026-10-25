@@ -2,21 +2,25 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
+use gdl_common::time::now_ms;
 use gdl_drive::client::{Change, DriveClient, DriveError};
 use gdl_store::{Item, ItemId, LocalState, Store};
 use tokio::sync::broadcast;
 
 use crate::events::EngineEvent;
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, item_from_remote};
+use crate::pins::reconcile;
 use crate::{EngineError, Result};
 
 pub struct ChangePoller {
     store: Arc<Store>,
     client: Arc<DriveClient>,
     events: broadcast::Sender<EngineEvent>,
-    interval: Duration,
+    offline: AtomicBool,
+    /// Hora da última consulta bem-sucedida; 0 enquanto não houve nenhuma.
+    last_sync_ms: AtomicI64,
 }
 
 /// Junta o item do banco com a versão nova da nuvem. Devolve o item e se o cache deve ser
@@ -78,14 +82,22 @@ impl ChangePoller {
         store: Arc<Store>,
         client: Arc<DriveClient>,
         events: broadcast::Sender<EngineEvent>,
-        interval: Duration,
     ) -> ChangePoller {
         ChangePoller {
             store,
             client,
             events,
-            interval,
+            offline: AtomicBool::new(false),
+            last_sync_ms: AtomicI64::new(0),
         }
+    }
+
+    pub fn is_offline(&self) -> bool {
+        self.offline.load(Ordering::Relaxed)
+    }
+
+    pub fn last_sync_ms(&self) -> Option<i64> {
+        Some(self.last_sync_ms.load(Ordering::Relaxed)).filter(|&ms| ms != 0)
     }
 
     /// Busca e aplica as mudanças desde a última consulta. Devolve quantas mudaram o banco.
@@ -100,6 +112,8 @@ impl ChangePoller {
         // segunda mudança do mesmo item parte do resultado da primeira.
         let mut pending: BTreeMap<ItemId, (Item, bool)> = BTreeMap::new();
         let mut parents = BTreeSet::new();
+        // Itens novos ou que mudaram de pasta: a fixação deles segue a pasta nova.
+        let mut moved = BTreeSet::new();
         let mut applied = 0;
         for change in changes {
             let (id, new) = match change {
@@ -113,7 +127,11 @@ impl ChangePoller {
                 Some((item, clear)) => (Some(item), clear),
                 None => (self.store.get(&id)?, false),
             };
+            let old_parent = old.as_ref().map(|o| o.parent.clone());
             if let Some((item, clear)) = resolve(old, new, &mut parents) {
+                if old_parent.as_ref() != Some(&item.parent) {
+                    moved.insert(id.clone());
+                }
                 pending.insert(id, (item, clear || cleared));
                 applied += 1;
             }
@@ -124,36 +142,33 @@ impl ChangePoller {
             self.store.ranges_clear(id)?;
         }
         self.store.recompute_local_names(&parents)?;
+        for id in &moved {
+            reconcile(&self.store, id)?;
+        }
         if next != token {
             self.store.kv_set(START_PAGE_TOKEN, &next)?;
         }
         Ok(applied)
     }
 
-    /// Consulta a cada `interval` até o processo acabar, avisando quando a rede cai e volta.
-    pub async fn run(&self) {
-        let mut offline = false;
-        loop {
-            let result = self.run_once().await;
-            let now_offline = matches!(result, Err(EngineError::Drive(DriveError::Offline)));
-            if now_offline != offline {
-                offline = now_offline;
-                // Sem ninguém ouvindo, o aviso pode se perder.
-                let _ = self.events.send(EngineEvent::Offline(offline));
-            }
-            if let Err(e) = result
-                && !now_offline
-            {
-                tracing::warn!(erro = %e, "falha ao consultar mudanças no Drive");
-            }
-            tokio::time::sleep(self.interval).await;
+    /// Uma consulta, avisando quando a rede cai e volta e anotando a hora da última que deu certo.
+    pub async fn poll(&self) {
+        let result = self.run_once().await;
+        let now_offline = matches!(result, Err(EngineError::Drive(DriveError::Offline)));
+        if self.offline.swap(now_offline, Ordering::Relaxed) != now_offline {
+            // Sem ninguém ouvindo, o aviso pode se perder.
+            let _ = self.events.send(EngineEvent::Offline(now_offline));
+        }
+        match result {
+            Ok(_) => self.last_sync_ms.store(now_ms(), Ordering::Relaxed),
+            Err(_) if now_offline => {}
+            Err(e) => tracing::warn!(erro = %e, "falha ao consultar mudanças no Drive"),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
 
     use gdl_fake_drive::Fault;
 
@@ -163,13 +178,7 @@ mod tests {
 
     async fn indexed() -> (Env, ChangePoller) {
         let env = Env::new().await;
-        let (tx, _rx) = broadcast::channel(16);
-        let poller = ChangePoller::new(
-            env.store.clone(),
-            env.client.clone(),
-            tx,
-            Duration::from_secs(15),
-        );
+        let (poller, _) = env.poller();
         (env, poller)
     }
 
@@ -273,27 +282,17 @@ mod tests {
     async fn offline_is_announced_once_and_cleared() {
         let env = Env::new().await;
         initial_index(&env.store, &env.client).await.unwrap();
-        let (tx, mut rx) = broadcast::channel(16);
-        let poller = Arc::new(ChangePoller::new(
-            env.store.clone(),
-            env.client.clone(),
-            tx,
-            Duration::from_millis(5),
-        ));
+        let (poller, mut rx) = env.poller();
         env.fake.inject(Fault::Offline);
-        let task = tokio::spawn({
-            let poller = poller.clone();
-            async move { poller.run().await }
-        });
-        let mut next = async || {
-            tokio::time::timeout(Duration::from_secs(5), rx.recv())
-                .await
-                .expect("evento dentro do prazo")
-                .unwrap()
-        };
-        assert_eq!(next().await, EngineEvent::Offline(true));
+        poller.poll().await;
+        poller.poll().await;
+        assert_eq!(rx.try_recv().unwrap(), EngineEvent::Offline(true));
+        assert!(rx.try_recv().is_err(), "avisa uma vez só");
+        assert!(poller.is_offline() && poller.last_sync_ms().is_none());
+
         env.fake.clear_faults();
-        assert_eq!(next().await, EngineEvent::Offline(false));
-        task.abort();
+        poller.poll().await;
+        assert_eq!(rx.try_recv().unwrap(), EngineEvent::Offline(false));
+        assert!(!poller.is_offline() && poller.last_sync_ms().is_some());
     }
 }

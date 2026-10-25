@@ -32,6 +32,15 @@ impl I18n {
         I18n { bundle }
     }
 
+    /// Idioma do sistema, pelas variáveis `LC_ALL`, `LC_MESSAGES` e `LANG`, nessa ordem.
+    pub fn from_env() -> I18n {
+        let lang = ["LC_ALL", "LC_MESSAGES", "LANG"]
+            .iter()
+            .find_map(|var| std::env::var(var).ok().filter(|v| !v.is_empty()))
+            .unwrap_or_default();
+        I18n::new(&lang)
+    }
+
     /// Texto traduzido de `key`; se a chave não existir, devolve a própria chave.
     pub fn tr(&self, key: &str, args: &[(&str, &str)]) -> String {
         let Some(pattern) = self.bundle.get_message(key).and_then(|m| m.value()) else {

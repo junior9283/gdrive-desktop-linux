@@ -20,6 +20,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   intervalos já baixados, fila de envios que sobrevive a reinícios e escolha do que liberar do cache.
 - Drive simulado para os testes (API v3, upload multipart e retomável, mudanças e OAuth com PKCE),
   com falhas injetáveis: limite de taxa, códigos de erro, queda de conexão e computador sem rede.
+- Login OAuth no navegador com retorno ao próprio computador e PKCE, página de conclusão própria
+  em pt-BR/inglês, renovação automática do acesso e guarda dos tokens no chaveiro do sistema.
+- Guia para criar o próprio Client ID no Google Cloud (`docs/guia-client-id.md`).
 
 ## [0.0.1] - 2026-10-25
 

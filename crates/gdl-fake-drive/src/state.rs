@@ -28,12 +28,7 @@ pub(crate) fn random_id(len: usize) -> String {
         .collect()
 }
 
-pub(crate) fn now_ms() -> i64 {
-    let since_epoch = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    since_epoch.as_millis() as i64
-}
+pub(crate) use gdl_common::time::now_ms;
 
 pub(crate) fn rfc3339(ms: i64) -> String {
     DateTime::from_timestamp_millis(ms)

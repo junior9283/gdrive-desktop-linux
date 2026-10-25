@@ -8,6 +8,24 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+async-trait.workspace = true
+axum.workspace = true
+base64.workspace = true
+gdl-common.workspace = true
+oo7.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+gdl-fake-drive.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

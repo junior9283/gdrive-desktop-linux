@@ -65,7 +65,7 @@ especificação em [`docs/`](docs/).
 - **Atualizações vindas da nuvem:** chegam em segundos, mas não na hora. O app oficial usa um canal
   de notificação interno do Google que não está disponível para terceiros.
 - **Login:** nunca usa a identidade do app oficial. Nas versões 0.x, cada usuário cria o próprio
-  Client ID no Google Cloud (haverá um guia passo a passo em `docs/`).
+  Client ID no Google Cloud, seguindo o [guia passo a passo](docs/guia-client-id.md).
 - **Backups de pastas:** a API pública não cria a seção "Computadores" do Drive. Os backups ficam em
   `Meu Drive/Computadores/<nome-do-computador>/`, e a pasta do app mostra "Computadores" como no
   original.

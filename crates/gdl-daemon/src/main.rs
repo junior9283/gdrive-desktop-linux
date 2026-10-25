@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 use gdl_common::i18n;
 use gdl_common::paths::Paths;
-use gdl_daemon::{Api, BUS_NAME, Config, Daemon, OBJECT_PATH, Service};
+use gdl_daemon::{Api, Config, Daemon, Service};
 use gdl_drive::client::Backoff;
 use gdl_drive::oauth::OAuthEndpoints;
 use gdl_drive::token_store::SecretServiceStore;
 use gdl_engine::engine::Intervals;
+use gdl_ipc::{BUS_NAME, OBJECT_PATH};
 use tokio::signal::unix::{SignalKind, signal};
 
 #[tokio::main]

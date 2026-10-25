@@ -17,8 +17,9 @@ use zbus::zvariant::OwnedValue;
 use zbus::{Connection, Guid};
 
 use crate::daemon::{Api, Config, Daemon};
-use crate::dbus::{OBJECT_PATH, Service, ServiceProxy};
+use crate::dbus::Service;
 use crate::notify::NOTIFICATIONS_PATH;
+use gdl_ipc::{OBJECT_PATH, ServiceProxy};
 
 /// Notificação recebida pelo serviço falso.
 #[derive(Debug, Clone)]

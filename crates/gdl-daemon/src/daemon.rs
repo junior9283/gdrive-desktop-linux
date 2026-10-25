@@ -24,7 +24,9 @@ use url::Url;
 use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 
-use crate::dbus::{OBJECT_PATH, Service, ServiceError, Status};
+use gdl_ipc::{OBJECT_PATH, ServiceError, Status};
+
+use crate::dbus::Service;
 use crate::mount;
 use crate::notify::{self, Notification, Notifier, OPEN_LOST_FOUND};
 

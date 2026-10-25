@@ -782,8 +782,8 @@ dependencies = [
  "clap",
  "futures-util",
  "gdl-common",
- "gdl-daemon",
  "gdl-engine",
+ "gdl-ipc",
  "rustix",
  "tempfile",
  "tokio",
@@ -816,11 +816,11 @@ dependencies = [
  "gdl-engine",
  "gdl-fake-drive",
  "gdl-fs",
+ "gdl-ipc",
  "gdl-store",
  "regex",
  "reqwest",
  "rustix",
- "serde",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -912,6 +912,14 @@ dependencies = [
  "tokio-util",
  "tracing",
  "walkdir",
+]
+
+[[package]]
+name = "gdl-ipc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "zbus",
 ]
 
 [[package]]

@@ -3,40 +3,10 @@
 use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
-use serde::{Deserialize, Serialize};
+use gdl_ipc::{ServiceError, Status};
 use zbus::object_server::SignalEmitter;
-use zbus::zvariant::Type;
 
 use crate::daemon::Daemon;
-
-pub const BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1";
-pub const OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1";
-
-/// Resposta de `Status`; sem conta conectada, tudo vazio.
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct Status {
-    pub account: String,
-    pub mount_point: String,
-    pub pending_uploads: u32,
-    pub paused: bool,
-    pub offline: bool,
-    /// Milissegundos desde 1970; 0 se nunca sincronizou.
-    pub last_sync_ms: i64,
-    pub errors: u32,
-}
-
-#[derive(Debug, zbus::DBusError)]
-#[zbus(prefix = "io.github.junior9283.GDriveDesktopLinux1.Error")]
-pub enum ServiceError {
-    #[zbus(error)]
-    ZBus(zbus::Error),
-    /// Há envios pendentes e `Logout` veio sem dizer o que fazer com eles.
-    PendingUploads(String),
-    NotLoggedIn(String),
-    NotFound(String),
-    InvalidArgs(String),
-    Failed(String),
-}
 
 /// Objeto publicado em `OBJECT_PATH`.
 pub struct Service {
@@ -49,15 +19,9 @@ impl Service {
     }
 }
 
-#[zbus::interface(
-    name = "io.github.junior9283.GDriveDesktopLinux1.Service",
-    proxy(
-        default_service = "io.github.junior9283.GDriveDesktopLinux1",
-        default_path = "/io/github/junior9283/GDriveDesktopLinux1",
-        gen_blocking = false,
-        async_name = "ServiceProxy"
-    )
-)]
+/// Os mesmos métodos e sinais do proxy em `gdl_ipc::Service`: mudou aqui, mude lá (os testes do
+/// serviço chamam tudo pelo proxy, e uma divergência falha neles).
+#[zbus::interface(name = "io.github.junior9283.GDriveDesktopLinux1.Service")]
 impl Service {
     /// Abre o login no navegador e devolve o endereço; o resultado vem em `LoginFinished`.
     async fn begin_login(

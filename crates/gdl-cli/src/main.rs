@@ -12,8 +12,8 @@ use gdl_common::config::load_preferences;
 use gdl_common::i18n::I18n;
 use gdl_common::paths::Paths;
 use gdl_common::time::rfc3339;
-use gdl_daemon::{ServiceError, ServiceProxy};
 use gdl_engine::gdocs::{open_url, pointer_doc_id};
+use gdl_ipc::{ServiceError, ServiceProxy};
 
 #[derive(Parser)]
 #[command(

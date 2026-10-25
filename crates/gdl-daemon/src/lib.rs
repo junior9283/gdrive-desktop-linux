@@ -6,7 +6,7 @@ pub mod mount;
 pub mod notify;
 
 pub use daemon::{Api, Config, Daemon};
-pub use dbus::{BUS_NAME, OBJECT_PATH, Service, ServiceError, ServiceProxy};
+pub use dbus::Service;
 
 #[cfg(test)]
 mod dbus_tests;

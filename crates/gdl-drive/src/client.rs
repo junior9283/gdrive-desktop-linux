@@ -715,6 +715,34 @@ mod tests {
         (path, data)
     }
 
+    /// Token vencido e sem rede para renovar.
+    struct NoNetworkToRefresh;
+
+    #[async_trait::async_trait]
+    impl AccessTokenProvider for NoNetworkToRefresh {
+        async fn access_token(&self) -> std::result::Result<String, AuthError> {
+            Err(AuthError::Network("sem rota".into()))
+        }
+
+        async fn refresh_now(&self, _stale: &str) -> std::result::Result<String, AuthError> {
+            Err(AuthError::Network("sem rota".into()))
+        }
+    }
+
+    /// Bug: depois de 1 h sem rede, a renovação do token falhava por rede e o erro chegava como
+    /// falha de acesso; a fila avisava "falha no envio" em vez de esperar a rede.
+    #[tokio::test]
+    async fn token_refresh_without_network_is_offline() {
+        let fake = FakeDrive::start().await;
+        let c = DriveClient::new(
+            fake.base_url(),
+            fake.upload_url(),
+            Arc::new(NoNetworkToRefresh),
+        );
+        let err = c.get(&fake.root_id()).await.unwrap_err();
+        assert!(matches!(err, DriveError::Offline), "{err:?}");
+    }
+
     /// O serviço roda cada chamada numa tarefa própria: as futures precisam ser `Send + 'static`.
     #[test]
     fn every_call_can_run_in_a_spawned_task() {

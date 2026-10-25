@@ -1,8 +1,19 @@
 //! Diretórios do app (padrão XDG).
 
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 const APP: &str = "gdrive-desktop-linux";
+
+/// Cria a pasta (e as que faltam no caminho) só para o dono e restringe a que já existia: o
+/// conteúdo do Drive e o banco não ficam legíveis por outros usuários.
+pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+}
 
 /// Onde o app guarda configuração, dados, estado e onde lê as políticas do sistema.
 #[derive(Debug, Clone, PartialEq, Eq)]

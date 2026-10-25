@@ -27,16 +27,9 @@ async fn kill_during_upload_then_restart_finishes_upload() {
     let path = h.drive().join("grande.bin");
     let written = data.clone();
     blocking(move || std::fs::write(path, written).unwrap()).await;
-    let engine = h.daemon.engine().await.unwrap();
-    wait_until("envio em andamento", || {
-        let item = engine
-            .store()
-            .lookup(&gdl_store::ItemId(h.fake.root_id()), "grande.bin");
-        item.unwrap()
-            .is_some_and(|i| i.local_state == gdl_store::LocalState::Uploading)
-    })
-    .await;
-    drop(engine);
+    // Esperar o estado `Uploading` não basta: ele vem antes dos bytes, e limpar as falhas antes
+    // do limite fazia o envio nem empacar.
+    wait_until("envio empacado na metade", || h.fake.byte_limit_reached()).await;
     h.fake.clear_faults();
 
     h.restart(None).await;

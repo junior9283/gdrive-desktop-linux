@@ -329,3 +329,71 @@ async fn lock_files_exist_locally_but_never_upload() {
     std::fs::remove_file(&lock).unwrap();
     assert_eq!(names(&m.drive()), ["planilha.ods"]);
 }
+
+/// Bug: o download do Chrome (`.crdownload` renomeado para o nome final) ficava só no
+/// computador para sempre; e o contrário, um arquivo pendente renomeado para nome de trava, subia.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn crdownload_renamed_to_final_name_uploads() {
+    let m = Mounted::new(FakeDrive::start().await).await;
+    m.run_engine();
+    let partial = m.drive().join("relatorio.pdf.crdownload");
+    std::fs::write(&partial, b"%PDF baixado").unwrap();
+    std::fs::rename(&partial, m.drive().join("relatorio.pdf")).unwrap();
+    let draft = m.drive().join("rascunho.txt");
+    std::fs::write(&draft, b"vira trava").unwrap();
+    std::fs::rename(&draft, m.drive().join("rascunho.txt.swp")).unwrap();
+
+    wait_until("envio do download", || {
+        !m.fake.find_live("relatorio.pdf").is_empty()
+    });
+    let id = only(m.fake.find_live("relatorio.pdf"));
+    assert_eq!(m.fake.content(&id), b"%PDF baixado");
+    assert!(m.fake.find_live("relatorio.pdf.crdownload").is_empty());
+    assert!(m.fake.find_live("rascunho.txt").is_empty());
+    assert!(m.fake.find_live("rascunho.txt.swp").is_empty());
+}
+
+/// Bug: esvaziar a lixeira do Dolphin com uma pasta dentro dava "permissão negada" (o KIO apaga
+/// o conteúdo e depois a pasta).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn emptying_kio_trash_with_folder() {
+    let fake = FakeDrive::start().await;
+    let folder = fake.add_folder(&fake.root_id(), "Fotos");
+    let photo = fake.add_file(&folder, "praia.jpg", b"jpeg".to_vec());
+    let m = Mounted::new(fake).await;
+    let trash = m.mnt.join(format!(".Trash-{}", uid()));
+    std::fs::rename(m.drive().join("Fotos"), trash.join("files/Fotos")).unwrap();
+
+    std::fs::remove_dir_all(trash.join("files/Fotos")).unwrap();
+
+    assert!(names(&trash.join("files")).is_empty());
+    assert_eq!(m.fake.meta(&folder)["trashed"], true);
+    assert_eq!(
+        m.fake.meta(&photo)["trashed"],
+        false,
+        "vai junto com a pasta"
+    );
+    assert_eq!(m.fake.requests_by_method("DELETE"), 0);
+}
+
+/// Bug: mandar para a lixeira do Dolphin um arquivo que ainda não tinha subido o apagava de vez,
+/// e restaurar falhava.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn trashing_a_file_not_yet_uploaded_can_be_restored() {
+    let m = Mounted::new(FakeDrive::start().await).await;
+    let trash = m.mnt.join(format!(".Trash-{}", uid()));
+    let path = m.drive().join("rascunho.txt");
+    std::fs::write(&path, b"ainda nao subiu").unwrap();
+
+    std::fs::rename(&path, trash.join("files/rascunho.txt")).unwrap();
+    assert!(!names(&m.drive()).contains(&"rascunho.txt".to_string()));
+    std::fs::rename(trash.join("files/rascunho.txt"), &path).unwrap();
+
+    assert_eq!(std::fs::read(&path).unwrap(), b"ainda nao subiu");
+    m.run_engine();
+    wait_until("envio depois de restaurar", || {
+        !m.fake.find_live("rascunho.txt").is_empty()
+    });
+    let id = only(m.fake.find_live("rascunho.txt"));
+    assert_eq!(m.fake.content(&id), b"ainda nao subiu");
+}

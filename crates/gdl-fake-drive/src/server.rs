@@ -14,7 +14,7 @@ use axum::routing::{get, patch, post, put};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 
-use crate::state::{self, IdRefused, Session, Shared, parse_query, random_id};
+use crate::state::{self, IdRefused, Session, SessionRef, Shared, parse_query, random_id};
 
 type Shr = State<Arc<Shared>>;
 type Params = Query<HashMap<String, String>>;
@@ -415,6 +415,7 @@ fn start_resumable(shared: &Shared, target: Option<String>, meta: Value) -> Resp
             target,
             meta,
             data: vec![],
+            owner: 0,
         })),
     );
     (StatusCode::OK, [(header::LOCATION, location.to_string())]).into_response()
@@ -465,10 +466,12 @@ async fn upload_chunk(
     let session = params
         .get("upload_id")
         .and_then(|sid| Some((sid.clone(), shared.state().sessions.get(sid)?.clone())));
-    let Some((sid, session)) = session else {
+    let Some((sid, entry)) = session else {
         return api_error(404, "notFound", "sessão de upload não encontrada");
     };
-    let mut session = session.lock().await;
+    let mut session = entry.lock().await;
+    session.owner += 1;
+    let me = session.owner;
     let content_range = headers
         .get(header::CONTENT_RANGE)
         .and_then(|v| v.to_str().ok());
@@ -488,13 +491,22 @@ async fn upload_chunk(
             return api_error(400, "invalid", "trecho fora de ordem");
         }
         session.data.truncate(start as usize);
+        // A trava sai durante a leitura do corpo, que pode nunca terminar.
+        drop(session);
         let mut stream = body.into_data_stream();
         while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(chunk) => session.data.extend_from_slice(&chunk),
-                Err(_) => return api_error(400, "badContent", "conexão interrompida"),
-            }
+            let Ok(chunk) = chunk else {
+                return api_error(400, "badContent", "conexão interrompida");
+            };
+            let Some(mut session) = owned(&entry, me).await else {
+                return superseded();
+            };
+            session.data.extend_from_slice(&chunk);
         }
+        let Some(owner) = owned(&entry, me).await else {
+            return superseded();
+        };
+        session = owner;
     }
     let received = session.data.len() as u64;
     if received < total {
@@ -511,6 +523,16 @@ async fn upload_chunk(
     state.sessions.remove(&sid);
     let data = std::mem::take(&mut session.data);
     finish_upload(&mut state, session.target.take(), &session.meta, data)
+}
+
+/// A sessão, se `me` ainda for a requisição dona dela.
+async fn owned(entry: &SessionRef, me: u64) -> Option<tokio::sync::MutexGuard<'_, Session>> {
+    let session = entry.lock().await;
+    (session.owner == me).then_some(session)
+}
+
+fn superseded() -> Response {
+    api_error(400, "badContent", "substituída por outra requisição")
 }
 
 async fn token(

@@ -101,6 +101,7 @@ impl Mounted {
         let poller = ChangePoller::new(
             self.engine.store().clone(),
             Arc::new(client(&self.fake)),
+            self.engine.cache().clone(),
             tx,
         );
         poller.run_once().await.unwrap();

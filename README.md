@@ -114,8 +114,15 @@ A pasta aparece em `~/Google Drive/Meu Drive`. Outros comandos:
 | `pin <caminho>` / `unpin <caminho>` | deixa disponível off-line / só on-line |
 | `pause` / `resume` | pausa e retoma a sincronização |
 | `lost-and-found` | lista as edições guardadas por conflito |
-| `logout [--finish \| --move <pasta> \| --discard]` | sai da conta, decidindo o que fazer com envios pendentes |
+| `logout [--finish \| --move <pasta> \| --discard]` | sai da conta, decidindo o que fazer com envios pendentes (o Lost and Found nunca é apagado) |
 | `open-pointer <arquivo>` | abre um `.gdoc`, `.gsheet`… no navegador (usado pelo duplo clique) |
+
+Limitações conhecidas da 0.1:
+
+- **Vim e Neovim** (com o padrão `backupcopy=auto`) salvam renomeando o original e criando outro:
+  o conteúdo não se perde, mas no Drive o arquivo ganha um ID novo e o antigo vai para a lixeira
+  (links compartilhados do antigo deixam de valer). Com `set backupcopy=yes` o ID se mantém.
+- Uma pasta criada aqui que ainda não subiu, mandada para a lixeira, some só deste computador.
 
 Roteiro de teste da 0.1 (e o que já foi conferido): [docs/testes](docs/testes/README.md).
 

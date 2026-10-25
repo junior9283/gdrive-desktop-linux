@@ -125,19 +125,23 @@ pub fn commit_local_write_at(
     modified_ms: i64,
     next_try_ms: i64,
 ) -> Result<()> {
-    let mut item = store.get(id)?.ok_or(EngineError::NotFound)?;
-    item.size = size;
-    item.modified_ms = modified_ms;
-    let local_only = item.local_state == LocalState::LocalOnly;
-    // Um conflito já anotado continua conflito até a fila decidir.
-    if !local_only && item.local_state != LocalState::Conflict {
-        item.local_state = LocalState::Dirty;
-    }
-    store.upsert_item(&item)?;
-    store.ranges_clear(id)?;
-    if size > 0 {
-        store.ranges_add(id, 0, size)?;
-    }
+    let local_only = store.modify(|batch| -> Result<bool> {
+        let mut item = batch.get(id)?.ok_or(EngineError::NotFound)?;
+        item.size = size;
+        item.modified_ms = modified_ms;
+        let local_only = item.local_state == LocalState::LocalOnly;
+        // Um conflito já anotado continua conflito até a fila decidir.
+        if !local_only && item.local_state != LocalState::Conflict {
+            item.local_state = LocalState::Dirty;
+        }
+        batch.put(&item)?;
+        batch.reset_upload_sessions(id)?;
+        batch.ranges_clear(id)?;
+        if size > 0 {
+            batch.ranges_add(id, 0, size)?;
+        }
+        Ok(local_only)
+    })?;
     if !local_only {
         enqueue_upload(store, id, next_try_ms, None)?;
     }
@@ -216,7 +220,9 @@ impl UploadWorker {
             return Ok(None);
         };
         let item = self.store.get(&job.item)?;
-        let outcome = match item {
+        let result = match item {
+            // Na lixeira daqui antes de subir: restaurar enfileira de novo.
+            Some(item) if item.trashed && is_local_id(&item.id) => self.skip(&job),
             Some(item)
                 if matches!(
                     item.local_state,
@@ -224,15 +230,29 @@ impl UploadWorker {
                 ) =>
             {
                 match job.kind {
-                    UploadKind::Create => self.create(&job, item).await?,
-                    UploadKind::Update => self.update(&job, item).await?,
+                    // Criar ou atualizar se decide agora: um envio enfileirado quando o item
+                    // ainda era só local atualiza depois que outro envio o criou.
+                    UploadKind::Create | UploadKind::Update if is_local_id(&item.id) => {
+                        self.create(&job, item).await
+                    }
+                    UploadKind::Create | UploadKind::Update => self.update(&job, item).await,
                     // Renomear e mover sem internet chegam com o FUSE (T12).
-                    UploadKind::Metadata => self.skip(&job)?,
+                    UploadKind::Metadata => self.skip(&job),
                 }
             }
-            _ => self.skip(&job)?,
+            _ => self.skip(&job),
         };
-        Ok(Some(outcome))
+        if result.is_err() {
+            // Erro daqui (disco, banco): este envio vai para depois, pelo recuo, e a fila segue.
+            let delay = self.retry.delay(job.attempts).as_millis() as i64;
+            self.store.retry_job(job.job_id, now_ms() + delay)?;
+            self.store.transition_local_state(
+                &job.item,
+                LocalState::Uploading,
+                LocalState::Dirty,
+            )?;
+        }
+        result.map(Some)
     }
 
     fn skip(&self, job: &UploadJob) -> Result<UploadOutcome> {
@@ -301,13 +321,16 @@ impl UploadWorker {
         self.ids.take(&self.client).await
     }
 
-    /// O ID reservado do job; o primeiro fica guardado na fila, para a criação repetida (mesmo
-    /// depois de reiniciar) não duplicar o item.
+    /// O ID reservado para criar o item; o primeiro fica guardado na fila, para a criação
+    /// repetida (por este ou outro envio do item, mesmo depois de reiniciar) não duplicar.
     async fn file_id(&self, job: &UploadJob) -> Result<String> {
         if let Some(id) = &job.file_id {
             return Ok(id.clone());
         }
-        let id = self.reserve_id().await?;
+        let id = match self.store.reserved_file_id(&job.item)? {
+            Some(id) => id,
+            None => self.reserve_id().await?,
+        };
         self.store.set_job_file_id(job.job_id, &id)?;
         Ok(id)
     }
@@ -344,17 +367,19 @@ impl UploadWorker {
 
     /// Envio aceito: a revisão da nuvem vira a nova revisão-base.
     fn uploaded(&self, job: &UploadJob, id: &ItemId, remote: RemoteFile) -> Result<UploadOutcome> {
-        let mut item = self.store.get(id)?.ok_or(EngineError::NotFound)?;
-        item.md5 = remote.md5.clone();
-        item.base_md5 = remote.md5;
-        item.head_revision = remote.head_revision.clone();
-        item.base_revision = remote.head_revision;
-        item.modified_ms = remote.modified_ms;
-        // Gravado de novo durante o envio: continua pendente (outro envio já está na fila).
-        if item.local_state == LocalState::Uploading {
-            item.local_state = LocalState::Clean;
-        }
-        self.store.upsert_item(&item)?;
+        self.store.modify(|batch| -> Result<()> {
+            let mut item = batch.get(id)?.ok_or(EngineError::NotFound)?;
+            item.md5 = remote.md5.clone();
+            item.base_md5 = remote.md5;
+            item.head_revision = remote.head_revision.clone();
+            item.base_revision = remote.head_revision;
+            item.modified_ms = remote.modified_ms;
+            // Gravado de novo durante o envio: continua pendente (outro envio já está na fila).
+            if item.local_state == LocalState::Uploading {
+                item.local_state = LocalState::Clean;
+            }
+            Ok(batch.put(&item)?)
+        })?;
         self.store.finish_job(job.job_id)?;
         Ok(UploadOutcome::Uploaded(id.clone()))
     }
@@ -858,6 +883,69 @@ mod tests {
             1,
             "continuou a mesma sessão"
         );
+    }
+
+    /// Bug: o segundo envio de um arquivo novo continuava `Create` depois que o primeiro criou o
+    /// arquivo, e uma nova edição fazia ele criar outra cópia no Drive.
+    #[tokio::test]
+    async fn rewrite_during_create_upload_makes_one_drive_file() {
+        let s = setup(Env::new().await).await;
+        let local = s.write_new(&s.env.root(), "novo.txt", b"v1");
+        s.write(&local, b"v2");
+        let Some(UploadOutcome::Uploaded(id)) = s.run().await else {
+            panic!("esperava envio");
+        };
+
+        s.write(&id, b"v3");
+        while s.run().await.is_some() {}
+
+        assert_eq!(s.env.fake.find_live("novo.txt"), vec![id.0.clone()]);
+        assert_eq!(s.env.fake.content(&id.0), b"v3");
+    }
+
+    /// Bug: a sessão retomável interrompida continuava com o conteúdo gravado depois, e o Drive
+    /// ficava com o começo da versão velha e o fim da nova.
+    #[tokio::test]
+    async fn rewrite_after_interrupted_resumable_restarts_session() {
+        let s = setup(Env::with_tries(1).await).await;
+        let old: Vec<u8> = (0..20 * MIB).map(|n| (n % 251) as u8).collect();
+        let local = s.write_new(&s.env.root(), "grande.bin", &old);
+        s.env
+            .fake
+            .inject(Fault::DropConnectionAfterBytes(10 * MIB as u64));
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
+        s.env.fake.clear_faults();
+        let interrupted = s.env.store.next_job(i64::MAX).unwrap().unwrap();
+        assert!(interrupted.session_url.is_some());
+
+        let new: Vec<u8> = (0..20 * MIB).map(|n| (n % 241) as u8).collect();
+        s.write(&local, &new);
+        s.env.store.postpone_job(interrupted.job_id, 0).unwrap();
+        while s.run().await.is_some() {}
+
+        let ids = s.env.fake.find_live("grande.bin");
+        assert_eq!(ids.len(), 1);
+        assert!(s.env.fake.content(&ids[0]) == new, "conteúdo misturado");
+    }
+
+    /// Bug: um erro local num envio (aqui, o Lost and Found sem onde gravar) deixava o envio
+    /// sempre como o primeiro da fila, e nenhum outro saía.
+    #[tokio::test]
+    async fn local_error_in_one_upload_does_not_block_the_queue() {
+        let env = Env::new().await;
+        let root = env.fake.root_id();
+        let broken = ItemId(env.fake.add_file(&root, "a.txt", b"v1".to_vec()));
+        let fine = ItemId(env.fake.add_file(&root, "b.txt", b"v1".to_vec()));
+        let s = setup(env).await;
+        s.edit(&broken, b"local").await;
+        s.edit(&fine, b"novo").await;
+        s.env.fake.modify_remote(&broken.0, b"nuvem".to_vec());
+        std::fs::write(s.env.dir().join("lost_and_found"), b"").unwrap();
+
+        assert!(s.worker.run_once().await.is_err());
+
+        assert_eq!(s.run().await, Some(UploadOutcome::Uploaded(fine.clone())));
+        assert_eq!(s.env.fake.content(&fine.0), b"novo");
     }
 
     #[tokio::test]

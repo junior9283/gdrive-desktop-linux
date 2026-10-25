@@ -9,6 +9,7 @@ use gdl_drive::client::{Change, DriveClient, DriveError};
 use gdl_store::{Item, ItemId, LocalState, Store};
 use tokio::sync::broadcast;
 
+use crate::cache::BlockCache;
 use crate::events::EngineEvent;
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, item_from_remote};
 use crate::pins::reconcile;
@@ -17,6 +18,7 @@ use crate::{EngineError, Result};
 pub struct ChangePoller {
     store: Arc<Store>,
     client: Arc<DriveClient>,
+    cache: BlockCache,
     events: broadcast::Sender<EngineEvent>,
     offline: AtomicBool,
     /// Hora da última consulta bem-sucedida; 0 enquanto não houve nenhuma.
@@ -33,8 +35,10 @@ pub(crate) fn merge(old: Item, mut new: Item) -> (Item, bool) {
         return (new, revised);
     }
     // Edição local pendente: tamanho, data e revisão-base continuam os da edição até a fila
-    // decidir o que fazer (T9). Se a nuvem também mudou, é conflito.
-    let remote_moved_on = new.trashed || new.head_revision != old.base_revision;
+    // decidir o que fazer (T9). Se a nuvem também mudou, é conflito; durante o envio, não: a
+    // revisão nova pode ser a do próprio envio, e o resultado dele decide (já conferiu antes).
+    let remote_moved_on = old.local_state != LocalState::Uploading
+        && (new.trashed || new.head_revision != old.base_revision);
     let item = Item {
         size: old.size,
         modified_ms: old.modified_ms,
@@ -63,7 +67,7 @@ fn resolve(
         parents.extend(new.parent.clone());
         return Some((new, false));
     };
-    // Apagado de vez conta como lixeira: o item fica na lixeira local.
+    // Apagado de vez com edição local: conta como lixeira, e o merge decide (conflito).
     let new = new.unwrap_or_else(|| Item {
         trashed: true,
         ..old.clone()
@@ -78,58 +82,76 @@ fn resolve(
 }
 
 /// Aplica ao banco mudanças vindas do Drive (da consulta periódica ou da resposta de uma operação
-/// feita pela montagem). Devolve quantas mudaram o banco.
-pub(crate) fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<usize> {
+/// feita pela montagem). Devolve quantas mudaram o banco e os itens que saíram dele (apagados de
+/// vez no Drive, sem edição local), cujo conteúdo em cache quem chamou descarta.
+pub(crate) fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usize, Vec<ItemId>)> {
     let email = store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
-    // Itens alterados nesta rodada (e se o cache deles cai), gravados juntos no fim. Uma
-    // segunda mudança do mesmo item parte do resultado da primeira.
-    let mut pending: BTreeMap<ItemId, (Item, bool)> = BTreeMap::new();
     let mut parents = BTreeSet::new();
     // Itens novos ou que mudaram de pasta: a fixação deles segue a pasta nova.
     let mut moved = BTreeSet::new();
-    let mut applied = 0;
-    for change in changes {
-        let (id, new) = match change {
-            Change::Upsert(r) => (
-                ItemId(r.id.clone()),
-                Some(item_from_remote(*r, email.as_str())),
-            ),
-            Change::Removed(id) => (ItemId(id), None),
-        };
-        let (old, cleared) = match pending.remove(&id) {
-            Some((item, clear)) => (Some(item), clear),
-            None => (store.get(&id)?, false),
-        };
-        let old_parent = old.as_ref().map(|o| o.parent.clone());
-        if let Some((item, clear)) = resolve(old, new, &mut parents) {
-            if old_parent.as_ref() != Some(&item.parent) {
-                moved.insert(id.clone());
+    // Ler e gravar na mesma transação: uma gravação local no meio não é desfeita.
+    let mut removed = vec![];
+    let applied = store.modify(|batch| -> gdl_store::Result<usize> {
+        // Itens alterados nesta rodada (e se o cache deles cai), gravados juntos no fim. Uma
+        // segunda mudança do mesmo item parte do resultado da primeira.
+        let mut pending: BTreeMap<ItemId, (Item, bool)> = BTreeMap::new();
+        let mut applied = 0;
+        for change in changes {
+            let (id, new) = match change {
+                Change::Upsert(r) => (
+                    ItemId(r.id.clone()),
+                    Some(item_from_remote(*r, email.as_str())),
+                ),
+                Change::Removed(id) => (ItemId(id), None),
+            };
+            let (old, cleared) = match pending.remove(&id) {
+                Some((item, clear)) => (Some(item), clear),
+                None => (batch.get(&id)?, false),
+            };
+            // Apagado de vez sem edição local: sai do banco (e da lixeira daqui).
+            if new.is_none()
+                && let Some(gone) = old.as_ref().filter(|o| o.local_state == LocalState::Clean)
+            {
+                parents.extend(gone.parent.clone());
+                batch.remove_item(&id)?;
+                removed.push(id);
+                applied += 1;
+                continue;
             }
-            pending.insert(id, (item, clear || cleared));
-            applied += 1;
+            let old_parent = old.as_ref().map(|o| o.parent.clone());
+            if let Some((item, clear)) = resolve(old, new, &mut parents) {
+                if old_parent.as_ref() != Some(&item.parent) {
+                    moved.insert(id.clone());
+                }
+                pending.insert(id, (item, clear || cleared));
+                applied += 1;
+            }
         }
-    }
-    let items: Vec<Item> = pending.values().map(|(item, _)| item.clone()).collect();
-    store.upsert_items(&items)?;
-    for (id, _) in pending.iter().filter(|(_, (_, clear))| *clear) {
-        store.ranges_clear(id)?;
-    }
+        let items: Vec<Item> = pending.values().map(|(item, _)| item.clone()).collect();
+        batch.put_all(&items)?;
+        for (id, _) in pending.iter().filter(|(_, (_, clear))| *clear) {
+            batch.ranges_clear(id)?;
+        }
+        Ok(applied)
+    })?;
     store.recompute_local_names(&parents)?;
     for id in &moved {
         reconcile(store, id)?;
     }
-    Ok(applied)
+    Ok((applied, removed))
 }
 
 impl ChangePoller {
     pub fn new(
         store: Arc<Store>,
         client: Arc<DriveClient>,
+        cache: BlockCache,
         events: broadcast::Sender<EngineEvent>,
     ) -> ChangePoller {
         ChangePoller {
             store,
             client,
+            cache,
             events,
             offline: AtomicBool::new(false),
             last_sync_ms: AtomicI64::new(0),
@@ -169,7 +191,10 @@ impl ChangePoller {
             .kv_get(START_PAGE_TOKEN)?
             .ok_or(EngineError::NotIndexed)?;
         let (changes, next) = self.client.changes(&token).await?;
-        let applied = apply_changes(&self.store, changes)?;
+        let (applied, removed) = apply_changes(&self.store, changes)?;
+        for id in &removed {
+            self.cache.discard(id).await?;
+        }
         if next != token {
             self.store.kv_set(START_PAGE_TOKEN, &next)?;
         }
@@ -256,6 +281,87 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "a edição local continua no cache"
+        );
+    }
+
+    /// Bug: a aplicação das mudanças lia o item e gravava depois; uma gravação local que
+    /// terminava no meio voltava ao tamanho antigo (e podia voltar a `Clean` e se perder).
+    #[tokio::test]
+    async fn local_write_during_apply_changes_is_not_overwritten() {
+        let (env, _poller) = indexed().await;
+        let id = env
+            .fake
+            .add_file(&env.fake.root_id(), "a.txt", b"v".to_vec());
+        initial_index(&env.store, &env.client).await.unwrap();
+        let remote = env.client.get(&id).await.unwrap();
+        let item = ItemId(id);
+        let stop = Arc::new(AtomicBool::new(false));
+        let applier = {
+            let (store, stop) = (env.store.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let change = Change::Upsert(Box::new(remote.clone()));
+                    apply_changes(&store, vec![change]).unwrap();
+                }
+            })
+        };
+        let mut reverted = 0;
+        for size in 1..=2000 {
+            crate::uploads::commit_local_write(&env.store, &item, size, 0).unwrap();
+            std::thread::yield_now();
+            let now = env.store.get(&item).unwrap().unwrap();
+            if now.size != size || now.local_state != LocalState::Dirty {
+                reverted += 1;
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        applier.join().unwrap();
+        assert_eq!(reverted, 0, "gravações locais desfeitas pela consulta");
+    }
+
+    /// Bug: a consulta que trazia a revisão do próprio envio antes do fim dele marcava conflito,
+    /// e o item ficava preso em `Conflict` sem envio na fila.
+    #[tokio::test]
+    async fn remote_revision_during_own_upload_is_not_a_conflict() {
+        let (env, poller) = indexed().await;
+        let id = env
+            .fake
+            .add_file(&env.fake.root_id(), "a.txt", b"velho".to_vec());
+        initial_index(&env.store, &env.client).await.unwrap();
+        env.make_dirty(&id, 4);
+        env.store
+            .set_local_state(&ItemId(id.clone()), LocalState::Uploading)
+            .unwrap();
+
+        // A revisão nova chega pela consulta antes da resposta do envio.
+        env.fake.modify_remote(&id, b"novo".to_vec());
+        poller.run_once().await.unwrap();
+
+        assert_eq!(env.item(&id).local_state, LocalState::Uploading);
+    }
+
+    /// Bug: o item apagado de vez no Drive (lixeira esvaziada pela web) ficava para sempre na
+    /// lixeira daqui, e restaurar dava erro.
+    #[tokio::test]
+    async fn permanently_deleted_clean_item_leaves_the_local_trash() {
+        let (env, poller) = indexed().await;
+        let id = env
+            .fake
+            .add_file(&env.fake.root_id(), "velho.txt", b"x".to_vec());
+        initial_index(&env.store, &env.client).await.unwrap();
+        let cache = env.cache_for(env.store.clone());
+        cache.ensure_full(&ItemId(id.clone())).await.unwrap();
+        env.fake.trash_remote(&id);
+        poller.run_once().await.unwrap();
+
+        env.fake.delete_remote(&id);
+        poller.run_once().await.unwrap();
+
+        assert!(env.store.get(&ItemId(id.clone())).unwrap().is_none());
+        assert!(env.store.trashed().unwrap().is_empty());
+        assert!(
+            !cache.local_path(&ItemId(id)).exists(),
+            "o conteúdo saiu do disco"
         );
     }
 

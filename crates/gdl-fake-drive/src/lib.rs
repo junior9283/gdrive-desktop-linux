@@ -158,6 +158,13 @@ impl FakeDrive {
         state.record_change(id);
     }
 
+    /// Apaga de vez, como esvaziar a lixeira pela web.
+    pub fn delete_remote(&self, id: &str) {
+        let mut state = self.shared.state();
+        state.files.remove(id);
+        state.record_change(id);
+    }
+
     pub fn content(&self, id: &str) -> Vec<u8> {
         let state = self.shared.state();
         state.files[id].content.to_vec()
@@ -222,8 +229,15 @@ impl FakeDrive {
 
     /// Depois de `n` bytes, a conexão cai (ou, com `stall`, empaca).
     fn limit_bytes(&self, n: u64, stall: bool) {
+        self.shared.limit_reached.store(false, Ordering::SeqCst);
         self.shared.stall.store(stall, Ordering::SeqCst);
         self.shared.drop_budget.store(n as i64, Ordering::SeqCst);
+    }
+
+    /// Se a conexão já caiu (ou empacou) pelo limite de `DropConnectionAfterBytes` ou
+    /// `StallConnectionAfterBytes`.
+    pub fn byte_limit_reached(&self) -> bool {
+        self.shared.limit_reached.load(Ordering::SeqCst)
     }
 
     /// Bytes de conteúdo entregues por `alt=media`.

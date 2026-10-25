@@ -34,7 +34,17 @@ pub enum DriveError {
     #[error("erro ao ler o arquivo local: {0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]
-    Auth(#[from] AuthError),
+    Auth(AuthError),
+}
+
+impl From<AuthError> for DriveError {
+    fn from(e: AuthError) -> Self {
+        match e {
+            // Sem rede para renovar o token é sem rede, não falta de acesso.
+            AuthError::Network(_) => DriveError::Offline,
+            e => DriveError::Auth(e),
+        }
+    }
 }
 
 impl From<reqwest::Error> for DriveError {
@@ -84,7 +94,19 @@ impl Backoff {
     }
 }
 
-/// Repete `op` enquanto a falha for passageira, até `backoff.tries` tentativas.
+/// Sem rede, uma repetição rápida só (uma queda momentânea): esperar a rede voltar é papel da
+/// fila e da consulta de mudanças, e a chamada que veio do FUSE não fica presa.
+const OFFLINE_TRIES: u32 = 2;
+
+fn tries_for(e: &DriveError, backoff: &Backoff) -> u32 {
+    match e {
+        DriveError::Offline => backoff.tries.min(OFFLINE_TRIES),
+        _ => backoff.tries,
+    }
+}
+
+/// Repete `op` enquanto a falha for passageira, até `backoff.tries` tentativas (sem rede, até
+/// `OFFLINE_TRIES`).
 ///
 /// `op` é uma closure comum que devolve a future, e não uma closure `async`: com `AsyncFnMut` o
 /// compilador não prova que a chamada é `Send`, e ela não poderia rodar numa tarefa do tokio.
@@ -98,7 +120,7 @@ where
     let mut attempt = 0;
     loop {
         match op().await {
-            Err(e) if e.is_retryable() && attempt + 1 < backoff.tries => {
+            Err(e) if e.is_retryable() && attempt + 1 < tries_for(&e, backoff) => {
                 tracing::debug!(tentativa = attempt + 1, erro = %e, "repetindo chamada ao Drive");
                 tokio::time::sleep(backoff.delay(attempt)).await;
                 attempt += 1;
@@ -120,6 +142,26 @@ mod tests {
             let cap = Duration::from_secs(cap);
             assert!(d >= cap / 2 && d <= cap, "tentativa {attempt}: {d:?}");
         }
+    }
+
+    /// Bug: sem rede, cada chamada repetia pelo recuo inteiro (de 1 a 2 min) e prendia o FUSE;
+    /// quem espera a rede é a fila e a consulta de mudanças, não a chamada.
+    #[tokio::test(start_paused = true)]
+    async fn offline_gives_up_after_one_quick_retry() {
+        let start = tokio::time::Instant::now();
+        let mut calls = 0;
+        let r: Result<(), _> = with_backoff(&Backoff::default(), || {
+            calls += 1;
+            async { Err(DriveError::Offline) }
+        })
+        .await;
+        assert!(matches!(r, Err(DriveError::Offline)));
+        assert_eq!(calls, 2);
+        assert!(
+            start.elapsed() <= Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[tokio::test]

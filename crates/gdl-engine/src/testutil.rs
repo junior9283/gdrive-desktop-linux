@@ -84,7 +84,8 @@ impl Env {
     /// Consulta de mudanças sobre o banco do ambiente, com o receptor dos avisos.
     pub fn poller(&self) -> (ChangePoller, broadcast::Receiver<EngineEvent>) {
         let (tx, rx) = broadcast::channel(16);
-        let poller = ChangePoller::new(self.store.clone(), self.client.clone(), tx);
+        let cache = self.cache_for(self.store.clone());
+        let poller = ChangePoller::new(self.store.clone(), self.client.clone(), cache, tx);
         (poller, rx)
     }
 

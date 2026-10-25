@@ -27,6 +27,7 @@ url.workspace = true
 [dev-dependencies]
 gdl-fake-drive.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

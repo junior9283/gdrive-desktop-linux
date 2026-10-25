@@ -60,7 +60,10 @@ pub(crate) fn item_perm(item: &Item) -> u16 {
     let read_only = !item.can_edit || item.trashed;
     match (&item.kind, read_only) {
         (ItemKind::Shortcut { .. }, _) => 0o777,
+        // Pasta na lixeira continua gravável para o dono: esvaziar a lixeira do Dolphin apaga o
+        // conteúdo dela (o que só esquece a entrada); criar nela continua recusado.
         (ItemKind::Folder, false) => 0o755,
+        (ItemKind::Folder, true) if item.can_edit => 0o755,
         (ItemKind::Folder, true) => 0o555,
         (_, false) => 0o644,
         (_, true) => 0o444,

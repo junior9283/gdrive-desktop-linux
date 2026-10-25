@@ -45,6 +45,8 @@ pub(crate) struct Shared {
     pub(crate) drop_budget: AtomicI64,
     /// Esgotado o limite, a conexão para de andar em vez de cair.
     pub(crate) stall: AtomicBool,
+    /// O limite de bytes armado por último já se esgotou.
+    pub(crate) limit_reached: AtomicBool,
     /// A próxima escrita (a resposta que acabou de ser montada) derruba a conexão antes de sair.
     pub(crate) cut_next_write: AtomicBool,
 }
@@ -57,6 +59,7 @@ impl Shared {
             offline: AtomicBool::new(false),
             drop_budget: AtomicI64::new(-1),
             stall: AtomicBool::new(false),
+            limit_reached: AtomicBool::new(false),
             cut_next_write: AtomicBool::new(false),
         }
     }
@@ -68,13 +71,18 @@ impl Shared {
     /// Desconta `n` bytes do limite; devolve `true` (uma vez) quando ele se esgota.
     pub(crate) fn consume(&self, n: usize) -> bool {
         let n = n as i64;
-        self.drop_budget
+        let reached = self
+            .drop_budget
             .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| match left {
                 l if l < 0 || n == 0 => None,
                 l if l - n <= 0 => Some(-1),
                 l => Some(l - n),
             })
-            .is_ok_and(|left| left - n <= 0)
+            .is_ok_and(|left| left - n <= 0);
+        if reached {
+            self.limit_reached.store(true, Ordering::SeqCst);
+        }
+        reached
     }
 }
 
@@ -108,12 +116,15 @@ pub(crate) struct StatusFault {
     pub(crate) times: u32,
 }
 
-/// Sessão de upload retomável. O lock próprio faz a consulta de offset esperar o envio em andamento.
+/// Sessão de upload retomável. Como no Drive real, cada requisição nova substitui a anterior: uma
+/// conexão morta (ou empacada) não segura a sessão.
 pub(crate) struct Session {
     /// Arquivo a atualizar; `None` cria um novo.
     pub(crate) target: Option<String>,
     pub(crate) meta: Value,
     pub(crate) data: Vec<u8>,
+    /// Requisição dona da sessão agora; a substituída para de gravar.
+    pub(crate) owner: u64,
 }
 
 pub(crate) type SessionRef = Arc<tokio::sync::Mutex<Session>>;

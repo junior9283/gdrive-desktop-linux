@@ -23,6 +23,10 @@ use crate::notify::NOTIFICATIONS_PATH;
 /// Notificação recebida pelo serviço falso.
 #[derive(Debug, Clone)]
 pub(crate) struct Note {
+    /// ID que o servidor devolveu.
+    pub id: u32,
+    /// Aviso anterior que este substitui (0: nenhum).
+    pub replaces_id: u32,
     pub summary: String,
     pub body: String,
     pub actions: Vec<String>,
@@ -36,7 +40,7 @@ impl FakeNotifications {
     fn notify(
         &self,
         _app_name: String,
-        _replaces_id: u32,
+        replaces_id: u32,
         _app_icon: String,
         summary: String,
         body: String,
@@ -45,12 +49,19 @@ impl FakeNotifications {
         _expire_timeout: i32,
     ) -> u32 {
         let mut notes = self.0.lock().unwrap();
+        // Como no servidor de verdade: substituir mantém o ID.
+        let id = match replaces_id {
+            0 => notes.len() as u32 + 1,
+            id => id,
+        };
         notes.push(Note {
+            id,
+            replaces_id,
             summary,
             body,
             actions,
         });
-        notes.len() as u32
+        id
     }
 }
 

@@ -298,7 +298,7 @@ impl Daemon {
         let gid = rustix::process::getgid().as_raw();
         let fs = DriveFs::new(engine.clone(), I18n::new(&config.lang), uid, gid);
         let session = gdl_fs::mount(fs, &mount_point).map_err(failed)?;
-        std::fs::create_dir_all(&config.paths.data_dir)
+        gdl_common::paths::create_private_dir(&config.paths.data_dir)
             .and_then(|()| std::fs::write(self.current_account_file(), &email))
             .map_err(failed)?;
 
@@ -324,6 +324,7 @@ impl Daemon {
                 summary: self.i18n.tr("notify-title", &[]),
                 body: self.i18n.tr("mount-moved", &[("path", &path)]),
                 action: None,
+                kind: None,
             })
             .await;
         }
@@ -478,7 +479,7 @@ impl Daemon {
             .ok_or_else(|| self.not_logged_in())?;
         match mode {
             "" => {
-                let pending = engine.summary().map_err(failed)?.pending_uploads;
+                let pending = unsynced(&engine).map_err(failed)?;
                 if pending > 0 {
                     let count = pending.to_string();
                     return Err(ServiceError::PendingUploads(
@@ -517,20 +518,19 @@ impl Daemon {
         }
     }
 
-    /// Desmonta, esquece os tokens e apaga os dados locais da conta (banco e cache).
+    /// Desmonta, esquece os tokens e apaga os dados locais da conta (banco e cache). O Lost and
+    /// Found fica: é a única cópia das edições guardadas nele.
     async fn sign_out(&self, engine: &Engine, email: &str) -> Result<(), ServiceError> {
         self.stop_account().await;
         self.config.tokens.delete(email).await.map_err(failed)?;
         let _ = std::fs::remove_file(self.current_account_file());
         let dirs = engine.local_dirs();
+        let keep = engine.lost_and_found().dir().to_path_buf();
         tokio::task::spawn_blocking(move || {
             for dir in dirs {
-                match std::fs::remove_dir_all(&dir) {
-                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
-                    _ => {}
-                }
+                remove_all_but(&dir, &keep)?;
             }
-            Ok(())
+            Ok::<_, std::io::Error>(())
         })
         .await
         .map_err(failed)?
@@ -554,7 +554,40 @@ fn relative_to_mount(path: &Path, mount_point: &Path) -> Option<PathBuf> {
     path.strip_prefix(real).ok().map(Into::into)
 }
 
-/// Copia o conteúdo local dos arquivos com envio pendente para `dir`, sem sobrescrever nada.
+/// Quantos itens ainda não estão no Drive: os pendentes (o que `copy_pending` copia) e as
+/// cópias no Lost and Found.
+fn unsynced(engine: &Engine) -> gdl_engine::Result<usize> {
+    Ok(engine.store().pending_items()?.len() + engine.lost_and_found().list().len())
+}
+
+/// Apaga `dir` inteira, menos `keep` (e as pastas no caminho até ela) se `keep` tiver algo.
+fn remove_all_but(dir: &Path, keep: &Path) -> std::io::Result<()> {
+    let keep_it =
+        keep.starts_with(dir) && std::fs::read_dir(keep).is_ok_and(|mut d| d.next().is_some());
+    if !keep_it {
+        return match std::fs::remove_dir_all(dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            result => result,
+        };
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path == keep {
+            continue;
+        }
+        if keep.starts_with(&path) {
+            remove_all_but(&path, keep)?;
+        } else if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Copia o conteúdo local dos arquivos pendentes e o Lost and Found para `dir`, sem sobrescrever
+/// nada.
 fn copy_pending(engine: &Engine, dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let pending = engine
@@ -567,12 +600,22 @@ fn copy_pending(engine: &Engine, dir: &Path) -> std::io::Result<()> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => return Err(e),
         };
-        let (stem, ext) = split_ext(&item.local_name);
-        let (_, mut dst) = create_unique(dir, stem, |n| match n {
-            0 => ext.to_string(),
-            n => format!(" ({n}){ext}"),
-        })?;
-        std::io::copy(&mut src, &mut dst)?;
+        copy_unique(&mut src, dir, &item.local_name)?;
     }
+    for saved in engine.lost_and_found().list() {
+        let name = saved.file_name().unwrap_or_default().to_string_lossy();
+        copy_unique(&mut std::fs::File::open(&saved)?, dir, &name)?;
+    }
+    Ok(())
+}
+
+/// Copia `src` para `dir/name`, numerando o nome se já existir.
+fn copy_unique(src: &mut std::fs::File, dir: &Path, name: &str) -> std::io::Result<()> {
+    let (stem, ext) = split_ext(name);
+    let (_, mut dst) = create_unique(dir, stem, |n| match n {
+        0 => ext.to_string(),
+        n => format!(" ({n}){ext}"),
+    })?;
+    std::io::copy(src, &mut dst)?;
     Ok(())
 }

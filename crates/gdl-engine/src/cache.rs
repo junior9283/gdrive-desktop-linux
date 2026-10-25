@@ -2,15 +2,16 @@
 
 use std::collections::HashMap;
 use std::io::SeekFrom;
-use std::os::unix::fs::FileExt;
+use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::Bytes;
+use gdl_common::paths::create_private_dir;
 use gdl_common::time::now_ms;
 use gdl_drive::client::{DriveClient, DriveError};
-use gdl_store::{ItemId, Store, StoreError};
+use gdl_store::{ItemId, LocalState, Store, StoreError};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::broadcast;
 
@@ -175,13 +176,22 @@ impl BlockCache {
 
     /// Abre o conteúdo local para leitura e escrita, criando o arquivo (e a pasta) se preciso.
     pub fn open_local(&self, id: &ItemId, truncate: bool) -> std::io::Result<std::fs::File> {
-        std::fs::create_dir_all(&self.0.content_dir)?;
-        std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(truncate)
-            .open(self.local_path(id))
+        let open = || {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(truncate)
+                .mode(0o600)
+                .open(self.local_path(id))
+        };
+        match open() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                create_private_dir(&self.0.content_dir)?;
+                open()
+            }
+            result => result,
+        }
     }
 
     fn items(&self) -> MutexGuard<'_, HashMap<ItemId, ItemState>> {
@@ -266,7 +276,7 @@ impl BlockCache {
         let (start, end) = (align_down(start), end.next_multiple_of(BLOCK).min(size));
         let gaps = self.0.store.ranges_missing(id, start, end)?;
         if !gaps.is_empty() {
-            self.check_disk()?;
+            self.check_disk(id).await?;
         }
         for (gap_start, gap_end) in gaps {
             let mut at = gap_start;
@@ -283,6 +293,12 @@ impl BlockCache {
     async fn fetch(&self, id: &ItemId, start: u64, end: u64) -> Result<()> {
         let lock = self.item_lock(id);
         let _guard = lock.lock().await;
+        // Quem passa a editar o item segura esta trava (`locked`): com edição local, o arquivo
+        // é dela e nada da nuvem entra nele.
+        let item = self.0.store.get(id)?.ok_or(CacheError::NotFound)?;
+        if item.local_state != LocalState::Clean {
+            return Ok(());
+        }
         // Outro leitor pode ter baixado enquanto esperávamos a trava.
         for (gap_start, gap_end) in self.0.store.ranges_missing(id, start, end)? {
             let bytes = self
@@ -290,26 +306,48 @@ impl BlockCache {
                 .client
                 .download_range(&id.0, gap_start, gap_end)
                 .await?;
-            tokio::fs::create_dir_all(&self.0.content_dir).await?;
-            let mut file = tokio::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .open(self.local_path(id))
-                .await?;
+            let mut file = tokio::fs::File::from_std(self.open_local(id, false)?);
             file.seek(SeekFrom::Start(gap_start)).await?;
             file.write_all(&bytes).await?;
             file.flush().await?;
-            self.0
-                .store
-                .ranges_add(id, gap_start, gap_start + bytes.len() as u64)?;
+            // Uma revisão nova que chegou durante o download descartou o cache: o trecho
+            // baixado é da velha e não conta.
+            self.0.store.modify(|batch| -> gdl_store::Result<()> {
+                let current = batch.get(id)?;
+                if current.is_some_and(|c| {
+                    c.head_revision == item.head_revision && c.local_state == LocalState::Clean
+                }) {
+                    batch.ranges_add(id, gap_start, gap_start + bytes.len() as u64)?;
+                }
+                Ok(())
+            })?;
         }
         Ok(())
     }
 
-    /// Recusa gravar no cache com o disco abaixo do mínimo livre, e avisa na passagem para cheio.
-    fn check_disk(&self) -> Result<()> {
-        let free_kb = self.0.free.free_kbytes(&self.0.dir)?;
+    /// Roda `f` com a trava do item: nenhum download grava no conteúdo local enquanto isso.
+    /// Quem passa a editar o item (marca a edição ou troca o arquivo) faz isso aqui dentro.
+    pub async fn locked<T>(&self, id: &ItemId, f: impl FnOnce() -> T) -> T {
+        let lock = self.item_lock(id);
+        let _guard = lock.lock().await;
+        f()
+    }
+
+    /// Com o disco abaixo do mínimo livre, libera o que estiver em cache há mais tempo (menos o
+    /// item `reading`); se não bastar, recusa gravar no cache e avisa na passagem para cheio.
+    async fn check_disk(&self, reading: &ItemId) -> Result<()> {
+        let mut free_kb = self.0.free.free_kbytes(&self.0.dir)?;
+        if free_kb < self.0.min_free_kbytes {
+            // Libera os de acesso mais antigo até voltar ao mínimo.
+            for (id, _) in self.0.store.eviction_candidates(64)? {
+                if free_kb >= self.0.min_free_kbytes {
+                    break;
+                }
+                if id != *reading && self.try_evict(&id).await? {
+                    free_kb = self.0.free.free_kbytes(&self.0.dir)?;
+                }
+            }
+        }
         let low = free_kb < self.0.min_free_kbytes;
         if self.0.disk_low.swap(low, Ordering::SeqCst) != low && low {
             // Sem ninguém ouvindo, o aviso pode se perder.
@@ -347,6 +385,16 @@ impl BlockCache {
         Ok(())
     }
 
+    /// Libera o item se ninguém o estiver usando agora. Devolve se liberou.
+    async fn try_evict(&self, id: &ItemId) -> Result<bool> {
+        let lock = self.item_lock(id);
+        let Ok(_guard) = lock.try_lock() else {
+            return Ok(false);
+        };
+        self.drop_content(id).await?;
+        Ok(true)
+    }
+
     /// Libera os itens de acesso mais antigo até o cache caber no limite. Nunca toca em itens
     /// fixados, com edição local ou sendo baixados agora. Devolve os bytes liberados.
     pub async fn evict_if_needed(&self) -> Result<u64> {
@@ -361,13 +409,10 @@ impl BlockCache {
                 if total <= max {
                     break;
                 }
-                let lock = self.item_lock(&id);
-                let Ok(_guard) = lock.try_lock() else {
-                    continue;
-                };
-                self.drop_content(&id).await?;
-                total -= bytes;
-                freed += bytes;
+                if self.try_evict(&id).await? {
+                    total -= bytes;
+                    freed += bytes;
+                }
             }
             // Só restam itens em uso: tenta de novo na próxima vez.
             if freed == before {
@@ -443,6 +488,26 @@ mod tests {
             _dir: dir,
         };
         (setup, ids)
+    }
+
+    /// Bug: um download (leitura antecipada, por exemplo) que alcançava o item depois de ele
+    /// passar a ser editado aqui gravava os blocos da nuvem por cima da edição.
+    #[tokio::test]
+    async fn download_never_writes_over_a_local_edit() {
+        let (s, ids) = setup(&[("a.bin", 2 * MIB)], None).await;
+        let mut file = s.cache.open_local(&ids[0], true).unwrap();
+        std::io::Write::write_all(&mut file, b"LOCAL").unwrap();
+        s.env
+            .store
+            .set_local_state(&ids[0], LocalState::Dirty)
+            .unwrap();
+
+        s.cache.ensure_full(&ids[0]).await.unwrap();
+
+        assert_eq!(
+            std::fs::read(s.cache.local_path(&ids[0])).unwrap(),
+            b"LOCAL"
+        );
     }
 
     #[tokio::test]
@@ -534,6 +599,41 @@ mod tests {
         assert!(!s.cache.local_path(&ids[0]).exists());
         assert!(s.cache.local_path(&ids[2]).exists());
         assert_eq!(s.cache.evict_if_needed().await.unwrap(), 0);
+    }
+
+    /// Espaço livre que só volta quando o arquivo dado sai do disco.
+    struct FreedBy(std::path::PathBuf);
+
+    impl FreeSpace for FreedBy {
+        fn free_kbytes(&self, _dir: &std::path::Path) -> std::io::Result<u64> {
+            Ok(if self.0.exists() { 100_000 } else { u64::MAX })
+        }
+    }
+
+    /// Bug: sem limite de cache configurado, nada era liberado; com o disco no mínimo livre,
+    /// todo arquivo ainda não baixado dava erro.
+    #[tokio::test]
+    async fn low_disk_frees_the_oldest_cached_item_before_refusing() {
+        let (s, ids) = setup(&[("velho.bin", MIB), ("novo.bin", MIB)], None).await;
+        let dir = tempfile::tempdir().unwrap();
+        let old_path = dir.path().join("content").join(&ids[0].0);
+        let (tx, _events) = broadcast::channel(16);
+        let cache = BlockCache::with_free_space(
+            s.env.store.clone(),
+            s.env.client.clone(),
+            dir.path().to_path_buf(),
+            None,
+            512_000,
+            tx,
+            Arc::new(FreedBy(old_path.clone())),
+        );
+        cache.ensure_full(&ids[0]).await.unwrap();
+        assert!(old_path.exists());
+
+        let got = cache.read(&ids[1], 0, 10).await.unwrap();
+
+        assert_eq!(got.as_ref(), &data(MIB)[..10]);
+        assert!(!old_path.exists(), "o mais antigo saiu do cache");
     }
 
     #[tokio::test]

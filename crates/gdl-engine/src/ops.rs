@@ -6,6 +6,7 @@ use std::io::Read;
 use std::path::Path;
 
 use gdl_common::names::{split_ext, to_remote};
+use gdl_common::temp_files::is_local_only;
 use gdl_common::time::now_ms;
 use gdl_drive::client::{Change, DriveError};
 use gdl_drive::model::RemoteFile;
@@ -54,7 +55,7 @@ impl Engine {
     pub async fn create_folder(&self, parent: &ItemId, name: &str) -> Result<Item> {
         // Com o ID reservado, a pasta cuja resposta se perdeu não é criada de novo pela fila.
         let mut file_id = None;
-        if !is_local_id(parent) {
+        if !is_local_id(parent) && !self.poller.is_offline() {
             let created = match self.uploads.reserve_id().await {
                 Ok(id) => {
                     self.client
@@ -142,18 +143,50 @@ impl Engine {
         Ok(())
     }
 
-    /// Manda para a lixeira do Drive (nunca apaga de vez). O que nunca subiu some só daqui.
+    /// Manda para a lixeira do Drive (nunca apaga de vez). O arquivo que ainda não subiu vai
+    /// para a lixeira daqui (o envio espera; restaurar volta a enviar); travas, temporários e
+    /// pastas que nunca subiram somem só daqui.
     pub async fn trash(&self, id: &ItemId) -> Result<()> {
         let item = self.item(id)?;
         if never_uploaded(&item) {
-            return self.forget_local(&item).await;
+            return if item.local_state == LocalState::LocalOnly || item.kind == ItemKind::Folder {
+                self.forget_local(&item).await
+            } else {
+                self.set_local_trashed(id, true)
+            };
         }
         self.applied(self.client.set_trashed(&id.0, true).await?)?;
         Ok(())
     }
 
     pub async fn untrash(&self, id: &ItemId) -> Result<Item> {
+        if is_local_id(id) {
+            self.set_local_trashed(id, false)?;
+            enqueue_upload(&self.store, id, now_ms() + UPLOAD_DELAY_MS, None)?;
+            return self.item(id);
+        }
         self.applied(self.client.set_trashed(&id.0, false).await?)
+    }
+
+    /// Lixeira daqui, para o que ainda não existe no Drive.
+    fn set_local_trashed(&self, id: &ItemId, trashed: bool) -> Result<()> {
+        let parent = self.store.modify(|batch| -> Result<Option<ItemId>> {
+            let item = batch.get(id)?.ok_or(EngineError::NotFound)?;
+            let parent = item.parent.clone();
+            batch.put(&Item { trashed, ..item })?;
+            Ok(parent)
+        })?;
+        self.store.recompute_local_names(parent.as_ref())?;
+        Ok(())
+    }
+
+    /// Esvaziar a lixeira: o que só estava na lixeira daqui (nunca subiu) é apagado; o que está
+    /// na lixeira do Drive continua lá.
+    pub async fn empty_from_trash(&self, id: &ItemId) -> Result<()> {
+        match self.store.get(id)? {
+            Some(item) if is_local_id(id) && item.trashed => self.forget_local(&item).await,
+            _ => Ok(()),
+        }
     }
 
     /// Renomeia e/ou move para outra pasta do Meu Drive.
@@ -161,13 +194,30 @@ impl Engine {
         let item = self.item(id)?;
         let remote_name = to_remote(name);
         if never_uploaded(&item) {
-            // O envio pendente usa o nome e a pasta da hora em que subir.
+            // O envio pendente usa o nome e a pasta da hora em que subir. O nome decide se sobe:
+            // o download terminado (`.crdownload` → nome final) passa a subir, e o que virou
+            // nome de trava deixa de subir (a fila pula o que não está pendente).
             let old_parent = item.parent.clone();
-            self.store.upsert_item(&Item {
-                parent: Some(parent.clone()),
-                remote_name,
-                ..item
+            let starts_uploading = self.store.modify(|batch| -> Result<bool> {
+                let item = batch.get(id)?.ok_or(EngineError::NotFound)?;
+                let was_local_only = item.local_state == LocalState::LocalOnly;
+                let local_only = is_local_only(name);
+                let local_state = match (was_local_only, local_only) {
+                    (true, false) => LocalState::Dirty,
+                    (false, true) => LocalState::LocalOnly,
+                    _ => item.local_state,
+                };
+                batch.put(&Item {
+                    parent: Some(parent.clone()),
+                    remote_name,
+                    local_state,
+                    ..item
+                })?;
+                Ok(was_local_only && !local_only)
             })?;
+            if starts_uploading {
+                enqueue_upload(&self.store, id, now_ms() + UPLOAD_DELAY_MS, None)?;
+            }
             self.store
                 .recompute_local_names(old_parent.iter().chain([parent]))?;
             crate::pins::reconcile(&self.store, id)?;
@@ -222,10 +272,14 @@ impl Engine {
         if !never_uploaded(&source) {
             self.client.set_trashed(&src.0, true).await?;
         }
-        self.cache.discard(dst).await?;
-        tokio::fs::rename(self.cache.local_path(src), self.cache.local_path(dst)).await?;
-        self.store.take_over(src, dst)?;
-        self.commit_write(dst, source.size, source.modified_ms, Upload::Soon)?;
+        // Com a trava de `dst`: um download dele em andamento não grava no conteúdo novo.
+        self.cache
+            .locked(dst, || -> Result<()> {
+                std::fs::rename(self.cache.local_path(src), self.cache.local_path(dst))?;
+                self.store.take_over(src, dst)?;
+                self.commit_write(dst, source.size, source.modified_ms, Upload::Soon)
+            })
+            .await?;
         self.store.recompute_local_names(source.parent.as_ref())?;
         Ok(())
     }

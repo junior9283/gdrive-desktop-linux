@@ -165,3 +165,64 @@ async fn logout_move_copies_pending_files_without_overwriting() {
     );
     assert_eq!(h.proxy.status().await.unwrap().account, "");
 }
+
+/// Bug: com o armazenamento cheio, cada tentativa de cada arquivo abria um aviso novo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn repeated_warnings_replace_the_previous_one() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.fake
+        .inject(gdl_fake_drive::Fault::QuotaExceeded { times: 1000 });
+
+    let dir = h.drive();
+    blocking(move || {
+        for name in ["a.txt", "b.txt"] {
+            std::fs::write(dir.join(name), b"sem espaco").unwrap();
+        }
+    })
+    .await;
+
+    let quota = || -> Vec<_> {
+        h.notes()
+            .into_iter()
+            .filter(|n| n.summary.contains("cheio"))
+            .collect()
+    };
+    wait_until("dois avisos de armazenamento cheio", || quota().len() >= 2).await;
+    let notes = quota();
+    assert_eq!(notes[1].replaces_id, notes[0].id, "{notes:?}");
+}
+
+/// Bug: sair da conta sem envios na fila apagava o Lost and Found, a única cópia das edições
+/// preservadas por conflito.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_never_deletes_lost_and_found_silently() {
+    let h = Harness::new().await;
+    let id = h
+        .fake
+        .add_file(&h.fake.root_id(), "contrato.txt", b"v1".to_vec());
+    h.logged_in().await;
+    let path = h.drive().join("contrato.txt");
+    blocking(move || std::fs::write(path, b"editado aqui").unwrap()).await;
+    h.fake.modify_remote(&id, b"editado na nuvem".to_vec());
+    let engine = h.daemon.engine().await.unwrap();
+    wait_until("edição no Lost and Found", || {
+        engine.lost_and_found().list().len() == 1
+    })
+    .await;
+    drop(engine);
+    let saved = h.proxy.list_lost_and_found().await.unwrap();
+
+    let err = h.proxy.logout("", "").await.unwrap_err();
+    assert!(err.to_string().contains("PendingUploads"), "{err}");
+    let copies = h.home.join("Copias");
+    h.proxy
+        .logout("move", copies.to_str().unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(h.proxy.status().await.unwrap().account, "");
+    assert_eq!(std::fs::read(&saved[0]).unwrap(), b"editado aqui");
+    let copied = std::fs::read_dir(&copies).unwrap().count();
+    assert_eq!(copied, 1, "o Lost and Found vai junto para a pasta");
+}

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gdl_common::config::Preferences;
-use gdl_common::paths::Paths;
+use gdl_common::paths::{Paths, create_private_dir};
 use gdl_drive::client::DriveClient;
 use gdl_drive::model::About;
 use gdl_store::Store;
@@ -50,7 +50,7 @@ pub struct Engine {
     pub(crate) cache: BlockCache,
     pins: PinManager,
     pub(crate) uploads: UploadWorker,
-    poller: ChangePoller,
+    pub(crate) poller: ChangePoller,
     lost: LostAndFound,
     data_dir: PathBuf,
     pub(crate) events: broadcast::Sender<EngineEvent>,
@@ -73,7 +73,8 @@ impl Engine {
             .content_cache_path
             .as_ref()
             .map_or_else(|| data_dir.clone(), |p| p.join(account));
-        std::fs::create_dir_all(&data_dir)?;
+        create_private_dir(&data_dir)?;
+        create_private_dir(&cache_dir)?;
         let store = Arc::new(Store::open(&data_dir.join("metadata.db"))?);
         let client = Arc::new(client);
         let (events, _) = broadcast::channel(64);
@@ -96,7 +97,7 @@ impl Engine {
                 lost.clone(),
                 events.clone(),
             ),
-            poller: ChangePoller::new(store.clone(), client.clone(), events.clone()),
+            poller: ChangePoller::new(store.clone(), client.clone(), cache.clone(), events.clone()),
             lost,
             data_dir,
             store,
@@ -231,7 +232,8 @@ impl Engine {
 
     async fn upload_loop(&self) {
         loop {
-            if !self.is_paused() {
+            // Sem rede, nenhum envio tenta: a próxima consulta bem-sucedida libera a fila.
+            if !self.is_paused() && !self.poller.is_offline() {
                 match self.uploads.run_once().await {
                     // O envio é o primeiro a ver a rede cair; a consulta de mudanças vê a volta.
                     Ok(Some(UploadOutcome::Offline)) => self.poller.report_offline(),
@@ -280,6 +282,47 @@ mod tests {
             maintenance: Duration::from_millis(20),
             eviction: Duration::from_millis(50),
         }
+    }
+
+    /// Bug: banco, cache e Lost and Found eram criados com o modo padrão (0755/0644), legíveis
+    /// por outros usuários num disco compartilhado.
+    #[tokio::test]
+    async fn account_data_is_private_to_the_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let id = fake.add_file(&fake.root_id(), "a.txt", b"segredo".to_vec());
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let (mut prefs, _) = load_preferences(&paths).unwrap();
+        let shared_disk = tmp.path().join("disco");
+        prefs.content_cache_path = Some(shared_disk.clone());
+        let account = paths.data_dir.join("teste@example.com");
+        std::fs::create_dir_all(&account).unwrap();
+        std::fs::set_permissions(&account, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let engine =
+            Engine::open(&paths, &prefs, "teste@example.com", fast_client(&fake, 3)).unwrap();
+        engine.ensure_indexed().await.unwrap();
+        let id = gdl_store::ItemId(id);
+        engine.cache.ensure_full(&id).await.unwrap();
+        engine
+            .lost
+            .preserve(
+                &engine.cache.local_path(&id),
+                "a.txt",
+                crate::events::LostReason::RemoteChanged,
+            )
+            .unwrap();
+
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        for dir in [
+            account.clone(),
+            shared_disk.join("teste@example.com"),
+            account.join("lost_and_found"),
+        ] {
+            assert_eq!(mode(&dir), 0o700, "{}", dir.display());
+        }
+        assert_eq!(mode(&engine.cache.local_path(&id)), 0o600);
     }
 
     #[tokio::test]

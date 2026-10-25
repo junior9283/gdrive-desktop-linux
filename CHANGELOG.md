@@ -71,7 +71,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   `lost-and-found`, `logout`, `open-pointer`) e abertura dos ponteiros `.gdoc`, `.gsheet`… no
   navegador pelo duplo clique (tipos MIME e atalho `.desktop`); o endereço vem do ID validado,
   nunca do campo `url` do arquivo.
-
 - Suíte "nunca perder dados" (queda no meio do envio, rede instável, disco cheio e tempestade de
   conflitos) e guia dos testes em `docs/testes/`.
 
@@ -82,6 +81,28 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   toda criação agora usa um ID reservado, e a repetição não duplica.
 - Com a rede de volta, ou depois de reiniciar, os envios que esperavam a rede ficavam até 30 s
   parados; agora saem na hora.
+- Revisão final da 0.1:
+  - um download terminado (`.crdownload` ou `.part` renomeado para o nome final) nunca subia;
+  - sair da conta apagava o Lost and Found e edições ainda sem envio; agora elas contam como
+    pendentes, vão junto no `--move`, e o Lost and Found nunca é apagado;
+  - sem internet, cada operação (abrir, criar pasta, enviar) insistia por 1 a 2 minutos antes de
+    desistir; agora desiste em cerca de 1 s, e a fila espera a rede voltar;
+  - o acesso vencido sem rede para renová-lo aparecia como falha de envio, e não como "sem
+    internet";
+  - gravar de novo um arquivo novo durante o envio podia criar uma segunda cópia no Drive, e um
+    envio grande retomado depois de uma edição misturava a versão velha com a nova;
+  - uma gravação terminada no meio de uma consulta de mudanças podia ser desfeita;
+  - o próprio envio podia ser visto como conflito e deixar o arquivo preso;
+  - um download em andamento podia gravar por cima de uma edição local;
+  - sem limite de cache configurado, nada era liberado, e com o disco no mínimo livre toda leitura
+    nova falhava; agora o que foi usado há mais tempo é liberado;
+  - um erro local num envio travava a fila inteira;
+  - com o armazenamento cheio, cada tentativa abria uma notificação nova;
+  - esvaziar a lixeira do Dolphin com uma pasta dentro dava "permissão negada";
+  - mandar para a lixeira um arquivo que ainda não tinha subido o apagava de vez;
+  - um item apagado de vez pela web ficava para sempre na lixeira daqui;
+  - banco, cache e Lost and Found eram legíveis por outros usuários (agora só pelo dono), e com
+    `ContentCachePath` configurado a primeira leitura falhava.
 
 ## [0.0.1] - 2026-10-25
 

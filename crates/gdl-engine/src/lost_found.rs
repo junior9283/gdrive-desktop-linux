@@ -4,6 +4,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use gdl_common::names::{create_unique, split_ext};
+use gdl_common::paths::create_private_dir;
 use gdl_common::time::{local_stamp, now_ms};
 
 use crate::events::LostReason;
@@ -26,7 +27,7 @@ impl LostAndFound {
         original_name: &str,
         reason: LostReason,
     ) -> std::io::Result<PathBuf> {
-        std::fs::create_dir_all(&self.dir)?;
+        create_private_dir(&self.dir)?;
         let (stem, ext) = split_ext(original_name);
         let stamp = local_stamp(now_ms());
         let (path, mut dst) = create_unique(&self.dir, stem, |n| match n {

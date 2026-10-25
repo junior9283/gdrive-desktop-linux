@@ -7,7 +7,9 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use gdl_common::names::{self, Sibling};
-use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, named_params, params};
+use rusqlite::{
+    Connection, OptionalExtension, Row, TransactionBehavior, named_params, params, params_from_iter,
+};
 
 pub use types::*;
 
@@ -62,57 +64,22 @@ impl Store {
     /// Grava vários itens numa transação. Item já conhecido mantém o inode; item novo com
     /// `Inode::UNASSIGNED` recebe o próximo livre, e nenhum inode é reaproveitado.
     pub fn upsert_items(&self, items: &[Item]) -> Result<()> {
+        self.modify(|batch| batch.put_all(items))
+    }
+
+    /// Lê, decide e grava numa transação só: nenhuma outra escrita (uma gravação local que
+    /// acabou de terminar, por exemplo) cai entre a leitura e a escrita e se perde.
+    pub fn modify<R, E: From<StoreError>>(
+        &self,
+        f: impl FnOnce(&Batch<'_>) -> std::result::Result<R, E>,
+    ) -> std::result::Result<R, E> {
         let mut conn = self.conn();
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        {
-            let mut inode_of = tx.prepare_cached(
-                "INSERT INTO inodes (inode, item_id) VALUES (?1, ?2) \
-                 ON CONFLICT(item_id) DO UPDATE SET item_id = item_id RETURNING inode",
-            )?;
-            let mut upsert = tx.prepare_cached(
-                "INSERT INTO items (id, inode, parent, remote_name, local_name, kind, mime, target_id, \
-                 size, md5, head_revision, base_revision, base_md5, modified_ms, created_ms, trashed, \
-                 can_edit, local_state, pin) VALUES (:id, :inode, :parent, :remote_name, :local_name, \
-                 :kind, :mime, :target_id, :size, :md5, :head_revision, :base_revision, :base_md5, \
-                 :modified_ms, :created_ms, :trashed, :can_edit, :local_state, :pin) \
-                 ON CONFLICT(id) DO UPDATE SET parent = excluded.parent, \
-                 remote_name = excluded.remote_name, local_name = excluded.local_name, \
-                 kind = excluded.kind, mime = excluded.mime, target_id = excluded.target_id, \
-                 size = excluded.size, md5 = excluded.md5, head_revision = excluded.head_revision, \
-                 base_revision = excluded.base_revision, base_md5 = excluded.base_md5, \
-                 modified_ms = excluded.modified_ms, created_ms = excluded.created_ms, \
-                 trashed = excluded.trashed, can_edit = excluded.can_edit, \
-                 local_state = excluded.local_state, pin = excluded.pin",
-            )?;
-            for item in items {
-                let wanted = (item.inode != Inode::UNASSIGNED).then_some(item.inode.0);
-                let inode: u64 = inode_of.query_row(params![wanted, item.id.0], |r| r.get(0))?;
-                let (kind, mime, target_id) = item.kind.to_columns();
-                upsert.execute(named_params! {
-                    ":id": item.id.0,
-                    ":inode": inode,
-                    ":parent": item.parent.as_ref().map(|p| &p.0),
-                    ":remote_name": item.remote_name,
-                    ":local_name": item.local_name,
-                    ":kind": kind,
-                    ":mime": mime,
-                    ":target_id": target_id,
-                    ":size": item.size,
-                    ":md5": item.md5,
-                    ":head_revision": item.head_revision,
-                    ":base_revision": item.base_revision,
-                    ":base_md5": item.base_md5,
-                    ":modified_ms": item.modified_ms,
-                    ":created_ms": item.created_ms,
-                    ":trashed": item.trashed,
-                    ":can_edit": item.can_edit,
-                    ":local_state": item.local_state,
-                    ":pin": item.pin,
-                })?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::from)?;
+        let result = f(&Batch { conn: &tx })?;
+        tx.commit().map_err(StoreError::from)?;
+        Ok(result)
     }
 
     fn query_items(&self, sql: &str, args: impl rusqlite::Params) -> Result<Vec<Item>> {
@@ -123,9 +90,7 @@ impl Store {
     }
 
     fn query_item(&self, sql: &str, args: impl rusqlite::Params) -> Result<Option<Item>> {
-        let conn = self.conn();
-        let mut stmt = conn.prepare_cached(sql)?;
-        stmt.query_and_then(args, item_from_row)?.next().transpose()
+        query_item(&self.conn(), sql, args)
     }
 
     pub fn get(&self, id: &ItemId) -> Result<Option<Item>> {
@@ -218,25 +183,7 @@ impl Store {
 
     /// Marca `[start, end)` como presente no cache, juntando com intervalos que se tocam.
     pub fn ranges_add(&self, id: &ItemId, start: u64, end: u64) -> Result<()> {
-        let mut conn = self.conn();
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (mut lo, mut hi) = (start, end);
-        {
-            let mut absorb = tx.prepare_cached(
-                "DELETE FROM ranges WHERE item_id = ?1 AND start <= ?3 AND end >= ?2 RETURNING start, end",
-            )?;
-            for range in absorb.query_map(params![id.0, start, end], |r| {
-                Ok((r.get::<_, u64>(0)?, r.get::<_, u64>(1)?))
-            })? {
-                let (s, e) = range?;
-                lo = lo.min(s);
-                hi = hi.max(e);
-            }
-            tx.prepare_cached("INSERT INTO ranges (item_id, start, end) VALUES (?1, ?2, ?3)")?
-                .execute(params![id.0, lo, hi])?;
-        }
-        tx.commit()?;
-        Ok(())
+        self.modify(|batch| batch.ranges_add(id, start, end))
     }
 
     /// Trechos de `[start, end)` que ainda não estão no cache, em ordem.
@@ -263,9 +210,7 @@ impl Store {
     }
 
     pub fn ranges_clear(&self, id: &ItemId) -> Result<()> {
-        self.conn()
-            .execute("DELETE FROM ranges WHERE item_id = ?1", [&id.0])?;
-        Ok(())
+        self.modify(|batch| batch.ranges_clear(id))
     }
 
     pub fn enqueue(&self, job: NewUploadJob) -> Result<i64> {
@@ -365,16 +310,14 @@ impl Store {
         Ok(())
     }
 
-    /// Itens com edição local (`Dirty` ou `Uploading`) sem envio na fila.
+    /// Itens com edição local (`Dirty`, `Uploading` ou `Conflict`) sem envio na fila.
     pub fn dirty_items_without_job(&self) -> Result<Vec<ItemId>> {
         let conn = self.conn();
         let mut stmt = conn.prepare_cached(
-            "SELECT id FROM items WHERE local_state IN (?1, ?2) \
+            "SELECT id FROM items WHERE local_state IN (?1, ?2, ?3) \
              AND id NOT IN (SELECT item_id FROM upload_queue) ORDER BY id",
         )?;
-        let rows = stmt.query_map(params![LocalState::Dirty, LocalState::Uploading], |r| {
-            Ok(ItemId(r.get(0)?))
-        })?;
+        let rows = stmt.query_map(params_from_iter(EDITED), |r| Ok(ItemId(r.get(0)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -403,11 +346,7 @@ impl Store {
 
     /// Apaga o item local e tudo o que é dele. O inode continua reservado e nunca volta a ser usado.
     pub fn remove_item(&self, id: &ItemId) -> Result<()> {
-        let mut conn = self.conn();
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        purge_rows(&tx, id)?;
-        tx.commit()?;
-        Ok(())
+        self.modify(|b| b.remove_item(id))
     }
 
     /// Salvar por cima: `dst` assume o inode de `src` (o nome agora aponta para o inode que o
@@ -440,12 +379,28 @@ impl Store {
         Ok(())
     }
 
+    /// Guarda a sessão retomável do envio, só enquanto o item ainda está sendo enviado: depois
+    /// de uma gravação nova, a sessão (com o conteúdo velho) não volta para a fila.
     pub fn set_session_url(&self, job_id: i64, url: Option<&str>) -> Result<()> {
         self.conn().execute(
-            "UPDATE upload_queue SET session_url = ?2 WHERE job_id = ?1",
-            params![job_id, url],
+            "UPDATE upload_queue SET session_url = ?2 WHERE job_id = ?1 AND (?2 IS NULL OR \
+             (SELECT local_state FROM items WHERE id = upload_queue.item_id) = ?3)",
+            params![job_id, url, LocalState::Uploading],
         )?;
         Ok(())
+    }
+
+    /// ID já reservado para criar o item, por qualquer envio dele na fila.
+    pub fn reserved_file_id(&self, id: &ItemId) -> Result<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT file_id FROM upload_queue WHERE item_id = ?1 AND file_id IS NOT NULL \
+                 ORDER BY job_id LIMIT 1",
+                [&id.0],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
 
     pub fn kv_get(&self, key: &str) -> Result<Option<String>> {
@@ -495,11 +450,15 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Itens com envio na fila, em ordem de nome local.
+    /// Itens que ainda não estão no Drive como estão aqui (com envio na fila ou edição local),
+    /// em ordem de nome local.
     pub fn pending_items(&self) -> Result<Vec<Item>> {
         self.query_items(
-            select_items!("WHERE id IN (SELECT item_id FROM upload_queue) ORDER BY local_name"),
-            [],
+            select_items!(
+                "WHERE id IN (SELECT item_id FROM upload_queue) OR local_state IN (?1, ?2, ?3) \
+                 ORDER BY local_name"
+            ),
+            params_from_iter(EDITED),
         )
     }
 
@@ -548,6 +507,121 @@ impl Store {
     }
 }
 
+/// Estados de um item com edição local que ainda não está no Drive.
+const EDITED: [LocalState; 3] = [
+    LocalState::Dirty,
+    LocalState::Uploading,
+    LocalState::Conflict,
+];
+
+fn query_item(conn: &Connection, sql: &str, args: impl rusqlite::Params) -> Result<Option<Item>> {
+    let mut stmt = conn.prepare_cached(sql)?;
+    stmt.query_and_then(args, item_from_row)?.next().transpose()
+}
+
+/// Leituras e escritas de dentro de `Store::modify`, na mesma transação.
+pub struct Batch<'a> {
+    conn: &'a Connection,
+}
+
+impl Batch<'_> {
+    pub fn get(&self, id: &ItemId) -> Result<Option<Item>> {
+        query_item(self.conn, select_items!("WHERE id = ?1"), [&id.0])
+    }
+
+    pub fn put(&self, item: &Item) -> Result<()> {
+        self.put_all(std::slice::from_ref(item))
+    }
+
+    pub fn put_all(&self, items: &[Item]) -> Result<()> {
+        let mut inode_of = self.conn.prepare_cached(
+            "INSERT INTO inodes (inode, item_id) VALUES (?1, ?2) \
+             ON CONFLICT(item_id) DO UPDATE SET item_id = item_id RETURNING inode",
+        )?;
+        let mut upsert = self.conn.prepare_cached(
+            "INSERT INTO items (id, inode, parent, remote_name, local_name, kind, mime, target_id, \
+             size, md5, head_revision, base_revision, base_md5, modified_ms, created_ms, trashed, \
+             can_edit, local_state, pin) VALUES (:id, :inode, :parent, :remote_name, :local_name, \
+             :kind, :mime, :target_id, :size, :md5, :head_revision, :base_revision, :base_md5, \
+             :modified_ms, :created_ms, :trashed, :can_edit, :local_state, :pin) \
+             ON CONFLICT(id) DO UPDATE SET parent = excluded.parent, \
+             remote_name = excluded.remote_name, local_name = excluded.local_name, \
+             kind = excluded.kind, mime = excluded.mime, target_id = excluded.target_id, \
+             size = excluded.size, md5 = excluded.md5, head_revision = excluded.head_revision, \
+             base_revision = excluded.base_revision, base_md5 = excluded.base_md5, \
+             modified_ms = excluded.modified_ms, created_ms = excluded.created_ms, \
+             trashed = excluded.trashed, can_edit = excluded.can_edit, \
+             local_state = excluded.local_state, pin = excluded.pin",
+        )?;
+        for item in items {
+            let wanted = (item.inode != Inode::UNASSIGNED).then_some(item.inode.0);
+            let inode: u64 = inode_of.query_row(params![wanted, item.id.0], |r| r.get(0))?;
+            let (kind, mime, target_id) = item.kind.to_columns();
+            upsert.execute(named_params! {
+                ":id": item.id.0,
+                ":inode": inode,
+                ":parent": item.parent.as_ref().map(|p| &p.0),
+                ":remote_name": item.remote_name,
+                ":local_name": item.local_name,
+                ":kind": kind,
+                ":mime": mime,
+                ":target_id": target_id,
+                ":size": item.size,
+                ":md5": item.md5,
+                ":head_revision": item.head_revision,
+                ":base_revision": item.base_revision,
+                ":base_md5": item.base_md5,
+                ":modified_ms": item.modified_ms,
+                ":created_ms": item.created_ms,
+                ":trashed": item.trashed,
+                ":can_edit": item.can_edit,
+                ":local_state": item.local_state,
+                ":pin": item.pin,
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn ranges_clear(&self, id: &ItemId) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM ranges WHERE item_id = ?1", [&id.0])?;
+        Ok(())
+    }
+
+    /// Apaga o item e tudo o que é dele (o inode continua reservado, como em `remove_item`).
+    pub fn remove_item(&self, id: &ItemId) -> Result<()> {
+        purge_rows(self.conn, id)
+    }
+
+    /// O conteúdo mudou: as sessões retomáveis dos envios do item (do conteúdo velho) caem.
+    pub fn reset_upload_sessions(&self, id: &ItemId) -> Result<()> {
+        self.conn.execute(
+            "UPDATE upload_queue SET session_url = NULL WHERE item_id = ?1",
+            [&id.0],
+        )?;
+        Ok(())
+    }
+
+    /// Marca `[start, end)` como presente no cache, juntando com intervalos que se tocam.
+    pub fn ranges_add(&self, id: &ItemId, start: u64, end: u64) -> Result<()> {
+        let (mut lo, mut hi) = (start, end);
+        let mut absorb = self.conn.prepare_cached(
+            "DELETE FROM ranges WHERE item_id = ?1 AND start <= ?3 AND end >= ?2 RETURNING start, end",
+        )?;
+        for range in absorb.query_map(params![id.0, start, end], |r| {
+            Ok((r.get::<_, u64>(0)?, r.get::<_, u64>(1)?))
+        })? {
+            let (s, e) = range?;
+            lo = lo.min(s);
+            hi = hi.max(e);
+        }
+        self.conn
+            .prepare_cached("INSERT INTO ranges (item_id, start, end) VALUES (?1, ?2, ?3)")?
+            .execute(params![id.0, lo, hi])?;
+        Ok(())
+    }
+}
+
 /// Lê as colunas na ordem de `select_items!` (por posição: ler por nome custa uma busca por coluna).
 fn item_from_row(r: &Row) -> Result<Item> {
     let kind: String = r.get(5)?;
@@ -576,7 +650,7 @@ fn item_from_row(r: &Row) -> Result<Item> {
 
 /// Apaga as linhas do item em todas as tabelas, menos a do inode (cada chamador decide o destino
 /// dele).
-fn purge_rows(tx: &rusqlite::Transaction<'_>, id: &ItemId) -> Result<()> {
+fn purge_rows(tx: &Connection, id: &ItemId) -> Result<()> {
     for sql in [
         "DELETE FROM items WHERE id = ?1",
         "DELETE FROM ranges WHERE item_id = ?1",
@@ -770,6 +844,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db = tmp.path().join("db.sqlite");
         let store = Store::open(&db).unwrap();
+        // A sessão só é guardada enquanto o item está sendo enviado.
+        store
+            .upsert_item(&Item {
+                local_state: LocalState::Uploading,
+                ..item("a", Some("root"))
+            })
+            .unwrap();
         let a = store
             .enqueue(NewUploadJob {
                 item: id("a"),

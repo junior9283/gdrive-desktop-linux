@@ -96,12 +96,16 @@ impl Inner {
         if !truncate {
             self.block(async { Ok(self.engine.cache().ensure_full(&item.id).await?) })?;
         }
+        // Com a trava do item: um download em andamento não grava por cima do que vem agora.
+        let cache = self.engine.cache();
         let file = self
-            .engine
-            .cache()
-            .open_local(&item.id, truncate)
+            .rt
+            .block_on(cache.locked(&item.id, || {
+                let file = cache.open_local(&item.id, truncate)?;
+                self.start_writing(item, truncate);
+                Ok::<_, std::io::Error>(file)
+            }))
             .map_err(Errno::from)?;
-        self.start_writing(item, truncate);
         Ok(Arc::new(file))
     }
 
@@ -331,18 +335,35 @@ impl Inner {
         self.item_attr(&item)
     }
 
-    pub(crate) fn unlink(&self, parent: &Node, name: &OsStr) -> Res<()> {
-        match parent {
-            // Esvaziar a lixeira do Dolphin: só a entrada local some; o item continua na lixeira
-            // do Drive.
+    /// Esvaziar a lixeira do Dolphin: só a entrada local some; o item continua na lixeira do
+    /// Drive. Dentro de uma pasta que está lá, o conteúdo vai junto com ela e não muda. Devolve
+    /// se a remoção era na lixeira (e já foi tratada).
+    fn forget_from_kio_trash(&self, parent: &Node, name: &OsStr) -> Res<bool> {
+        let found = match parent {
             Node::KioFiles => {
-                let forgotten = self.kio.forget(name).is_some();
-                if forgotten || self.kio_item(name)?.is_some() {
-                    Ok(())
-                } else {
-                    Err(Errno::ENOENT)
+                let item = self.kio_item(name)?;
+                if let Some(item) = &item {
+                    self.block(self.engine.empty_from_trash(&item.id))?;
                 }
+                self.kio.forget(name).is_some() || item.is_some()
             }
+            Node::Item(inode) => {
+                let dir = self.item(*inode)?;
+                if !dir.trashed {
+                    return Ok(false);
+                }
+                self.child(&dir, name)?.is_some()
+            }
+            _ => return Ok(false),
+        };
+        if found { Ok(true) } else { Err(Errno::ENOENT) }
+    }
+
+    pub(crate) fn unlink(&self, parent: &Node, name: &OsStr) -> Res<()> {
+        if self.forget_from_kio_trash(parent, name)? {
+            return Ok(());
+        }
+        match parent {
             Node::KioInfo => std::fs::remove_file(self.kio.info_path(name)).map_err(Errno::from),
             _ => {
                 let dir = self.writable_folder(parent)?;
@@ -356,6 +377,9 @@ impl Inner {
     }
 
     pub(crate) fn rmdir(&self, parent: &Node, name: &OsStr) -> Res<()> {
+        if self.forget_from_kio_trash(parent, name)? {
+            return Ok(());
+        }
         let dir = self.writable_folder(parent)?;
         let item = self.existing_child(&dir, name)?;
         if item.kind != ItemKind::Folder {

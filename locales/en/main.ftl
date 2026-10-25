@@ -33,7 +33,7 @@ notify-shortcut-body = Google Docs can't be copied, so the shortcut { $name } wa
 
 # Signing in and out
 login-rejected = The account { $email } isn't allowed on this computer.
-logout-pending = There are { $count } pending uploads. Choose to finish them, move the files to a folder, or discard them.
+logout-pending = There are { $count } items not yet in Drive (pending uploads or copies in Lost and Found). Choose to finish the uploads, move the files to a folder, or discard them; Lost and Found is never deleted.
 not-logged-in = No account is connected.
 path-not-in-drive = { $path } isn't in My Drive.
 

@@ -33,7 +33,7 @@ notify-shortcut-body = Documentos Google não podem ser copiados; no lugar da c�
 
 # Login e saída da conta
 login-rejected = A conta { $email } não é permitida neste computador.
-logout-pending = Há { $count } envios pendentes. Escolha terminar os envios, mover os arquivos para uma pasta ou descartá-los.
+logout-pending = Há { $count } itens que ainda não estão no Drive (envios pendentes ou cópias no Lost and Found). Escolha terminar os envios, mover os arquivos para uma pasta ou descartá-los; o Lost and Found nunca é apagado.
 not-logged-in = Nenhuma conta conectada.
 path-not-in-drive = { $path } não está no Meu Drive.
 

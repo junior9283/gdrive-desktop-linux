@@ -44,6 +44,7 @@ fn random_token() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
+#[derive(Debug, Clone)]
 pub struct OAuthEndpoints {
     pub auth: Url,
     pub token: Url,

@@ -1,0 +1,15 @@
+[Unit]
+Description=Google Drive para Linux
+Documentation=https://github.com/junior9283/gdrive-desktop-linux
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=io.github.junior9283.GDriveDesktopLinux1
+ExecStart=/usr/bin/gdrive-desktop-linuxd
+# O SIGTERM desmonta; se o serviço cair, a montagem órfã é limpa na próxima partida.
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

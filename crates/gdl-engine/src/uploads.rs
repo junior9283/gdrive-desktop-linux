@@ -342,11 +342,15 @@ impl UploadWorker {
         let delay = self.retry.delay(job.attempts).as_millis() as i64;
         self.store.retry_job(job.job_id, now + delay)?;
         if !e.is_retryable() {
+            let event = match e {
+                DriveError::QuotaExceeded => EngineEvent::QuotaFull,
+                _ => EngineEvent::UploadFailed {
+                    name: item.local_name.clone(),
+                    error: e.to_string(),
+                },
+            };
             // Sem ninguém ouvindo, o aviso pode se perder.
-            let _ = self.events.send(EngineEvent::UploadFailed {
-                name: item.local_name.clone(),
-                error: e.to_string(),
-            });
+            let _ = self.events.send(event);
         }
         Ok(UploadOutcome::Retrying)
     }
@@ -646,6 +650,21 @@ mod tests {
         assert_eq!(s.env.fake.meta(&id.0)["trashed"], true);
         assert_eq!(s.env.fake.requests("/upload"), 0, "nada foi enviado");
         assert!(s.run().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn full_storage_reports_quota_full_and_keeps_the_job() {
+        let env = Env::new().await;
+        let mut s = setup(env).await;
+        let root = ItemId(s.env.fake.root_id());
+        s.write_new(&root, "grande.bin", b"dados");
+        s.env.fake.inject(Fault::QuotaExceeded { times: 1 });
+
+        let outcome = s.run().await;
+
+        assert!(matches!(outcome, Some(UploadOutcome::Retrying)));
+        assert_eq!(s.events.try_recv().unwrap(), EngineEvent::QuotaFull);
+        assert_eq!(s.env.store.queue_stats().unwrap().0, 1);
     }
 
     #[tokio::test]

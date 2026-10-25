@@ -165,6 +165,10 @@ impl BlockCache {
     }
 
     /// Arquivo esparso com o conteúdo do item; é onde a gravação local acontece.
+    pub fn dir(&self) -> &Path {
+        &self.0.dir
+    }
+
     pub fn local_path(&self, id: &ItemId) -> PathBuf {
         self.0.content_dir.join(&id.0)
     }

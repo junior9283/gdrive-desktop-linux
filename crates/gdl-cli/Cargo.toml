@@ -12,6 +12,17 @@ name = "gdrive-desktop-linux"
 path = "src/main.rs"
 
 [dependencies]
+clap.workspace = true
+gdl-common.workspace = true
+gdl-daemon.workspace = true
+gdl-engine.workspace = true
+futures-util.workspace = true
+rustix = { workspace = true, features = ["termios"] }
+tokio.workspace = true
+zbus.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

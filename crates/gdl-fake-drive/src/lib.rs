@@ -25,6 +25,8 @@ pub enum Fault {
     RateLimit403 { times: u32 },
     /// As próximas `times` chamadas à API recebem o código `code`.
     Status { code: u16, times: u32 },
+    /// As próximas `times` chamadas à API recebem 403 `storageQuotaExceeded` (armazenamento cheio).
+    QuotaExceeded { times: u32 },
     /// A conexão cai depois de trafegar mais `n` bytes (uma vez só).
     DropConnectionAfterBytes(u64),
     /// Toda conexão cai até `clear_faults`.
@@ -169,6 +171,13 @@ impl FakeDrive {
                 self.shared.state().fault = Some(StatusFault {
                     code: 403,
                     reason: "userRateLimitExceeded",
+                    times,
+                });
+            }
+            Fault::QuotaExceeded { times } => {
+                self.shared.state().fault = Some(StatusFault {
+                    code: 403,
+                    reason: "storageQuotaExceeded",
                     times,
                 });
             }

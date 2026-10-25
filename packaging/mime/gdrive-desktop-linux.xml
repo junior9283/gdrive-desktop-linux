@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ponteiros dos Documentos Google: JSON com o ID do documento, abertos no navegador. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-gdrive-document">
+    <comment>Google Document</comment>
+    <comment xml:lang="pt_BR">Documento Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gdoc"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-spreadsheet">
+    <comment>Google Spreadsheet</comment>
+    <comment xml:lang="pt_BR">Planilha Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gsheet"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-presentation">
+    <comment>Google Presentation</comment>
+    <comment xml:lang="pt_BR">Apresentação Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gslides"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-form">
+    <comment>Google Form</comment>
+    <comment xml:lang="pt_BR">Formulário Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gform"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-drawing">
+    <comment>Google Drawing</comment>
+    <comment xml:lang="pt_BR">Desenho Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gdraw"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-map">
+    <comment>Google My Map</comment>
+    <comment xml:lang="pt_BR">Mapa Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gmap"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-site">
+    <comment>Google Site</comment>
+    <comment xml:lang="pt_BR">Site Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gsite"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-script">
+    <comment>Google Apps Script</comment>
+    <comment xml:lang="pt_BR">Script Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gscript"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-jam">
+    <comment>Google Jamboard</comment>
+    <comment xml:lang="pt_BR">Jamboard Google</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.gjam"/>
+  </mime-type>
+  <mime-type type="application/x-gdrive-link">
+    <comment>Google Drive link</comment>
+    <comment xml:lang="pt_BR">Link do Google Drive</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.glink"/>
+  </mime-type>
+</mime-info>

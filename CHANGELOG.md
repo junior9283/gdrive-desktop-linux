@@ -57,6 +57,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   manda para a lixeira do Drive (nunca apaga de vez), a lixeira do Dolphin (`.Trash-<uid>`) é a
   lixeira do Drive e esvaziá-la não apaga nada no Drive, copiar um ponteiro `.gdoc` cria um atalho
   para o documento e trazer de volta um arquivo do `Lost and Found` o sobe como novo.
+- Serviço do usuário `gdrive-desktop-linuxd` (systemd e ativação pelo D-Bus) com a interface
+  `io.github.junior9283.GDriveDesktopLinux1`: login, estado, pausar/retomar, Disponível off-line
+  por caminho, Lost and Found e saída da conta (terminar envios, copiar pendentes ou descartar).
+  Monta em `~/Google Drive` (ou `Google Drive (1)`… se a pasta já tiver arquivos), reconecta a
+  conta na partida e respeita `AllowedAccountsPattern`.
+- Notificações do sistema: edição guardada no Lost and Found (com "Ver arquivos"), sem internet,
+  disco quase cheio, armazenamento do Google cheio, falha de envio e cópia de Documento Google
+  transformada em atalho.
+- CLI provisória `gdrive-desktop-linux` (`login`, `status`, `pin`, `unpin`, `pause`, `resume`,
+  `lost-and-found`, `logout`, `open-pointer`) e abertura dos ponteiros `.gdoc`, `.gsheet`… no
+  navegador pelo duplo clique (tipos MIME e atalho `.desktop`); o endereço vem do ID validado,
+  nunca do campo `url` do arquivo.
 
 ### Corrigido
 - Um arquivo ou pasta criado aqui podia ser criado duas vezes no Drive quando a consulta de

@@ -1,6 +1,9 @@
 //! Conversão entre nomes do Google Drive e nomes válidos no Linux.
 
 use std::collections::{HashMap, HashSet};
+use std::fs::{File, OpenOptions};
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
@@ -92,6 +95,24 @@ pub fn fit(stem: &str, suffix: &str) -> String {
         cut -= 1;
     }
     format!("{}{suffix}", &stem[..cut])
+}
+
+/// Cria em `dir` o arquivo `stem + suffix(n)` com o primeiro `n` (0, 1, 2…) cujo nome está
+/// livre, sem sobrescrever nada. O nome é cortado com `fit` para caber no limite do Linux.
+pub fn create_unique(
+    dir: &Path,
+    stem: &str,
+    suffix: impl Fn(u32) -> String,
+) -> std::io::Result<(PathBuf, File)> {
+    let mut n = 0;
+    loop {
+        let path = dir.join(fit(stem, &suffix(n)));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => n += 1,
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 /// 8 dígitos hexadecimais do SHA-256 do nome original, para nomes cortados não colidirem.

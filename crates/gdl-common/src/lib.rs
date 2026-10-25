@@ -1,5 +1,6 @@
 //! Utilidades comuns: nomes, caminhos, preferências e idiomas.
 
+pub mod browser;
 pub mod config;
 pub mod gdocs;
 pub mod i18n;

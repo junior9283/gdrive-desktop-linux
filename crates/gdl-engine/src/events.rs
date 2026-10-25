@@ -31,6 +31,8 @@ pub enum EngineEvent {
     DiskLow {
         free_kb: u64,
     },
+    /// O armazenamento da conta está cheio: nada sobe até liberar espaço.
+    QuotaFull,
     UploadFailed {
         name: String,
         error: String,

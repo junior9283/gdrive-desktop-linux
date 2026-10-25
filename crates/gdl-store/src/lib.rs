@@ -466,6 +466,14 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Itens com envio na fila, em ordem de nome local.
+    pub fn pending_items(&self) -> Result<Vec<Item>> {
+        self.query_items(
+            select_items!("WHERE id IN (SELECT item_id FROM upload_queue) ORDER BY local_name"),
+            [],
+        )
+    }
+
     /// Envios na fila e quantos deles já falharam ao menos uma vez.
     pub fn queue_stats(&self) -> Result<(u32, u32)> {
         Ok(self.conn().query_row(
@@ -788,6 +796,31 @@ mod tests {
         // O inode antigo do destino nunca volta.
         store.upsert_item(&item("novo", Some("root"))).unwrap();
         assert!(get("novo").inode.0 > src.0);
+    }
+
+    #[test]
+    fn pending_items_are_the_ones_with_an_upload_job() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .upsert_items(&[item("a", Some("root")), item("b", Some("root"))])
+            .unwrap();
+        store
+            .enqueue(NewUploadJob {
+                item: id("b"),
+                kind: UploadKind::Update,
+                next_try_ms: 0,
+            })
+            .unwrap();
+
+        let pending: Vec<_> = store
+            .pending_items()
+            .unwrap()
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+
+        assert_eq!(pending, [id("b")]);
     }
 
     #[test]

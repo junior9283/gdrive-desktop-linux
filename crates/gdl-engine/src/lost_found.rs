@@ -1,10 +1,9 @@
 //! `Lost and Found` local: cópias de edições que não puderam subir, para nada se perder.
 
-use std::fs::{File, OpenOptions};
-use std::io::ErrorKind;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use gdl_common::names::{fit, split_ext};
+use gdl_common::names::{create_unique, split_ext};
 use gdl_common::time::{local_stamp, now_ms};
 
 use crate::events::LostReason;
@@ -30,28 +29,14 @@ impl LostAndFound {
         std::fs::create_dir_all(&self.dir)?;
         let (stem, ext) = split_ext(original_name);
         let stamp = local_stamp(now_ms());
-        let mut n = 1;
-        loop {
-            let copy = if n == 1 {
-                String::new()
-            } else {
-                format!(" {n}")
-            };
-            // `fit` corta o nome, se preciso, para caber no limite do Linux.
-            let path = self
-                .dir
-                .join(fit(stem, &format!(" (local {stamp}{copy}){ext}")));
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(mut dst) => {
-                    std::io::copy(&mut File::open(src)?, &mut dst)?;
-                    dst.sync_all()?;
-                    tracing::info!(caminho = %path.display(), motivo = ?reason, "edição local guardada no Lost and Found");
-                    return Ok(path);
-                }
-                Err(e) if e.kind() == ErrorKind::AlreadyExists => n += 1,
-                Err(e) => return Err(e),
-            }
-        }
+        let (path, mut dst) = create_unique(&self.dir, stem, |n| match n {
+            0 => format!(" (local {stamp}){ext}"),
+            n => format!(" (local {stamp} {}){ext}", n + 1),
+        })?;
+        std::io::copy(&mut File::open(src)?, &mut dst)?;
+        dst.sync_all()?;
+        tracing::info!(caminho = %path.display(), motivo = ?reason, "edição local guardada no Lost and Found");
+        Ok(path)
     }
 
     pub fn dir(&self) -> &Path {

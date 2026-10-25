@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=io.github.junior9283.GDriveDesktopLinux1
+Exec=/usr/bin/gdrive-desktop-linuxd
+SystemdService=gdrive-desktop-linuxd.service

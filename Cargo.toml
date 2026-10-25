@@ -16,6 +16,7 @@ gdl-drive = { path = "crates/gdl-drive" }
 gdl-fake-drive = { path = "crates/gdl-fake-drive" }
 gdl-engine = { path = "crates/gdl-engine" }
 gdl-fs = { path = "crates/gdl-fs" }
+gdl-daemon = { path = "crates/gdl-daemon" }
 sha2 = "0.11"
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
 serde = { version = "1", features = ["derive"] }
@@ -42,6 +43,10 @@ tracing = "0.1"
 tempfile = "3"
 fluent-bundle = "0.16"
 unic-langid = "0.9"
+zbus = { version = "5.19", default-features = false, features = ["tokio", "p2p"] }
+clap = { version = "4.6", features = ["derive"] }
+regex = "1.12"
+tracing-subscriber = "0.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

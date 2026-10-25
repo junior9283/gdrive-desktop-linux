@@ -138,6 +138,11 @@ impl Engine {
         &self.data_dir
     }
 
+    /// Pastas com os dados locais da conta: banco e `Lost and Found`, e o cache.
+    pub fn local_dirs(&self) -> [PathBuf; 2] {
+        [self.data_dir.clone(), self.cache.dir().to_path_buf()]
+    }
+
     pub fn lost_and_found(&self) -> &LostAndFound {
         &self.lost
     }

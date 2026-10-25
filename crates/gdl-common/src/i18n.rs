@@ -7,6 +7,14 @@ use unic_langid::LanguageIdentifier;
 const PT_BR: &str = include_str!("../../../locales/pt-BR/main.ftl");
 const EN: &str = include_str!("../../../locales/en/main.ftl");
 
+/// Idioma do sistema, pelas variáveis `LC_ALL`, `LC_MESSAGES` e `LANG`, nessa ordem.
+pub fn env_lang() -> String {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|var| std::env::var(var).ok().filter(|v| !v.is_empty()))
+        .unwrap_or_default()
+}
+
 /// Textos do app num idioma: pt-BR quando o idioma do sistema começa com `pt`, senão inglês.
 pub struct I18n {
     bundle: FluentBundle<FluentResource>,
@@ -32,13 +40,9 @@ impl I18n {
         I18n { bundle }
     }
 
-    /// Idioma do sistema, pelas variáveis `LC_ALL`, `LC_MESSAGES` e `LANG`, nessa ordem.
+    /// Idioma do sistema (`env_lang`).
     pub fn from_env() -> I18n {
-        let lang = ["LC_ALL", "LC_MESSAGES", "LANG"]
-            .iter()
-            .find_map(|var| std::env::var(var).ok().filter(|v| !v.is_empty()))
-            .unwrap_or_default();
-        I18n::new(&lang)
+        I18n::new(&env_lang())
     }
 
     /// Texto traduzido de `key`; se a chave não existir, devolve a própria chave.

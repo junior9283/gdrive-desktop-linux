@@ -12,6 +12,27 @@ name = "gdrive-desktop-linuxd"
 path = "src/main.rs"
 
 [dependencies]
+futures-util.workspace = true
+fuser.workspace = true
+gdl-common.workspace = true
+gdl-drive.workspace = true
+gdl-engine.workspace = true
+gdl-fs.workspace = true
+gdl-store.workspace = true
+regex.workspace = true
+rustix = { workspace = true, features = ["fs", "process"] }
+serde.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+zbus.workspace = true
+
+[dev-dependencies]
+gdl-fake-drive.workspace = true
+reqwest.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

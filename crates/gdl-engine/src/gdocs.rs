@@ -22,10 +22,16 @@ pub fn pointer_json(id: &str, mime: &str, email: &str) -> String {
     )
 }
 
-/// `doc_id` de um ponteiro montado por `pointer_json`.
+/// `doc_id` de um ponteiro montado por `pointer_json`. Só vale um ID do Drive (letras, números,
+/// `-` e `_`), porque ele vai para o endereço aberto no navegador.
 pub fn pointer_doc_id(json: &[u8]) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(json).ok()?;
-    Some(value.get("doc_id")?.as_str()?.into())
+    let id = value.get("doc_id")?.as_str()?;
+    let valid = !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    valid.then(|| id.into())
 }
 
 #[cfg(test)]
@@ -63,6 +69,9 @@ mod tests {
         let json = pointer_json("abc", "application/vnd.google-apps.document", "a@b.c");
         assert_eq!(pointer_doc_id(json.as_bytes()).as_deref(), Some("abc"));
         assert_eq!(pointer_doc_id(b"texto comum"), None);
+        // Um ponteiro forjado não injeta nada no endereço aberto.
+        assert_eq!(pointer_doc_id(br#"{"doc_id":"abc&x=file:///etc"}"#), None);
+        assert_eq!(pointer_doc_id(br#"{"doc_id":""}"#), None);
         assert!(is_pointer_extension("gsheet") && is_pointer_extension("glink"));
         assert!(!is_pointer_extension("odt"));
     }

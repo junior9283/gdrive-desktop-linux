@@ -16,6 +16,7 @@ thiserror.workspace = true
 tracing.workspace = true
 fluent-bundle.workspace = true
 unic-langid.workspace = true
+url.workspace = true
 tempfile.workspace = true
 
 [lints]

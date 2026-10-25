@@ -232,12 +232,7 @@ pub struct Daemon {
 
 /// `DirectConnection` vence `ProxyServer`; sem nenhum, o proxy do sistema.
 fn network_of(prefs: &Preferences) -> Network {
-    let proxy = prefs
-        .proxy_server
-        .as_deref()
-        .map(str::trim)
-        .filter(|url| !url.is_empty());
-    match (prefs.direct_connection, proxy) {
+    match (prefs.direct_connection, prefs.manual_proxy()) {
         (true, _) => Network::Direct,
         (false, Some(url)) => Network::Proxy(url.into()),
         (false, None) => Network::System,

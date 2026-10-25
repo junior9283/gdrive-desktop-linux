@@ -803,6 +803,7 @@ dependencies = [
  "toml",
  "tracing",
  "unic-langid",
+ "url",
 ]
 
 [[package]]

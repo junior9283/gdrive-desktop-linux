@@ -242,6 +242,41 @@ pub fn save_user_preference(
     set_user_preferences(paths, &[(key.into(), value)])
 }
 
+/// Esquemas aceitos em `ProxyServer`.
+pub const PROXY_SCHEMES: [&str; 4] = ["http", "https", "socks5", "socks5h"];
+
+/// O proxy manual de `ProxyServer`, sem espaços; vazio é nenhum.
+fn manual_proxy(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|p| !p.is_empty())
+}
+
+impl Preferences {
+    /// O proxy manual (`ProxyServer`), se houver.
+    pub fn manual_proxy(&self) -> Option<&str> {
+        manual_proxy(self.proxy_server.as_deref())
+    }
+}
+
+impl Layer {
+    /// O que o tipo do campo não verifica. Só na gravação: um valor ruim já no arquivo não
+    /// impede a partida.
+    fn check(&self) -> Result<(), toml::de::Error> {
+        if let Some(proxy) = manual_proxy(self.proxy_server.as_deref()) {
+            let valid = url::Url::parse(proxy).is_ok_and(|url| {
+                PROXY_SCHEMES.contains(&url.scheme())
+                    && url.host_str().is_some_and(|h| !h.is_empty())
+            });
+            if !valid {
+                return Err(serde::de::Error::custom(format!(
+                    "endereço de proxy esperado ({}://)",
+                    PROXY_SCHEMES.join("://, ")
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Grava várias preferências do usuário de uma vez. Recusa tudo, sem gravar nada, se alguma
 /// chave for desconhecida, definida pela política ou tiver valor de tipo errado: um valor
 /// inválido nunca chega ao arquivo (e nunca impede a próxima partida). A gravação é atômica.
@@ -258,12 +293,12 @@ pub fn set_user_preferences(
             return Err(ConfigError::Managed(key.clone()));
         }
         let probe = toml::Table::from_iter([(key.clone(), value.clone())]);
-        probe
-            .try_into::<Layer>()
-            .map_err(|source| ConfigError::InvalidValue {
-                key: key.clone(),
-                source,
-            })?;
+        let invalid = |source| ConfigError::InvalidValue {
+            key: key.clone(),
+            source,
+        };
+        let layer = probe.try_into::<Layer>().map_err(invalid)?;
+        layer.check().map_err(invalid)?;
     }
 
     let path = user_path(paths);
@@ -467,5 +502,25 @@ mod tests {
         );
         let (prefs, _) = load_preferences(&paths).unwrap();
         assert!(!prefs.auto_start_on_login);
+    }
+
+    #[test]
+    fn proxy_server_must_be_a_proxy_url() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        for bad in ["proxy.empresa:3128", "ftp://proxy:21", "http://", "nada"] {
+            let err = save_user_preference(&paths, "ProxyServer", bad.into()).unwrap_err();
+            assert!(
+                matches!(&err, ConfigError::InvalidValue { key, .. } if key == "ProxyServer"),
+                "{bad}: {err}"
+            );
+        }
+        for good in [
+            "",
+            "http://proxy:3128",
+            "socks5://usuario:senha@127.0.0.1:1080",
+        ] {
+            save_user_preference(&paths, "ProxyServer", good.into()).unwrap();
+        }
     }
 }

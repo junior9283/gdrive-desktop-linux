@@ -21,7 +21,7 @@ pub struct ChangePoller {
 
 /// Junta o item do banco com a versão nova da nuvem. Devolve o item e se o cache deve ser
 /// descartado (a revisão mudou e não há edição local).
-fn merge(old: Item, mut new: Item) -> (Item, bool) {
+pub(crate) fn merge(old: Item, mut new: Item) -> (Item, bool) {
     new.inode = old.inode;
     new.pin = old.pin;
     if old.local_state == LocalState::Clean {

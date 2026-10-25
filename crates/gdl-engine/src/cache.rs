@@ -100,6 +100,14 @@ struct ItemState {
     touched_ms: i64,
 }
 
+/// Arquivo que já não existe conta como sucesso ao apagar ou renomear.
+fn ignore_not_found(result: std::io::Result<()>) -> Result<()> {
+    match result {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
+    }
+}
+
 fn align_down(n: u64) -> u64 {
     n / BLOCK * BLOCK
 }
@@ -278,6 +286,32 @@ impl BlockCache {
         Ok(())
     }
 
+    /// Apaga o conteúdo local do item e esquece o que estava no cache. Quem chama segura a trava.
+    async fn drop_content(&self, id: &ItemId) -> Result<()> {
+        ignore_not_found(tokio::fs::remove_file(self.local_path(id)).await)?;
+        self.0.store.ranges_clear(id)?;
+        self.items().remove(id);
+        Ok(())
+    }
+
+    /// Descarta o conteúdo local (uma edição que foi para o `Lost and Found`); a próxima leitura
+    /// baixa de novo da nuvem.
+    pub async fn discard(&self, id: &ItemId) -> Result<()> {
+        let lock = self.item_lock(id);
+        let _guard = lock.lock().await;
+        self.drop_content(id).await
+    }
+
+    /// Acompanha a troca do ID temporário pelo do Drive (`Store::replace_id`).
+    pub async fn rename_local(&self, old: &ItemId, new: &ItemId) -> Result<()> {
+        ignore_not_found(tokio::fs::rename(self.local_path(old), self.local_path(new)).await)?;
+        let mut items = self.items();
+        if let Some(state) = items.remove(old) {
+            items.insert(new.clone(), state);
+        }
+        Ok(())
+    }
+
     /// Libera os itens de acesso mais antigo até o cache caber no limite. Nunca toca em itens
     /// fixados, com edição local ou sendo baixados agora. Devolve os bytes liberados.
     pub async fn evict_if_needed(&self) -> Result<u64> {
@@ -296,12 +330,7 @@ impl BlockCache {
                 let Ok(_guard) = lock.try_lock() else {
                     continue;
                 };
-                match tokio::fs::remove_file(self.local_path(&id)).await {
-                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-                    _ => {}
-                }
-                self.0.store.ranges_clear(&id)?;
-                self.items().remove(&id);
+                self.drop_content(&id).await?;
                 total -= bytes;
                 freed += bytes;
             }

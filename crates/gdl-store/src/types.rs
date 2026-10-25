@@ -96,8 +96,9 @@ impl ItemKind {
 }
 
 stored_enum! {
-    /// Situação do conteúdo local em relação à nuvem.
-    LocalState { Clean = 0, Dirty = 1, Uploading = 2, Conflict = 3 }
+    /// Situação do conteúdo local em relação à nuvem. `LocalOnly`: temporário de editor, que
+    /// nunca sobe.
+    LocalState { Clean = 0, Dirty = 1, Uploading = 2, Conflict = 3, LocalOnly = 4 }
 }
 
 stored_enum! {

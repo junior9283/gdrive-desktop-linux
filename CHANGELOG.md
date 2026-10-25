@@ -33,6 +33,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   baixa só os blocos perto do ponto lido, a leitura sequencial antecipa os próximos 8 MiB, o que já
   está no cache abre sem internet, e o cache respeita o tamanho máximo e o espaço livre mínimo
   (nunca libera itens fixados ou com edição local).
+- Fila de envio que sobrevive a quedas e reinícios: arquivos novos ganham o ID do Drive mantendo o
+  inode, edições sobem sem trocar o ID, envios grandes continuam de onde pararam, e sem internet a
+  fila espera sem gastar tentativas. Se a nuvem mudou, apagou ou negou permissão, a edição local
+  vai para `Lost and Found` com data e hora no nome, e o caminho original fica com a versão da
+  nuvem. Travas e temporários de editores (`.~lock.*#`, `*.swp`…) nunca sobem.
 
 ## [0.0.1] - 2026-10-25
 

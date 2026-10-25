@@ -78,7 +78,7 @@ pub fn dedupe(siblings: &[Sibling]) -> Vec<(String, String)> {
 }
 
 /// Separa a extensão (com o ponto) do resto do nome. Nomes como `.bashrc` não têm extensão.
-fn split_ext(name: &str) -> (&str, &str) {
+pub fn split_ext(name: &str) -> (&str, &str) {
     match name.rfind('.') {
         Some(i) if i > 0 && name.len() - i <= MAX_EXT_BYTES => name.split_at(i),
         _ => (name, ""),
@@ -86,7 +86,7 @@ fn split_ext(name: &str) -> (&str, &str) {
 }
 
 /// Junta `stem` e `suffix`, cortando `stem` (em limite de caractere) para caber em `NAME_MAX`.
-fn fit(stem: &str, suffix: &str) -> String {
+pub fn fit(stem: &str, suffix: &str) -> String {
     let mut cut = stem.len().min(NAME_MAX - suffix.len());
     while !stem.is_char_boundary(cut) {
         cut -= 1;

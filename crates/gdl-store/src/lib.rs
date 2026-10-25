@@ -295,6 +295,85 @@ impl Store {
         Ok(())
     }
 
+    pub fn set_local_state(&self, id: &ItemId, state: LocalState) -> Result<()> {
+        self.conn().execute(
+            "UPDATE items SET local_state = ?2 WHERE id = ?1",
+            params![id.0, state],
+        )?;
+        Ok(())
+    }
+
+    /// Muda o estado só se ele ainda for `from`.
+    pub fn transition_local_state(
+        &self,
+        id: &ItemId,
+        from: LocalState,
+        to: LocalState,
+    ) -> Result<()> {
+        self.conn().execute(
+            "UPDATE items SET local_state = ?3 WHERE id = ?1 AND local_state = ?2",
+            params![id.0, from, to],
+        )?;
+        Ok(())
+    }
+
+    /// Adia o envio sem contar tentativa (sem internet, por exemplo).
+    pub fn postpone_job(&self, job_id: i64, next_try_ms: i64) -> Result<()> {
+        self.conn().execute(
+            "UPDATE upload_queue SET next_try_ms = ?2 WHERE job_id = ?1",
+            [job_id, next_try_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Itens com edição local (`Dirty` ou `Uploading`) sem envio na fila.
+    pub fn dirty_items_without_job(&self) -> Result<Vec<ItemId>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT id FROM items WHERE local_state IN (?1, ?2) \
+             AND id NOT IN (SELECT item_id FROM upload_queue) ORDER BY id",
+        )?;
+        let rows = stmt.query_map(params![LocalState::Dirty, LocalState::Uploading], |r| {
+            Ok(ItemId(r.get(0)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Troca o ID de um item (o temporário `local:` pelo do Drive) em todas as tabelas, mantendo o
+    /// inode, os filhos, o cache e a fila.
+    pub fn replace_id(&self, old: &ItemId, new: &ItemId) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for sql in [
+            "UPDATE items SET id = ?2 WHERE id = ?1",
+            "UPDATE items SET parent = ?2 WHERE parent = ?1",
+            "UPDATE inodes SET item_id = ?2 WHERE item_id = ?1",
+            "UPDATE ranges SET item_id = ?2 WHERE item_id = ?1",
+            "UPDATE access SET item_id = ?2 WHERE item_id = ?1",
+            "UPDATE upload_queue SET item_id = ?2 WHERE item_id = ?1",
+        ] {
+            tx.execute(sql, [&old.0, &new.0])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Apaga o item local e tudo o que é dele. O inode continua reservado e nunca volta a ser usado.
+    pub fn remove_item(&self, id: &ItemId) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for sql in [
+            "DELETE FROM items WHERE id = ?1",
+            "DELETE FROM ranges WHERE item_id = ?1",
+            "DELETE FROM access WHERE item_id = ?1",
+            "DELETE FROM upload_queue WHERE item_id = ?1",
+        ] {
+            tx.execute(sql, [&id.0])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_session_url(&self, job_id: i64, url: Option<&str>) -> Result<()> {
         self.conn().execute(
             "UPDATE upload_queue SET session_url = ?2 WHERE job_id = ?1",
@@ -596,6 +675,101 @@ mod tests {
         store.finish_job(b).unwrap();
         let job = store.next_job(3000).unwrap().unwrap();
         assert_eq!((job.job_id, job.attempts), (a, 1));
+    }
+
+    #[test]
+    fn replace_id_keeps_inode_children_ranges_and_jobs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .upsert_items(&[
+                item("local:1", Some("root")),
+                item("filho", Some("local:1")),
+            ])
+            .unwrap();
+        let inode = store.get(&id("local:1")).unwrap().unwrap().inode;
+        store.ranges_add(&id("local:1"), 0, 10).unwrap();
+        store.touch_access(&id("local:1"), 5).unwrap();
+        store
+            .enqueue(NewUploadJob {
+                item: id("local:1"),
+                kind: UploadKind::Update,
+                next_try_ms: 0,
+            })
+            .unwrap();
+
+        store.replace_id(&id("local:1"), &id("real")).unwrap();
+
+        assert!(store.get(&id("local:1")).unwrap().is_none());
+        let real = store.get(&id("real")).unwrap().unwrap();
+        assert_eq!(real.inode, inode);
+        assert_eq!(store.by_inode(inode).unwrap().unwrap().id, id("real"));
+        assert_eq!(store.children(&id("real")).unwrap()[0].id, id("filho"));
+        assert!(store.ranges_missing(&id("real"), 0, 10).unwrap().is_empty());
+        assert_eq!(store.next_job(0).unwrap().unwrap().item, id("real"));
+    }
+
+    #[test]
+    fn removed_item_leaves_no_trace_and_its_inode_is_never_reused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store.upsert_item(&item("a", Some("root"))).unwrap();
+        let inode = store.get(&id("a")).unwrap().unwrap().inode;
+        store.ranges_add(&id("a"), 0, 10).unwrap();
+        store
+            .enqueue(NewUploadJob {
+                item: id("a"),
+                kind: UploadKind::Create,
+                next_try_ms: 0,
+            })
+            .unwrap();
+
+        store.remove_item(&id("a")).unwrap();
+
+        assert!(store.get(&id("a")).unwrap().is_none());
+        assert_eq!(store.ranges_missing(&id("a"), 0, 10).unwrap(), [(0, 10)]);
+        assert!(store.next_job(0).unwrap().is_none());
+        store.upsert_item(&item("b", Some("root"))).unwrap();
+        assert!(store.get(&id("b")).unwrap().unwrap().inode > inode);
+    }
+
+    #[test]
+    fn postponing_a_job_does_not_count_an_attempt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let job = store
+            .enqueue(NewUploadJob {
+                item: id("a"),
+                kind: UploadKind::Update,
+                next_try_ms: 0,
+            })
+            .unwrap();
+        store.postpone_job(job, 100).unwrap();
+        assert!(store.next_job(50).unwrap().is_none());
+        assert_eq!(store.next_job(100).unwrap().unwrap().attempts, 0);
+    }
+
+    #[test]
+    fn finds_pending_edits_without_a_job() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let mut queued = item("queued", Some("root"));
+        queued.local_state = LocalState::Dirty;
+        let mut orphan = item("orphan", Some("root"));
+        orphan.local_state = LocalState::Uploading;
+        let mut local_only = item("lock", Some("root"));
+        local_only.local_state = LocalState::LocalOnly;
+        store
+            .upsert_items(&[queued, orphan, local_only, item("clean", Some("root"))])
+            .unwrap();
+        store
+            .enqueue(NewUploadJob {
+                item: id("queued"),
+                kind: UploadKind::Update,
+                next_try_ms: 0,
+            })
+            .unwrap();
+        assert_eq!(store.dirty_items_without_job().unwrap(), [id("orphan")]);
     }
 
     #[test]

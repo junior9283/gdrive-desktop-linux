@@ -5,11 +5,15 @@ pub mod changes;
 pub mod events;
 pub mod gdocs;
 pub mod indexer;
+pub mod lost_found;
 #[cfg(test)]
 mod testutil;
+pub mod uploads;
 
 use gdl_drive::client::DriveError;
 use gdl_store::StoreError;
+
+use crate::cache::CacheError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -17,8 +21,14 @@ pub enum EngineError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Drive(#[from] DriveError),
+    #[error(transparent)]
+    Cache(#[from] CacheError),
+    #[error("erro de arquivo local: {0}")]
+    Io(#[from] std::io::Error),
     #[error("a conta ainda não foi indexada")]
     NotIndexed,
+    #[error("o item não existe")]
+    NotFound,
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

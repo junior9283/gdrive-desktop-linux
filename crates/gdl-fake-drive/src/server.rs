@@ -42,6 +42,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
             injected_status,
         ))
         .route("/token", post(token))
+        .route("/photo.png", get(photo))
         .route("/o/oauth2/auth", get(authorize))
         .layer(middleware::from_fn_with_state(shared.clone(), log_request))
         .with_state(shared)
@@ -155,7 +156,11 @@ async fn about(State(shared): Shr) -> Json<Value> {
     let state = shared.state();
     let usage: usize = state.files.values().map(|f| f.content.len()).sum();
     Json(json!({
-        "user": { "emailAddress": state.email, "displayName": "Pessoa de Teste" },
+        "user": {
+            "emailAddress": state.email,
+            "displayName": "Pessoa de Teste",
+            "photoLink": shared.origin.join("photo.png").unwrap().to_string(),
+        },
         "storageQuota": { "limit": "16106127360", "usage": usage.to_string() },
     }))
 }
@@ -565,6 +570,18 @@ async fn authorize(State(shared): Shr, Query(params): Params) -> Response {
         target.query_pairs_mut().append_pair("state", state);
     }
     Redirect::to(target.as_str()).into_response()
+}
+
+/// PNG de 1×1 pixel, a foto da conta de teste.
+async fn photo() -> Response {
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60,
+        0x60, 0xf8, 0x0f, 0x00, 0x01, 0x04, 0x01, 0x00, 0x5f, 0xe5, 0xc3, 0x4b, 0x00, 0x00, 0x00,
+        0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+    ([(axum::http::header::CONTENT_TYPE, "image/png")], PNG).into_response()
 }
 
 async fn userinfo(State(shared): Shr) -> Json<Value> {

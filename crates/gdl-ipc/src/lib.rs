@@ -12,12 +12,30 @@ pub const OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1";
 pub struct Status {
     pub account: String,
     pub mount_point: String,
+    /// `signed-out`, `synced`, `syncing`, `paused`, `offline`, `quota-full` ou `error`.
+    pub state: String,
+    /// Itens subindo ou descendo agora (envios na fila e fixados por baixar).
+    pub syncing: u32,
     pub pending_uploads: u32,
     pub paused: bool,
     pub offline: bool,
     /// Milissegundos desde 1970; 0 se nunca sincronizou.
     pub last_sync_ms: i64,
     pub errors: u32,
+    /// Tempo estimado para terminar os envios; -1 sem estimativa.
+    pub remaining_secs: i64,
+}
+
+/// Resposta de `AccountInfo`: a conta conectada, para o menu da conta.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct AccountInfo {
+    pub email: String,
+    pub name: String,
+    /// A foto da conta em PNG (ou no formato que o Google mandar); vazia se não houver.
+    pub photo_png: Vec<u8>,
+    pub quota_used: i64,
+    /// -1: armazenamento ilimitado.
+    pub quota_total: i64,
 }
 
 #[derive(Debug, zbus::DBusError)]
@@ -61,6 +79,7 @@ pub trait Service {
     /// Abre o login no navegador e devolve o endereço; o resultado vem em `LoginFinished`.
     fn begin_login(&self, client_id: &str, client_secret: &str) -> Result<String, ServiceError>;
     fn status(&self) -> Result<Status, ServiceError>;
+    fn account_info(&self) -> Result<AccountInfo, ServiceError>;
     fn pin(&self, path: &str) -> Result<(), ServiceError>;
     fn unpin(&self, path: &str) -> Result<(), ServiceError>;
     fn pause(&self) -> Result<(), ServiceError>;

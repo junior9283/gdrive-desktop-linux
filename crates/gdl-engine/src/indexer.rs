@@ -62,10 +62,11 @@ pub async fn initial_index(store: &Store, client: &DriveClient) -> Result<()> {
     // O token vem antes da listagem: o que mudar durante ela aparece na primeira consulta.
     let token = client.start_page_token().await?;
     let about = client.about().await?;
-    let mut root = item_from_remote(client.get(&about.root_id).await?, &about.email);
+    let mut root = item_from_remote(client.get("root").await?, &about.email);
     root.inode = Inode::ROOT;
     root.parent = None;
     store.upsert_item(&root)?;
+    let root_id = root.id.0.clone();
 
     let mut parents = BTreeSet::from([root.id]);
     client
@@ -80,7 +81,7 @@ pub async fn initial_index(store: &Store, client: &DriveClient) -> Result<()> {
         .await?;
     store.recompute_local_names(&parents)?;
     store.kv_set(ACCOUNT_EMAIL, &about.email)?;
-    store.kv_set(ROOT_ID, &about.root_id)?;
+    store.kv_set(ROOT_ID, &root_id)?;
     store.kv_set(START_PAGE_TOKEN, &token)?;
     Ok(())
 }

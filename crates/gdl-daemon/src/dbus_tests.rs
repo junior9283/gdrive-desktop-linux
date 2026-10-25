@@ -3,7 +3,7 @@
 use gdl_drive::token_store::TokenStore;
 use gdl_store::PinState;
 
-use crate::testutil::{Harness, blocking, wait_until};
+use crate::testutil::{Harness, blocking, status_until, wait_until};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn login_over_dbus_emits_login_finished() {
@@ -225,4 +225,44 @@ async fn logout_never_deletes_lost_and_found_silently() {
     assert_eq!(std::fs::read(&saved[0]).unwrap(), b"editado aqui");
     let copied = std::fs::read_dir(&copies).unwrap().count();
     assert_eq!(copied, 1, "o Lost and Found vai junto para a pasta");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_reports_state_and_syncing_count() {
+    let h = Harness::new().await;
+    assert_eq!(h.proxy.status().await.unwrap().state, "signed-out");
+    h.logged_in().await;
+    status_until(&h, "sincronizado", |s| s.state == "synced").await;
+
+    let path = h.drive().join("novo.txt");
+    blocking(move || std::fs::write(path, b"para subir").unwrap()).await;
+
+    // O envio só começa 2 s depois do fechamento: até lá, está na fila.
+    let status = h.proxy.status().await.unwrap();
+    assert_eq!(status.state, "syncing", "{status:?}");
+    assert_eq!(status.pending_uploads, 1);
+    assert_eq!(status.syncing, 1);
+    status_until(&h, "envio concluído", |s| s.state == "synced").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn account_info_has_name_quota_and_photo() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+
+    let info = h.proxy.account_info().await.unwrap();
+
+    assert_eq!(info.email, h.fake.email());
+    assert_eq!(info.name, "Pessoa de Teste");
+    assert_eq!(info.quota_total, 15 * 1024 * 1024 * 1024);
+    assert!(
+        info.photo_png.starts_with(b"\x89PNG"),
+        "{:?}",
+        &info.photo_png[..8.min(info.photo_png.len())]
+    );
+    // A foto fica guardada: a segunda consulta não baixa de novo.
+    let photos = h.fake.requests("/photo.png");
+    assert_eq!(photos, 1);
+    h.proxy.account_info().await.unwrap();
+    assert_eq!(h.fake.requests("/photo.png"), photos);
 }

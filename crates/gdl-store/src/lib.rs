@@ -36,6 +36,23 @@ macro_rules! select_items {
 }
 
 /// Banco de uma conta. Pode ser compartilhado entre threads.
+/// `FROM … WHERE` dos arquivos fixados, fora da lixeira e sem edição local, que ainda não estão
+/// inteiros no cache (`?1` = `PinState::None`, `?2` = `LocalState::Clean`).
+const INCOMPLETE_PINNED: &str = "FROM items i \
+     WHERE i.pin != ?1 AND i.kind = 'file' AND i.trashed = 0 AND i.local_state = ?2 \
+     AND i.size > (SELECT COALESCE(SUM(r.end - r.start), 0) FROM ranges r \
+                   WHERE r.item_id = i.id)";
+
+/// Resumo da fila de envio (`Store::queue_stats`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct QueueStats {
+    pub pending: u32,
+    /// Envios que já falharam ao menos uma vez.
+    pub failed: u32,
+    /// Bytes dos itens com envio na fila.
+    pub bytes: u64,
+}
+
 pub struct Store {
     conn: Mutex<Connection>,
 }
@@ -437,17 +454,21 @@ impl Store {
     /// cache (nunca baixados ou descartados por uma revisão nova).
     pub fn incomplete_pinned_files(&self) -> Result<Vec<ItemId>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare_cached(
-            "SELECT i.id FROM items i \
-             WHERE i.pin != ?1 AND i.kind = 'file' AND i.trashed = 0 AND i.local_state = ?2 \
-             AND i.size > (SELECT COALESCE(SUM(r.end - r.start), 0) FROM ranges r \
-                           WHERE r.item_id = i.id) \
-             ORDER BY i.id",
-        )?;
+        let mut stmt =
+            conn.prepare_cached(&format!("SELECT i.id {INCOMPLETE_PINNED} ORDER BY i.id"))?;
         let rows = stmt.query_map(params![PinState::None, LocalState::Clean], |r| {
             Ok(ItemId(r.get(0)?))
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Quantos são os `incomplete_pinned_files`, sem carregá-los.
+    pub fn count_incomplete_pinned(&self) -> Result<u32> {
+        Ok(self.conn().query_row(
+            &format!("SELECT COUNT(*) {INCOMPLETE_PINNED}"),
+            params![PinState::None, LocalState::Clean],
+            |r| r.get(0),
+        )?)
     }
 
     /// Itens que ainda não estão no Drive como estão aqui (com envio na fila ou edição local),
@@ -462,12 +483,21 @@ impl Store {
         )
     }
 
-    /// Envios na fila e quantos deles já falharam ao menos uma vez.
-    pub fn queue_stats(&self) -> Result<(u32, u32)> {
+    /// Envios na fila, quantos deles já falharam ao menos uma vez e os bytes dos itens deles.
+    pub fn queue_stats(&self) -> Result<QueueStats> {
         Ok(self.conn().query_row(
-            "SELECT COUNT(*), COUNT(*) FILTER (WHERE attempts > 0) FROM upload_queue",
+            "SELECT COUNT(*), COUNT(*) FILTER (WHERE attempts > 0), \
+             (SELECT COALESCE(SUM(size), 0) FROM items \
+              WHERE id IN (SELECT item_id FROM upload_queue)) \
+             FROM upload_queue",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| {
+                Ok(QueueStats {
+                    pending: r.get(0)?,
+                    failed: r.get(1)?,
+                    bytes: r.get(2)?,
+                })
+            },
         )?)
     }
 

@@ -1,7 +1,9 @@
 //! Fila de envio persistente: sobe as edições locais, detecta conflitos e guarda no
 //! `Lost and Found` o que não pode subir.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use gdl_common::names;
@@ -27,6 +29,56 @@ pub const LOCAL_ID_PREFIX: &str = "local:";
 const OFFLINE_WAIT_MS: i64 = 30_000;
 /// Pasta-mãe ainda não criada no Drive: espera por ela.
 const PARENT_WAIT_MS: i64 = 5_000;
+/// Janela dos envios que entram na estimativa de tempo restante.
+const RATE_WINDOW_MS: i64 = 30_000;
+
+/// O que a fila de envio informa ao resumo: cota cheia e o ritmo recente dos envios.
+#[derive(Default)]
+pub(crate) struct UploadStats {
+    quota_full: AtomicBool,
+    /// Envios concluídos na janela: quando e quantos bytes.
+    recent: Mutex<VecDeque<(i64, u64)>>,
+}
+
+impl UploadStats {
+    pub fn quota_full(&self) -> bool {
+        self.quota_full.load(Ordering::Relaxed)
+    }
+
+    fn mark_quota_full(&self) {
+        self.quota_full.store(true, Ordering::Relaxed);
+    }
+
+    /// Os envios da janela que termina em `now` (os mais antigos saem).
+    fn recent(&self, now: i64) -> std::sync::MutexGuard<'_, VecDeque<(i64, u64)>> {
+        let mut recent = self.recent.lock().unwrap_or_else(|e| e.into_inner());
+        while recent
+            .front()
+            .is_some_and(|(at, _)| now - at > RATE_WINDOW_MS)
+        {
+            recent.pop_front();
+        }
+        recent
+    }
+
+    fn uploaded(&self, bytes: u64, now: i64) {
+        self.quota_full.store(false, Ordering::Relaxed);
+        self.recent(now).push_back((now, bytes));
+    }
+
+    /// Segundos para enviar `pending` bytes no ritmo dos envios da janela (só envios: os
+    /// downloads dos fixados não entram); `None` sem nada pendente ou sem amostras.
+    pub fn remaining_secs(&self, pending: u64, now: i64) -> Option<u64> {
+        if pending == 0 {
+            return None;
+        }
+        let recent = self.recent(now);
+        let first = recent.front()?.0;
+        let bytes: u64 = recent.iter().map(|(_, b)| b).sum();
+        let elapsed_ms = (now - first).max(1_000) as u64;
+        Some(pending * elapsed_ms / bytes.max(1) / 1_000)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UploadOutcome {
@@ -193,6 +245,7 @@ pub struct UploadWorker {
     events: broadcast::Sender<EngineEvent>,
     retry: Backoff,
     ids: IdPool,
+    pub(crate) stats: Arc<UploadStats>,
 }
 
 impl UploadWorker {
@@ -211,6 +264,7 @@ impl UploadWorker {
             events,
             retry: Backoff::default(),
             ids: IdPool::default(),
+            stats: Arc::default(),
         }
     }
 
@@ -367,7 +421,7 @@ impl UploadWorker {
 
     /// Envio aceito: a revisão da nuvem vira a nova revisão-base.
     fn uploaded(&self, job: &UploadJob, id: &ItemId, remote: RemoteFile) -> Result<UploadOutcome> {
-        self.store.modify(|batch| -> Result<()> {
+        let size = self.store.modify(|batch| -> Result<u64> {
             let mut item = batch.get(id)?.ok_or(EngineError::NotFound)?;
             item.md5 = remote.md5.clone();
             item.base_md5 = remote.md5;
@@ -378,9 +432,11 @@ impl UploadWorker {
             if item.local_state == LocalState::Uploading {
                 item.local_state = LocalState::Clean;
             }
-            Ok(batch.put(&item)?)
+            batch.put(&item)?;
+            Ok(item.size)
         })?;
         self.store.finish_job(job.job_id)?;
+        self.stats.uploaded(size, now_ms());
         Ok(UploadOutcome::Uploaded(id.clone()))
     }
 
@@ -405,7 +461,10 @@ impl UploadWorker {
         self.store.retry_job(job.job_id, now + delay)?;
         if !e.is_retryable() {
             let event = match e {
-                DriveError::QuotaExceeded => EngineEvent::QuotaFull,
+                DriveError::QuotaExceeded => {
+                    self.stats.mark_quota_full();
+                    EngineEvent::QuotaFull
+                }
                 _ => EngineEvent::UploadFailed {
                     name: item.local_name.clone(),
                     error: e.to_string(),
@@ -726,7 +785,7 @@ mod tests {
 
         assert!(matches!(outcome, Some(UploadOutcome::Retrying)));
         assert_eq!(s.events.try_recv().unwrap(), EngineEvent::QuotaFull);
-        assert_eq!(s.env.store.queue_stats().unwrap().0, 1);
+        assert_eq!(s.env.store.queue_stats().unwrap().pending, 1);
     }
 
     #[tokio::test]
@@ -962,5 +1021,20 @@ mod tests {
             assert_eq!(s.env.item(&id.0).local_state, LocalState::LocalOnly);
         }
         assert!(s.env.store.lookup(&root, "foo.swp").unwrap().is_some());
+    }
+
+    #[test]
+    fn remaining_time_uses_the_recent_rate() {
+        let stats = UploadStats::default();
+        assert_eq!(stats.remaining_secs(1_000, 0), None);
+        // 2 MB em 2 s: 1 MB/s.
+        stats.uploaded(1_000_000, 0);
+        stats.uploaded(1_000_000, 2_000);
+        assert_eq!(stats.remaining_secs(10_000_000, 2_000), Some(10));
+        // Envios fora da janela não contam mais.
+        assert_eq!(
+            stats.remaining_secs(10_000_000, 2_000 + RATE_WINDOW_MS + 1),
+            None
+        );
     }
 }

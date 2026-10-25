@@ -40,7 +40,9 @@ pub enum Change {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct About {
     pub email: String,
-    pub root_id: String,
+    pub display_name: String,
+    /// Endereço da foto da conta; vazio quando não há.
+    pub photo_link: String,
     /// `None` quando o armazenamento é ilimitado.
     pub quota_total: Option<u64>,
     pub quota_used: u64,

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use gdl_common::config::Preferences;
 use gdl_common::paths::{Paths, create_private_dir};
+use gdl_common::time::now_ms;
 use gdl_drive::client::DriveClient;
 use gdl_drive::model::About;
 use gdl_store::Store;
@@ -157,6 +158,11 @@ impl Engine {
         Ok(self.client.about().await?)
     }
 
+    /// A foto da conta (`About::photo_link`).
+    pub async fn fetch_photo(&self, link: &str) -> Result<bytes::Bytes> {
+        Ok(self.client.fetch_photo(link).await?)
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {
         self.events.subscribe()
     }
@@ -185,13 +191,19 @@ impl Engine {
     }
 
     pub fn summary(&self) -> Result<SyncSummary> {
-        let (pending_uploads, errors) = self.store.queue_stats()?;
+        let queue = self.store.queue_stats()?;
+        let downloads = self.store.count_incomplete_pinned()?;
+        let stats = &self.uploads.stats;
         Ok(SyncSummary {
-            pending_uploads,
+            pending_uploads: queue.pending,
             paused: self.is_paused(),
             offline: self.poller.is_offline(),
             last_sync_ms: self.poller.last_sync_ms(),
-            errors,
+            errors: queue.failed,
+            // Sem nada na fila, a cota cheia não impede nada.
+            quota_full: queue.pending > 0 && stats.quota_full(),
+            syncing: queue.pending + downloads,
+            remaining_secs: stats.remaining_secs(queue.bytes, now_ms()),
         })
     }
 

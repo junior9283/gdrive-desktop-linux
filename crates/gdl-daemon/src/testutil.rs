@@ -179,6 +179,22 @@ pub(crate) async fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
+/// Espera o `Status` satisfazer `done` (com o limite de `wait_until`).
+pub(crate) async fn status_until(h: &Harness, what: &str, done: impl Fn(&gdl_ipc::Status) -> bool) {
+    let start = std::time::Instant::now();
+    loop {
+        let status = h.proxy.status().await.unwrap();
+        if done(&status) {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "esperando: {what} ({status:?})"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// Operação de arquivo bloqueante na montagem, fora das threads do runtime.
 pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     tokio::task::spawn_blocking(f).await.unwrap()

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
-use gdl_ipc::{ServiceError, Status};
+use gdl_ipc::{AccountInfo, ServiceError, Status};
 use zbus::object_server::SignalEmitter;
 
 use crate::daemon::Daemon;
@@ -38,6 +38,10 @@ impl Service {
 
     async fn status(&self) -> Result<Status, ServiceError> {
         self.daemon.status().await
+    }
+
+    async fn account_info(&self) -> Result<AccountInfo, ServiceError> {
+        self.daemon.account_info().await
     }
 
     async fn pin(&self, path: &str) -> Result<(), ServiceError> {

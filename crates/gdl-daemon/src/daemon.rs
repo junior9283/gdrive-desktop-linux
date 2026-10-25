@@ -14,7 +14,7 @@ use gdl_drive::client::{Backoff, DriveClient};
 use gdl_drive::oauth::{AccessTokens, LoginFlow, OAuthEndpoints};
 use gdl_drive::token_store::{ClientCredentials, TokenSet, TokenStore};
 use gdl_engine::engine::{Engine, Intervals};
-use gdl_engine::events::EngineEvent;
+use gdl_engine::events::{EngineEvent, SyncState};
 use gdl_fs::DriveFs;
 use gdl_store::{Inode, ItemId, ItemKind};
 use tokio::sync::broadcast;
@@ -24,7 +24,7 @@ use url::Url;
 use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 
-use gdl_ipc::{OBJECT_PATH, ServiceError, Status};
+use gdl_ipc::{AccountInfo, OBJECT_PATH, ServiceError, Status};
 
 use crate::dbus::Service;
 use crate::mount;
@@ -34,6 +34,8 @@ use crate::notify::{self, Notification, Notifier, OPEN_LOST_FOUND};
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// Arquivo (em `data_dir`) com a conta conectada, para reconectar na próxima partida.
 const CURRENT_ACCOUNT: &str = "current-account";
+/// Foto da conta, no diretório de dados dela.
+const PHOTO_FILE: &str = "photo.png";
 /// De quanto em quanto tempo `logout finish` confere se os envios terminaram.
 const FINISH_POLL: Duration = Duration::from_secs(1);
 
@@ -391,17 +393,38 @@ impl Daemon {
             })
             .await
         else {
-            return Ok(Status::default());
+            return Ok(Status {
+                state: SyncState::SignedOut.as_str().into(),
+                remaining_secs: -1,
+                ..Status::default()
+            });
         };
         let summary = engine.summary().map_err(failed)?;
         Ok(Status {
             account,
             mount_point,
+            state: summary.state().as_str().into(),
+            syncing: summary.syncing,
+            remaining_secs: summary.remaining_secs.map_or(-1, |s| s as i64),
             pending_uploads: summary.pending_uploads,
             paused: summary.paused,
             offline: summary.offline,
             last_sync_ms: summary.last_sync_ms.unwrap_or(0),
             errors: summary.errors,
+        })
+    }
+
+    /// Nome, cota e foto da conta conectada. A foto é baixada uma vez e fica no diretório de
+    /// dados da conta.
+    pub async fn account_info(&self) -> Result<AccountInfo, ServiceError> {
+        let engine = self.connected_engine().await?;
+        let about = engine.about().await.map_err(failed)?;
+        Ok(AccountInfo {
+            photo_png: cached_photo(&engine, &about.photo_link).await,
+            email: about.email,
+            name: about.display_name,
+            quota_used: about.quota_used as i64,
+            quota_total: about.quota_total.map_or(-1, |t| t as i64),
         })
     }
 
@@ -540,6 +563,35 @@ impl Daemon {
         self.emit_status_changed().await;
         Ok(())
     }
+}
+
+/// A foto guardada da conta, ou baixada de `link` e guardada; vazia se não houver ou falhar
+/// (a foto não é essencial: o erro só vai para o log).
+async fn cached_photo(engine: &Engine, link: &str) -> Vec<u8> {
+    let saved = engine.data_dir().join(PHOTO_FILE);
+    if let Ok(bytes) = tokio::fs::read(&saved).await {
+        return bytes;
+    }
+    if link.is_empty() {
+        return Vec::new();
+    }
+    let bytes = match engine.fetch_photo(link).await {
+        Ok(bytes) => bytes.to_vec(),
+        Err(e) => {
+            tracing::warn!(erro = %e, "não deu para baixar a foto da conta");
+            return Vec::new();
+        }
+    };
+    // Grava ao lado e renomeia: uma queda no meio não deixa uma foto pela metade.
+    let partial = saved.with_extension("part");
+    let stored = match tokio::fs::write(&partial, &bytes).await {
+        Ok(()) => tokio::fs::rename(&partial, &saved).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = stored {
+        tracing::warn!(erro = %e, "não deu para guardar a foto da conta");
+    }
+    bytes
 }
 
 /// `path` relativo à montagem, aceitando o caminho real (com links simbólicos resolvidos) da

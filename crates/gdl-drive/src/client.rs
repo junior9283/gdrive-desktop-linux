@@ -193,6 +193,10 @@ impl DriveClient {
         #[serde(rename_all = "camelCase")]
         struct User {
             email_address: String,
+            #[serde(default)]
+            display_name: String,
+            #[serde(default)]
+            photo_link: String,
         }
         #[derive(Deserialize)]
         struct Quota {
@@ -201,17 +205,37 @@ impl DriveClient {
         }
         let raw: Raw = self
             .json(|| {
-                self.http
-                    .get(self.api("about"))
-                    .query(&[("fields", "user(emailAddress),storageQuota(limit,usage)")])
+                self.http.get(self.api("about")).query(&[(
+                    "fields",
+                    "user(emailAddress,displayName,photoLink),storageQuota(limit,usage)",
+                )])
             })
             .await?;
         Ok(About {
             email: raw.user.email_address,
-            root_id: self.get("root").await?.id,
+            display_name: raw.user.display_name,
+            photo_link: raw.user.photo_link,
             quota_total: parse_u64(raw.storage_quota.limit.as_deref()),
             quota_used: parse_u64(raw.storage_quota.usage.as_deref()).unwrap_or(0),
         })
+    }
+
+    /// Baixa a foto da conta (`About::photo_link`), sem o token de acesso. Só aceita o servidor
+    /// de imagens do Google (por HTTPS) ou o mesmo servidor da API (o Drive simulado dos testes).
+    pub async fn fetch_photo(&self, link: &str) -> Result<Bytes> {
+        let url: Url = link
+            .parse()
+            .map_err(|_| DriveError::Protocol(format!("endereço de foto inválido: {link}")))?;
+        let host = url.host_str().unwrap_or_default();
+        let google = url.scheme() == "https" && host.ends_with(".googleusercontent.com");
+        if !google && url.origin() != self.base.origin() {
+            return Err(DriveError::Protocol(format!("foto fora do Google: {host}")));
+        }
+        let resp = self.http.get(url).send().await?;
+        if !resp.status().is_success() {
+            return Err(error_from(resp).await);
+        }
+        Ok(resp.bytes().await?)
     }
 
     /// Todos os itens fora da lixeira, entregues página a página (1000 por página). Para na
@@ -782,9 +806,31 @@ mod tests {
         fake.add_file(&fake.root_id(), "a", vec![0; 10]);
         let about = client(&fake).about().await.unwrap();
         assert_eq!(about.email, fake.email());
-        assert_eq!(about.root_id, fake.root_id());
         assert_eq!(about.quota_used, 10);
         assert!(about.quota_total.is_some());
+    }
+
+    #[tokio::test]
+    async fn photo_comes_only_from_google_images_or_the_api_server() {
+        let fake = FakeDrive::start().await;
+        let c = client(&fake);
+        let about = c.about().await.unwrap();
+        assert!(
+            c.fetch_photo(&about.photo_link)
+                .await
+                .unwrap()
+                .starts_with(b"\x89PNG")
+        );
+        for link in [
+            "http://lh3.googleusercontent.com/a.png",
+            "https://exemplo.com/a.png",
+            "file:///etc/passwd",
+        ] {
+            assert!(
+                matches!(c.fetch_photo(link).await, Err(DriveError::Protocol(_))),
+                "{link}"
+            );
+        }
     }
 
     #[tokio::test]

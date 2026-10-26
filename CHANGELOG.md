@@ -7,6 +7,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.6.0] - 2026-10-26
+
 ### Mudado
 - Desempenho: o serviço parado gastava ~2,5% de um núcleo com um Drive grande (~610 mil itens),
   porque a busca de arquivos off-line a baixar, a cada 30 s, percorria todos os itens. Essa busca,
@@ -327,7 +329,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.4.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.0...v0.3.1

@@ -792,6 +792,34 @@ mod tests {
         full.abort();
     }
 
+    /// Caça a bugs: um download cancelado no meio (Ctrl+C num `cp`, leitura interrompida)
+    /// solta a reserva; o próximo leitor baixa o trecho em vez de esperar para sempre.
+    #[tokio::test]
+    async fn canceled_download_releases_its_range() {
+        let (s, ids) = setup(&[("grande.bin", 8 * MIB)], None).await;
+        let id = ids[0].clone();
+        s.env
+            .fake
+            .inject(Fault::StallConnectionAfterBytes(MIB as u64));
+        let cache = s.cache.clone();
+        let stuck = tokio::spawn({
+            let id = id.clone();
+            async move { cache.ensure_full(&id).await }
+        });
+        wait_until("o download empacar", || s.env.fake.byte_limit_reached()).await;
+        stuck.abort();
+        let _ = stuck.await;
+        s.env.fake.clear_faults();
+
+        let at = 6 * MIB;
+        let got = tokio::time::timeout(Duration::from_secs(5), s.cache.read(&id, at as u64, 10))
+            .await
+            .expect("a reserva do download cancelado ficou presa")
+            .unwrap();
+
+        assert_eq!(got.as_ref(), &data(8 * MIB)[at..at + 10]);
+    }
+
     #[tokio::test]
     async fn offline_with_missing_block_is_offline_error_but_cached_block_still_reads() {
         let (s, ids) = setup(&[("a.bin", 4 * MIB)], None).await;

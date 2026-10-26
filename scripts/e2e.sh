@@ -5,7 +5,15 @@
 # tira o foco da janela em momentos aleatórios). Nada aparece na tela de quem roda. Sai com 77
 # (pulado) sem o WebKitWebDriver, o tauri-driver, o openbox ou o xdotool.
 # Um argumento filtra os testes pelo nome (`scripts/e2e.sh search`).
+# `GDL_SCREENSHOTS=docs/imagens scripts/e2e.sh screenshots` gera as imagens do README: em alta
+# densidade, numa tela virtual que cabe as janelas inteiras.
 set -eu
+screen=1920x1080
+if [ -n "${GDL_SCREENSHOTS:-}" ]; then
+  GDL_SCREENSHOTS=$(realpath -m "$GDL_SCREENSHOTS")
+  export GDL_SCREENSHOTS GDK_SCALE=2
+  screen=3840x2160
+fi
 cd "$(dirname "$0")/.."
 
 if [ "${1:-}" != "--inside" ]; then
@@ -29,7 +37,7 @@ if [ "${1:-}" != "--inside" ]; then
   cargo build -q -p gdl-daemon --example e2e-daemon
   cargo test -q -p gdl-ui --test e2e --no-run
   exec env -u DISPLAY -u WAYLAND_DISPLAY \
-    dbus-run-session --config-file=scripts/e2e-bus.conf -- xvfb-run -a -s "-screen 0 1920x1080x24" "$0" --inside "$@"
+    dbus-run-session --config-file=scripts/e2e-bus.conf -- xvfb-run -a -s "-screen 0 ${screen}x24" "$0" --inside "$@"
 fi
 shift
 

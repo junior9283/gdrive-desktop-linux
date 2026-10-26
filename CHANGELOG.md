@@ -22,6 +22,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `gdrive-desktop-linux menu-action <ação> <caminho>…`, com o link na área de transferência e os
   erros em notificação.
 
+### Mudado
+- README atualizado, com todas as telas; as imagens saem de um teste de ponta a ponta
+  (`GDL_SCREENSHOTS`) com o Drive simulado.
+- O modo espelho nas preferências diz "Chega numa próxima versão" (dizia "na versão 0.4").
+
 ## [0.4.0] - 2026-10-26
 
 ### Adicionado

@@ -1,7 +1,7 @@
 // A lógica do primeiro uso sem DOM: em que passo está, para onde cada botão (ou o fim do login)
 // leva e quais botões aparecem. Os erros saem como `[chave, argumentos]` do `ui.ftl`.
 
-// Os passos da 0.2 (escolher pastas e o resumo chegam na 0.4, com o backup de pastas). O login
+// Os passos da 0.2 (escolher pastas e o resumo chegam com o backup de pastas). O login
 // começa pelo guia do Client ID, que quem já tem um passa com Continuar.
 const LOGIN = ['setup', 'sign-in', 'waiting'];
 

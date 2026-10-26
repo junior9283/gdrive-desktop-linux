@@ -11,9 +11,6 @@ import {
 
 // O atalho quando `SearchHotKey` não foi definido (o mesmo `DEFAULT_TRIGGER` da bandeja).
 const DEFAULT_HOTKEY = 'Ctrl+Alt+G';
-// O que chega na 0.4, com o backup de pastas.
-const SOON = { version: '0.4' };
-
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
 const screen = { root: null, ctx: null, tab: 'drive', listening: null, listeningArg: null };
 // O que veio do serviço e o que o usuário mudou.
@@ -133,7 +130,7 @@ function cancel() {
 
 function computerTab() {
   const { t } = screen.ctx;
-  const soon = t('pref-next-version', SOON);
+  const soon = t('pref-coming-soon');
   return [
     el('p', { class: 'empty' }, t('pref-computer-empty')),
     el('button', { class: 'tonal', disabled: true, title: soon }, t('pref-add-folder')),
@@ -146,7 +143,7 @@ function driveTab() {
   const mode = (value, label, text, disabled) =>
     choice(el('input', { type: 'radio', name: 'drive-mode', value, checked: value === 'stream', disabled }),
       el('strong', {}, label), el('br'), text,
-      disabled ? [el('br'), el('span', { class: 'meta' }, t('pref-next-version', SOON))] : []);
+      disabled ? [el('br'), el('span', { class: 'meta' }, t('pref-coming-soon'))] : []);
   return [
     el('h2', {}, t('pref-drive-mode')),
     el('div', { class: 'choices' },

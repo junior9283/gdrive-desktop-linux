@@ -1715,6 +1715,7 @@ name = "gdl-ui"
 version = "0.5.0"
 dependencies = [
  "ashpd",
+ "base64 0.22.1",
  "futures-util",
  "gdl-common",
  "gdl-ipc",

@@ -575,22 +575,39 @@ async fn authorize(State(shared): Shr, Query(params): Params) -> Response {
     Redirect::to(target.as_str()).into_response()
 }
 
-/// PNG de 1×1 pixel, a foto da conta de teste.
+/// A foto da conta de teste: um PNG 96×96 com a silhueta de uma pessoa (cabeça e ombros) sobre
+/// fundo azul-esverdeado, gerado uma vez.
 async fn photo() -> Response {
-    const PNG: &[u8] = &[
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
-        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
-        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60,
-        0x60, 0xf8, 0x0f, 0x00, 0x01, 0x04, 0x01, 0x00, 0x5f, 0xe5, 0xc3, 0x4b, 0x00, 0x00, 0x00,
-        0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
-    ];
-    ([(axum::http::header::CONTENT_TYPE, "image/png")], PNG).into_response()
+    static PNG: std::sync::OnceLock<Bytes> = std::sync::OnceLock::new();
+    let png = PNG.get_or_init(|| {
+        png(image::RgbaImage::from_fn(96, 96, |x, y| {
+            let (x, y) = (x as f32, y as f32);
+            let head = (x - 48.0).powi(2) + (y - 38.0).powi(2) < 17.0f32.powi(2);
+            let shoulders = y > 62.0
+                && (x - 48.0).powi(2) / 32.0f32.powi(2) + (y - 96.0).powi(2) / 34.0f32.powi(2)
+                    < 1.0;
+            if head || shoulders {
+                image::Rgba([232, 240, 254, 255])
+            } else {
+                image::Rgba([0, 121 + (y / 3.0) as u8, 107 + (x / 3.0) as u8, 255])
+            }
+        }))
+    });
+    ([(header::CONTENT_TYPE, "image/png")], png.clone()).into_response()
+}
+
+/// A imagem em PNG, para gerar uma vez e servir de um `OnceLock`.
+fn png(img: image::RgbaImage) -> Bytes {
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png)
+        .expect("PNG em memória");
+    out.into_inner().into()
 }
 
 /// Miniatura de um arquivo (`<id>=s<N>`): um PNG 600×400, gerado uma vez. O pedido fica em
 /// `request_log`, de onde os testes conferem o tamanho pedido.
 async fn thumb(State(shared): Shr, Path(spec): Path<String>) -> Response {
-    static PNG: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    static PNG: std::sync::OnceLock<Bytes> = std::sync::OnceLock::new();
     let id = spec.split_once('=').map_or(spec.as_str(), |(id, _)| id);
     let delay = shared.state().thumb_delay;
     if let Some(delay) = delay {
@@ -606,16 +623,16 @@ async fn thumb(State(shared): Shr, Path(spec): Path<String>) -> Response {
         return not_found(id);
     }
     let png = PNG.get_or_init(|| {
-        let img = image::RgbaImage::from_pixel(600, 400, image::Rgba([200, 60, 60, 255]));
-        let mut out = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut out, image::ImageFormat::Png)
-            .expect("PNG em memória");
-        out.into_inner()
+        png(image::RgbaImage::from_pixel(
+            600,
+            400,
+            image::Rgba([200, 60, 60, 255]),
+        ))
     });
     if shared.state().thumb_cut {
         // Metade do PNG e um erro no fluxo: o servidor derruba a conexão no meio do corpo. A
         // pausa deixa o cabeçalho e a metade saírem antes (erro imediato descartaria a resposta).
-        let half = Bytes::copy_from_slice(&png[..png.len() / 2]);
+        let half = png.slice(..png.len() / 2);
         let cut = async {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             Err(std::io::Error::other(

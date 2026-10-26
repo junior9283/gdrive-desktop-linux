@@ -16,6 +16,8 @@ scripts/e2e.sh                               # a janela e a bandeja de verdade (
 scripts/e2e.sh search                        # só os de ponta a ponta com "search" no nome
 integrations/dolphin/build.sh /tmp/dolphin   # o plugin do Dolphin (C++/KF6) e os testes dele
 integrations/gtk/tests/run.sh                # a extensão do Nautilus, Nemo, Caja e Thunar
+# as imagens do README, geradas no Xvfb com o Drive simulado
+GDL_SCREENSHOTS=docs/imagens scripts/e2e.sh screenshots
 ```
 
 Os testes de montagem precisam do FUSE 3 (`fusermount3`) e de acesso a `/dev/fuse`; os da bandeja e

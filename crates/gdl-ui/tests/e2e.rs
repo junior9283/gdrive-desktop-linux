@@ -54,6 +54,20 @@ impl Session {
         reply.json::<Value>().await.unwrap()["value"].take()
     }
 
+    /// A janela em PNG, sem animação no meio e com a fonte embutida carregada.
+    async fn screenshot(&self) -> Vec<u8> {
+        self.eval(
+            "return document.fonts.ready.then(() => \
+             Promise.all(document.getAnimations().map(a => a.finished)))",
+        )
+        .await;
+        let png = self.request(reqwest::Method::GET, "screenshot", None).await;
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(png.as_str().expect("captura"))
+            .unwrap()
+    }
+
     async fn post(&self, path: &str, body: Value) -> Value {
         self.request(reqwest::Method::POST, path, Some(body)).await
     }
@@ -741,4 +755,70 @@ async fn tray_publishes_menu() {
 
     assert!(layout.contains("\"Pesquisar\""), "{layout}");
     assert!(layout.contains("Sair"), "{layout}");
+}
+
+/// As imagens do README (`docs/imagens`): `GDL_SCREENSHOTS=docs/imagens scripts/e2e.sh
+/// screenshots`. Sem a variável, não faz nada. O primeiro uso vai por último: ele sai da conta.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn screenshots_for_the_readme() {
+    let Some(dir) = std::env::var_os("GDL_SCREENSHOTS").map(std::path::PathBuf::from) else {
+        return;
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    let save = async |session: &Session, name: &str| {
+        std::fs::write(dir.join(format!("{name}.png")), session.screenshot().await).unwrap();
+    };
+
+    let home = Session::open("home").await;
+    home.wait_text(".header-title", "Sincronização concluída")
+        .await;
+    until("a foto da conta", async || {
+        let loaded = home
+            .eval("return !!document.querySelector('.account-button img.avatar')?.complete")
+            .await;
+        (loaded == Value::Bool(true)).then_some(())
+    })
+    .await;
+    save(&home, "janela-principal").await;
+    home.click(".account-button").await;
+    home.wait_text(".menu .account-card", "Pessoa de Teste")
+        .await;
+    home.find(".menu .account-card img.avatar").await;
+    save(&home, "menu-da-conta").await;
+    home.click(".header-title").await;
+    home.click("[data-view='activity']").await;
+    home.wait_text(".activity-table tbody", "enviado-pelo-teste.txt")
+        .await;
+    save(&home, "atividade").await;
+    drop(home);
+
+    let search = Session::open("search").await;
+    search.fill(".search-field", "r").await;
+    search.wait_text(".results", "relatório.pdf").await;
+    save(&search, "pesquisa").await;
+    drop(search);
+
+    for (screen, css, wanted, name) in [
+        (
+            "offline",
+            ".offline-items",
+            "notas.txt",
+            "arquivos-off-line",
+        ),
+        ("preferences", "p.path", "Google Drive", "preferencias"),
+        ("about", ".about-version", "0.", "sobre"),
+        ("uninstall", ".uninstall", "", "desinstalar"),
+    ] {
+        let session = Session::open(screen).await;
+        session.wait_text(css, wanted).await;
+        save(&session, name).await;
+    }
+
+    let service = service().await;
+    service.logout("discard", "").await.unwrap();
+    status_until(&service, "sem conta", |s| s.state == "signed-out").await;
+    let onboarding = Session::open("onboarding").await;
+    onboarding.wait_text(".step-title", "Client ID").await;
+    save(&onboarding, "primeiro-uso").await;
 }

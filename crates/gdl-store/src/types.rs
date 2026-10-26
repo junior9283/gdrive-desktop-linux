@@ -165,3 +165,15 @@ pub struct NewUploadJob {
     /// ID já reservado no Drive para a criação, se houver.
     pub file_id: Option<String>,
 }
+
+/// Miniatura já gravada no cache do freedesktop para um item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThumbRec {
+    pub id: ItemId,
+    /// Revisão do arquivo na hora da semeadura.
+    pub revision: Option<String>,
+    /// `modified_ms` do arquivo na hora da semeadura.
+    pub modified_ms: i64,
+    /// URI `file://` usada no nome do PNG, para apagá-lo depois.
+    pub uri: String,
+}

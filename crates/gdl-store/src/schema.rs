@@ -79,6 +79,15 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX items_pinned ON items (parent) WHERE pin != 0;
     CREATE INDEX access_recent ON access (last_access_ms);
 ",
+    "
+    -- Miniaturas já gravadas no cache do freedesktop, para não refazer nem repetir downloads.
+    CREATE TABLE thumbs (
+        item_id     TEXT PRIMARY KEY,
+        revision    TEXT,
+        modified_ms INTEGER NOT NULL,
+        uri         TEXT NOT NULL
+    ) WITHOUT ROWID;
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.
@@ -143,5 +152,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(row, ("a".into(), None, None));
+    }
+
+    #[test]
+    fn migration_6_adds_thumbs_and_keeps_items() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..5] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 5).unwrap();
+        conn.execute(
+            "INSERT INTO items (id, inode, remote_name, local_name, kind, size, modified_ms, \
+             created_ms, trashed, can_edit, local_state, pin) \
+             VALUES ('a', 2, 'a', 'a', 'file', 7, 0, 0, 0, 1, 0, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let version: usize = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 6);
+        let items: u32 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(items, 1);
+        conn.execute(
+            "INSERT INTO thumbs (item_id, revision, modified_ms, uri) VALUES ('a', NULL, 1, 'file:///a')",
+            [],
+        )
+        .unwrap();
     }
 }

@@ -24,6 +24,15 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
+fn thumb_from_row(r: &Row) -> rusqlite::Result<ThumbRec> {
+    Ok(ThumbRec {
+        id: ItemId(r.get(0)?),
+        revision: r.get(1)?,
+        modified_ms: r.get(2)?,
+        uri: r.get(3)?,
+    })
+}
+
 /// `SELECT` de itens com o filtro dado.
 macro_rules! select_items {
     ($filter:literal) => {
@@ -237,6 +246,11 @@ impl Store {
             missing.push((pos, end));
         }
         Ok(missing)
+    }
+
+    /// O arquivo de `size` bytes está inteiro no cache? (Tamanho 0 é sempre inteiro.)
+    pub fn is_complete(&self, id: &ItemId, size: u64) -> Result<bool> {
+        Ok(self.ranges_missing(id, 0, size)?.is_empty())
     }
 
     pub fn ranges_clear(&self, id: &ItemId) -> Result<()> {
@@ -696,6 +710,46 @@ impl Store {
         Ok(())
     }
 
+    /// Miniatura semeada para o item, se houver.
+    pub fn thumb(&self, id: &ItemId) -> Result<Option<ThumbRec>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT item_id, revision, modified_ms, uri FROM thumbs WHERE item_id = ?1",
+                [&id.0],
+                thumb_from_row,
+            )
+            .optional()?)
+    }
+
+    /// Grava (ou substitui) a miniatura semeada do item.
+    pub fn put_thumb(&self, rec: &ThumbRec) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO thumbs (item_id, revision, modified_ms, uri) VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(item_id) DO UPDATE SET revision = excluded.revision, \
+             modified_ms = excluded.modified_ms, uri = excluded.uri",
+            params![rec.id.0, rec.revision, rec.modified_ms, rec.uri],
+        )?;
+        Ok(())
+    }
+
+    /// Todas as miniaturas semeadas.
+    pub fn all_thumbs(&self) -> Result<Vec<ThumbRec>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT item_id, revision, modified_ms, uri FROM thumbs ORDER BY item_id",
+        )?;
+        Ok(stmt
+            .query_map([], thumb_from_row)?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Esquece todas as miniaturas semeadas.
+    pub fn clear_thumbs(&self) -> Result<()> {
+        self.conn().execute("DELETE FROM thumbs", [])?;
+        Ok(())
+    }
+
     /// Itens com conteúdo em cache que podem ser liberados, do acesso mais antigo ao mais recente,
     /// com os bytes em cache de cada um. Nunca inclui fixados nem itens com edição local.
     pub fn eviction_candidates(&self, limit: usize) -> Result<Vec<(ItemId, u64)>> {
@@ -1060,6 +1114,66 @@ mod tests {
         let name = |s| store.get(&id(s)).unwrap().unwrap().local_name;
         assert_eq!(name("1"), "Plano.gsheet");
         assert_eq!(name("2"), "Plano (1).gsheet");
+    }
+
+    fn thumb_rec(item: &str, revision: &str) -> ThumbRec {
+        ThumbRec {
+            id: id(item),
+            revision: Some(revision.into()),
+            modified_ms: 1_000,
+            uri: format!("file:///mnt/drive/{item}.jpg"),
+        }
+    }
+
+    #[test]
+    fn thumbs_roundtrip_and_upsert() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        assert_eq!(store.thumb(&id("a")).unwrap(), None);
+
+        store.put_thumb(&thumb_rec("a", "r1")).unwrap();
+        assert_eq!(store.thumb(&id("a")).unwrap(), Some(thumb_rec("a", "r1")));
+
+        let nova = ThumbRec {
+            modified_ms: 2_000,
+            ..thumb_rec("a", "r2")
+        };
+        store.put_thumb(&nova).unwrap();
+        assert_eq!(store.thumb(&id("a")).unwrap(), Some(nova.clone()));
+        assert_eq!(store.all_thumbs().unwrap(), [nova]);
+
+        let sem_revisao = ThumbRec {
+            revision: None,
+            ..thumb_rec("b", "x")
+        };
+        store.put_thumb(&sem_revisao).unwrap();
+        assert_eq!(store.thumb(&id("b")).unwrap(), Some(sem_revisao));
+        assert_eq!(store.all_thumbs().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn clear_thumbs_empties_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store.put_thumb(&thumb_rec("a", "r1")).unwrap();
+        store.put_thumb(&thumb_rec("b", "r1")).unwrap();
+        store.clear_thumbs().unwrap();
+        assert!(store.all_thumbs().unwrap().is_empty());
+        assert_eq!(store.thumb(&id("a")).unwrap(), None);
+    }
+
+    #[test]
+    fn is_complete_follows_the_cached_ranges() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let a = id("a");
+        assert!(store.is_complete(&a, 0).unwrap());
+        assert!(!store.is_complete(&a, 40).unwrap());
+        store.ranges_add(&a, 0, 30).unwrap();
+        assert!(!store.is_complete(&a, 40).unwrap());
+        store.ranges_add(&a, 30, 40).unwrap();
+        assert!(store.is_complete(&a, 40).unwrap());
+        assert!(!store.is_complete(&a, 41).unwrap());
     }
 
     #[test]

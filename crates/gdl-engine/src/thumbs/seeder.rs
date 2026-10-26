@@ -17,7 +17,7 @@ use super::freedesktop::{
 };
 use super::mtime_secs;
 
-/// Downloads de miniatura em paralelo por pasta.
+/// Downloads (com a gravação) de miniatura em paralelo, somando todas as pastas.
 const PARALLEL: usize = 8;
 /// Lado pedido ao Google: o do maior tamanho gravado.
 const FETCH_SIZE: u32 = 512;
@@ -25,12 +25,16 @@ const FETCH_SIZE: u32 = 512;
 /// O item precisa de miniatura: arquivo comum, sem edição local, fora do cache local e sem
 /// semeadura em dia (mesma revisão, mesma data e mesmo caminho).
 pub(crate) fn needs_seed(item: &Item, rec: Option<&ThumbRec>, uri: &str, complete: bool) -> bool {
-    item.kind == ItemKind::File
-        && item.local_state == LocalState::Clean
+    seedable(item)
         && !complete
         && rec.is_none_or(|r| {
             r.revision != item.head_revision || r.modified_ms != item.modified_ms || r.uri != uri
         })
+}
+
+/// Arquivo comum sem edição local: o que dá para decidir sem consultar o banco.
+fn seedable(item: &Item) -> bool {
+    item.kind == ItemKind::File && item.local_state == LocalState::Clean
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -63,6 +67,11 @@ pub(crate) struct ThumbSeeder {
     generation: RwLock<CancellationToken>,
     running: Mutex<HashMap<ItemId, Running>>,
     next_id: AtomicU64,
+    /// Limite de downloads e gravações em curso, para o motor inteiro.
+    permits: Arc<Semaphore>,
+    /// Downloads e gravações em curso (para os testes conferirem o limite).
+    #[cfg(test)]
+    busy: tests::Busy,
 }
 
 /// Ao fim da semeadura (inclusive por pânico): sai da lista e avisa quem espera.
@@ -93,6 +102,9 @@ impl ThumbSeeder {
             generation: RwLock::default(),
             running: Mutex::default(),
             next_id: AtomicU64::new(0),
+            permits: Arc::new(Semaphore::new(PARALLEL)),
+            #[cfg(test)]
+            busy: tests::Busy::default(),
         }
     }
 
@@ -102,6 +114,13 @@ impl ThumbSeeder {
 
     /// Ver `Engine::seed_thumbnails`.
     pub(crate) fn seed(self: &Arc<Self>, folder: &ItemId, folder_path: PathBuf) -> JoinHandle<()> {
+        // Travas sempre na ordem `generation` → `running`, como na limpeza. Com a de leitura
+        // presa até registrar a pasta, uma limpeza vem inteira antes (e esta semeadura nasce na
+        // geração nova) ou inteira depois (e cancela esta, mesmo antes de começar).
+        let generation = self
+            .generation
+            .read()
+            .unwrap_or_else(PoisonError::into_inner);
         let mut running = self.running();
         if let Some(r) = running.get(folder) {
             return tokio::spawn(r.done.clone().cancelled_owned());
@@ -119,13 +138,9 @@ impl ThumbSeeder {
                 done: finish.done.clone(),
             },
         );
+        let cancel = generation.child_token();
         drop(running);
-        // Tirado já aqui: uma limpeza logo depois cancela esta semeadura, mesmo antes de começar.
-        let cancel = self
-            .generation
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .child_token();
+        drop(generation);
         tokio::spawn(async move {
             let seeder = finish.seeder.clone();
             tokio::select! {
@@ -158,7 +173,6 @@ impl ThumbSeeder {
             Ok(links) => links.into_iter().map(|l| (l.id, l.link)).collect(),
             Err(e) => return tracing::debug!(erro = %e, "falha ao listar as miniaturas da pasta"),
         };
-        let permits = Arc::new(Semaphore::new(PARALLEL));
         let mut tasks = JoinSet::new();
         let mut without_link = Vec::new();
         for job in pending {
@@ -166,18 +180,23 @@ impl ThumbSeeder {
                 without_link.push(job.rec);
                 continue;
             };
-            let (this, permits, cancel) = (self.clone(), permits.clone(), cancel.clone());
+            let (this, cancel) = (self.clone(), cancel.clone());
             tasks.spawn(async move {
-                let Ok(_permit) = permits.acquire_owned().await else {
+                // Presa até o fim da gravação.
+                let Ok(_permit) = this.permits.clone().acquire_owned().await else {
                     return;
                 };
+                #[cfg(test)]
+                let _busy = this.busy.enter();
                 this.seed_one(job, &link, cancel).await;
             });
         }
         // Sem miniatura no Google: lembra mesmo assim, para não listar a pasta a cada abertura;
         // uma versão nova do arquivo faz tentar de novo.
-        let (this, cancel) = (self.clone(), cancel.clone());
-        tasks.spawn_blocking(move || this.remember(&without_link, &cancel));
+        if !without_link.is_empty() {
+            let (this, cancel) = (self.clone(), cancel.clone());
+            tasks.spawn_blocking(move || this.remember(&without_link, &cancel));
+        }
         while let Some(result) = tasks.join_next().await {
             if let Err(e) = result {
                 tracing::debug!(erro = %e, "falha ao semear uma miniatura");
@@ -194,7 +213,7 @@ impl ThumbSeeder {
         cancel: &CancellationToken,
     ) -> Result<Vec<Job>, StoreError> {
         let mut jobs = Vec::new();
-        for item in self.store.children(folder)? {
+        for item in self.store.children(folder)?.into_iter().filter(seedable) {
             let uri = uri_of(&folder_path.join(&item.local_name));
             let rec = self.store.thumb(&item.id)?;
             let complete = self.store.is_complete(&item.id, item.size)?;
@@ -229,7 +248,7 @@ impl ThumbSeeder {
         Ok(jobs)
     }
 
-    async fn seed_one(self: Arc<Self>, job: Job, link: &str, cancel: CancellationToken) {
+    async fn seed_one(self: &Arc<Self>, job: Job, link: &str, cancel: CancellationToken) {
         let image = match self.client.fetch_thumbnail(link, FETCH_SIZE).await {
             Ok(image) => image,
             Err(e) => {
@@ -284,6 +303,7 @@ impl ThumbSeeder {
     /// Ver `Engine::purge_thumbnails`.
     pub(crate) fn purge(&self) {
         // A trava de escrita espera as gravações em curso; depois dela, as antigas não gravam.
+        // Ordem das travas: `generation` → `running`, a mesma de `seed`.
         let mut generation = self
             .generation
             .write()
@@ -315,6 +335,29 @@ mod tests {
     use crate::testutil::{indexed_engine, wait_until};
     use crate::thumbs::freedesktop::{ThumbSize, file_for, stored_mtime, uri_of, write_all};
     use crate::thumbs::mtime_secs;
+
+    /// Conta o trabalho em curso e guarda o máximo simultâneo.
+    #[derive(Default)]
+    pub(super) struct Busy {
+        now: std::sync::atomic::AtomicUsize,
+        max: std::sync::atomic::AtomicUsize,
+    }
+
+    pub(super) struct BusyGuard<'a>(&'a Busy);
+
+    impl Busy {
+        pub(super) fn enter(&self) -> BusyGuard<'_> {
+            let now = self.now.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max.fetch_max(now, Ordering::SeqCst);
+            BusyGuard(self)
+        }
+    }
+
+    impl Drop for BusyGuard<'_> {
+        fn drop(&mut self) {
+            self.0.now.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
 
     const FOTO: &str = "Fotos de Março #1 (100%).jpg";
     const LIST: &str = "/drive/v3/files";
@@ -545,19 +588,49 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_seeds_of_same_folder_fetch_once() {
+        // Referência: uma semeadura sozinha, numa pasta igual.
+        let (alone, _) = setup().await;
+        let list = alone.fake.requests(LIST);
+        alone.seed().await;
+        let alone_lists = alone.fake.requests(LIST) - list;
+        assert_eq!(alone_lists, 1);
+
         let (s, _) = setup().await;
+        let list = s.fake.requests(LIST);
         let first = s.engine.seed_thumbnails(&s.folder, s.folder_path.clone());
         let second = s.engine.seed_thumbnails(&s.folder, s.folder_path.clone());
         first.await.unwrap();
         second.await.unwrap();
         assert_eq!(s.fake.requests("/thumb"), 2);
-        assert_eq!(s.fake.requests(LIST), {
-            // A listagem da pasta também foi uma só: uma terceira semeadura não lista de novo.
-            let before = s.fake.requests(LIST);
-            s.seed().await;
-            before
-        });
+        assert_eq!(s.fake.requests(LIST) - list, alone_lists, "uma só listagem");
         assert_eq!(s.pngs(), 6);
+    }
+
+    /// O limite de 8 vale para o motor inteiro, não para cada pasta.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn parallel_limit_is_global_across_folders() {
+        let fake = FakeDrive::start().await;
+        let folders: Vec<String> = (0..2)
+            .map(|f| {
+                let folder = fake.add_folder(&fake.root_id(), &format!("Pasta {f}"));
+                for i in 0..12 {
+                    fake.add_file_with_mime(&folder, &format!("{i}.png"), "image/png", vec![1; 10]);
+                }
+                folder
+            })
+            .collect();
+        let (engine, tmp) = indexed_engine(&fake).await;
+        let engine = Arc::new(engine);
+        let handles: Vec<_> = folders
+            .iter()
+            .map(|f| engine.seed_thumbnails(&ItemId(f.clone()), tmp.path().join("m").join(f)))
+            .collect();
+        for h in handles {
+            h.await.unwrap();
+        }
+        assert_eq!(fake.requests("/thumb"), 24);
+        let max = engine.thumbs.busy.max.load(Ordering::SeqCst);
+        assert!(max <= PARALLEL, "{max} em voo ao mesmo tempo");
     }
 
     #[tokio::test]

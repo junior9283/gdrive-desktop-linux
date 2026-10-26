@@ -128,6 +128,11 @@ impl FakeDrive {
         self.shared.state().add(parent, name, mime, bytes, None)
     }
 
+    /// A rota de miniaturas passa a responder 302 para `location`.
+    pub fn redirect_thumbs_to(&self, location: &str) {
+        self.shared.state().thumb_redirect = Some(location.into());
+    }
+
     pub fn add_gdoc(&self, parent: &str, name: &str, mime: &str) -> String {
         self.shared.state().add(parent, name, mime, vec![], None)
     }

@@ -134,6 +134,8 @@ pub(crate) type SessionRef = Arc<tokio::sync::Mutex<Session>>;
 pub(crate) struct State {
     /// Origem do servidor, para montar os endereços absolutos (miniaturas).
     origin: Url,
+    /// Destino do 302 que a rota de miniaturas devolve, quando definido.
+    pub(crate) thumb_redirect: Option<String>,
     pub(crate) files: BTreeMap<String, FileRec>,
     pub(crate) root_id: String,
     pub(crate) email: String,
@@ -170,6 +172,7 @@ impl State {
     fn new(origin: Url) -> State {
         let mut state = State {
             origin,
+            thumb_redirect: None,
             files: BTreeMap::new(),
             root_id: String::new(),
             email: "teste@example.com".into(),

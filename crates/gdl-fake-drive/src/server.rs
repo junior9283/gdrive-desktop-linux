@@ -592,6 +592,9 @@ async fn photo() -> Response {
 async fn thumb(State(shared): Shr, Path(spec): Path<String>) -> Response {
     static PNG: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
     let id = spec.split_once('=').map_or(spec.as_str(), |(id, _)| id);
+    if let Some(to) = shared.state().thumb_redirect.clone() {
+        return (StatusCode::FOUND, [(header::LOCATION, to)]).into_response();
+    }
     if !shared.state().files.contains_key(id) {
         return not_found(id);
     }

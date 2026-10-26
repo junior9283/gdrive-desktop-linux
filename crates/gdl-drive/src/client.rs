@@ -70,6 +70,8 @@ enum SessionState {
 
 pub struct DriveClient {
     http: reqwest::Client,
+    /// Para as miniaturas: não segue redirecionamentos (o token só vai ao host já validado).
+    image_http: reqwest::Client,
     base: Url,
     upload_base: Url,
     tokens: Arc<dyn AccessTokenProvider>,
@@ -137,8 +139,14 @@ impl DriveClient {
             .read_timeout(Duration::from_secs(60))
             .build()
             .expect("configuração fixa do cliente HTTP");
+        let image_http = crate::http_builder()
+            .read_timeout(Duration::from_secs(60))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("configuração fixa do cliente HTTP");
         DriveClient {
             http,
+            image_http,
             base,
             upload_base,
             tokens,
@@ -348,7 +356,7 @@ impl DriveClient {
         }
         let sized = format!("{sized}=s{size}");
         self.call(
-            || self.http.get(&sized),
+            || self.image_http.get(&sized),
             |resp| async move { Ok(resp.bytes().await?) },
         )
         .await
@@ -1110,6 +1118,20 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn fetch_thumbnail_does_not_follow_redirects() {
+        let fake = FakeDrive::start().await;
+        let foto = fake.add_file_with_mime(&fake.root_id(), "f.png", "image/png", vec![1; 10]);
+        fake.redirect_thumbs_to("https://evil.example/");
+        let link = fake
+            .base_url()
+            .join(&format!("/thumb/{foto}=s220"))
+            .unwrap();
+        let result = client(&fake).fetch_thumbnail(link.as_str(), 512).await;
+        assert!(result.is_err());
+        assert_eq!(fake.requests("/thumb"), 1);
+    }
+
     #[test]
     fn image_host_rule() {
         let api: Url = "http://127.0.0.1:9/drive/v3/".parse().unwrap();
@@ -1117,12 +1139,17 @@ mod tests {
             "https://lh3.googleusercontent.com/a=s220",
             "https://drive.google.com/a",
             "http://127.0.0.1:9/thumb/x=s220",
+            "https://LH3.GoogleUserContent.com/x",
         ] {
             assert!(image_host_allowed(&ok.parse().unwrap(), &api), "{ok}");
         }
         for bad in [
             "https://googleusercontent.com.evil.com/",
             "https://evil.com/?a=.google.com",
+            "https://a.google.com@evil.com/",
+            "https://lh3.googleusercontent.c\u{3bf}m/",
+            "https://evilgoogle.com/",
+            "https://google.com/",
             "http://lh3.googleusercontent.com/",
             "http://127.0.0.1:10/thumb/x",
         ] {

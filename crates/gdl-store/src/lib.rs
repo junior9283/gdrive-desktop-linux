@@ -46,18 +46,21 @@ macro_rules! select_items {
     };
 }
 
-/// Banco de uma conta. Pode ser compartilhado entre threads.
+// As consultas dos itens off-line escrevem `pin != 0` (`PinState::None`) por extenso: é o que
+// deixa o SQLite usar o índice parcial `items_pinned` (com um parâmetro no lugar do 0, ele não
+// prova que o índice serve e percorre todos os itens).
+
 /// `FROM … WHERE` dos arquivos fixados, fora da lixeira e sem edição local, que ainda não estão
-/// inteiros no cache (`?1` = `PinState::None`, `?2` = `LocalState::Clean`).
+/// inteiros no cache (`?1` = `LocalState::Clean`).
 const INCOMPLETE_PINNED: &str = "FROM items i \
-     WHERE i.pin != ?1 AND i.kind = 'file' AND i.trashed = 0 AND i.local_state = ?2 \
+     WHERE i.pin != 0 AND i.kind = 'file' AND i.trashed = 0 AND i.local_state = ?1 \
      AND i.size > (SELECT COALESCE(SUM(r.end - r.start), 0) FROM ranges r \
                    WHERE r.item_id = i.id)";
 
 /// `WHERE` (de `items`) dos fixados mais altos, sem pasta fixada acima (`?1` =
-/// `PinState::Pinned`, `?2` = `PinState::None`).
-const TOP_PINNED: &str = "WHERE pin = ?1 AND trashed = 0 AND NOT EXISTS ( \
-     SELECT 1 FROM items p WHERE p.id = items.parent AND p.pin != ?2)";
+/// `PinState::Pinned`).
+const TOP_PINNED: &str = "WHERE pin != 0 AND pin = ?1 AND trashed = 0 AND NOT EXISTS ( \
+     SELECT 1 FROM items p WHERE p.id = items.parent AND p.pin != 0)";
 
 /// Resumo da fila de envio (`Store::queue_stats`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -69,6 +72,7 @@ pub struct QueueStats {
     pub bytes: u64,
 }
 
+/// Banco de uma conta. Pode ser compartilhado entre threads.
 pub struct Store {
     conn: Mutex<Connection>,
 }
@@ -530,19 +534,20 @@ impl Store {
     /// cache (nunca baixados ou descartados por uma revisão nova).
     pub fn incomplete_pinned_files(&self) -> Result<Vec<ItemId>> {
         let conn = self.conn();
-        let mut stmt =
-            conn.prepare_cached(&format!("SELECT i.id {INCOMPLETE_PINNED} ORDER BY i.id"))?;
-        let rows = stmt.query_map(params![PinState::None, LocalState::Clean], |r| {
-            Ok(ItemId(r.get(0)?))
-        })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        // Ordenados aqui: um `ORDER BY` no SQL troca o índice dos fixados por percorrer todos os
+        // itens pela chave.
+        let mut stmt = conn.prepare_cached(&format!("SELECT i.id {INCOMPLETE_PINNED}"))?;
+        let rows = stmt.query_map(params![LocalState::Clean], |r| Ok(ItemId(r.get(0)?)))?;
+        let mut ids = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        ids.sort_unstable();
+        Ok(ids)
     }
 
     /// Quantos são os `incomplete_pinned_files`, sem carregá-los.
     pub fn count_incomplete_pinned(&self) -> Result<u32> {
         Ok(self.conn().query_row(
             &format!("SELECT COUNT(*) {INCOMPLETE_PINNED}"),
-            params![PinState::None, LocalState::Clean],
+            params![LocalState::Clean],
             |r| r.get(0),
         )?)
     }
@@ -554,22 +559,22 @@ impl Store {
         let Some(folder) = folder else {
             return self.query_items(
                 &format!("{} {TOP_PINNED} ORDER BY local_name", select_items!("")),
-                params![PinState::Pinned, PinState::None],
+                params![PinState::Pinned],
             );
         };
         // `up`: as pastas acima de algum item fixado.
         self.query_items(
             concat!(
                 "WITH RECURSIVE up(id) AS ( \
-                     SELECT parent FROM items WHERE pin = ?2 AND trashed = 0 \
+                     SELECT parent FROM items WHERE pin != 0 AND pin = ?2 AND trashed = 0 \
                      UNION SELECT i.parent FROM items i JOIN up ON i.id = up.id \
                      WHERE i.parent IS NOT NULL) ",
                 select_items!(
-                    "WHERE parent = ?1 AND trashed = 0 AND (pin != ?3 OR id IN up) \
+                    "WHERE parent = ?1 AND trashed = 0 AND (pin != 0 OR id IN up) \
                      ORDER BY local_name"
                 )
             ),
-            params![folder.0, PinState::Pinned, PinState::None],
+            params![folder.0, PinState::Pinned],
         )
     }
 
@@ -578,7 +583,7 @@ impl Store {
     pub fn has_pinned_inside(&self, folder: &ItemId) -> Result<bool> {
         Ok(self.conn().query_row(
             "WITH RECURSIVE up(id) AS ( \
-                 SELECT parent FROM items WHERE pin = ?2 AND trashed = 0 \
+                 SELECT parent FROM items WHERE pin != 0 AND pin = ?2 AND trashed = 0 \
                  UNION SELECT i.parent FROM items i JOIN up ON i.id = up.id \
                  WHERE i.parent IS NOT NULL) \
              SELECT EXISTS (SELECT 1 FROM up WHERE id = ?1)",
@@ -591,7 +596,7 @@ impl Store {
     pub fn count_top_pinned(&self) -> Result<u32> {
         Ok(self.conn().query_row(
             &format!("SELECT COUNT(*) FROM items {TOP_PINNED}"),
-            params![PinState::Pinned, PinState::None],
+            params![PinState::Pinned],
             |r| r.get(0),
         )?)
     }
@@ -600,8 +605,8 @@ impl Store {
     pub fn pinned_bytes(&self) -> Result<u64> {
         Ok(self.conn().query_row(
             "SELECT COALESCE(SUM(size), 0) FROM items \
-             WHERE pin != ?1 AND kind = 'file' AND trashed = 0",
-            params![PinState::None],
+             WHERE pin != 0 AND kind = 'file' AND trashed = 0",
+            [],
             |r| r.get(0),
         )?)
     }
@@ -648,14 +653,16 @@ impl Store {
     }
 
     /// Itens que ainda não estão no Drive como estão aqui (com envio na fila ou edição local),
-    /// em ordem de nome local.
+    /// em ordem de nome local. `local_state IN (1, 2, 3)` (`EDITED`) por extenso, como no índice
+    /// parcial `items_edited`.
     pub fn pending_items(&self) -> Result<Vec<Item>> {
+        // Em duas partes, cada uma pelo seu índice: com `OR`, o SQLite percorre todos os itens.
         self.query_items(
-            select_items!(
-                "WHERE id IN (SELECT item_id FROM upload_queue) OR local_state IN (?1, ?2, ?3) \
-                 ORDER BY local_name"
+            concat!(
+                select_items!("WHERE local_state IN (1, 2, 3) UNION "),
+                select_items!("WHERE id IN (SELECT item_id FROM upload_queue) ORDER BY local_name")
             ),
-            params_from_iter(EDITED),
+            [],
         )
     }
 
@@ -1738,19 +1745,101 @@ mod tests {
         store.upsert_items(&items).unwrap();
         assert_eq!(store.children(&id("root")).unwrap().len(), 10_000);
         // Desempenho pelo plano da consulta, não pelo relógio: o tempo varia com a carga da máquina.
-        let sql = format!(
-            "EXPLAIN QUERY PLAN {}",
-            select_items!("WHERE parent = ?1 AND trashed = 0 ORDER BY local_name")
-        );
-        let conn = store.conn();
-        let mut stmt = conn.prepare(&sql).unwrap();
-        let plan: Vec<String> = stmt
-            .query_map(["root"], |r| r.get(3))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        let plan = plan.join(" | ");
+        let plan = query_plan(
+            &store,
+            select_items!("WHERE parent = ?1 AND trashed = 0 ORDER BY local_name"),
+            ["root"],
+        )
+        .join(" | ");
         assert!(plan.contains("items_parent_name"), "plano: {plan}");
         assert!(!plan.contains("TEMP B-TREE"), "plano: {plan}");
+    }
+
+    /// O plano de `sql` (`EXPLAIN QUERY PLAN`), um passo por linha.
+    fn query_plan(store: &Store, sql: &str, params: impl rusqlite::Params) -> Vec<String> {
+        store
+            .conn()
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(params, |r| r.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    /// As consultas que o serviço repete (a manutenção dos fixados a cada 30 s, o despejo do
+    /// cache, a fila de envio, o estado da bandeja e as telas de atividade e off-line abertas) não
+    /// podem percorrer todos os itens: com o Drive inteiro no banco, cada uma custava ~1 s de CPU.
+    /// Prova pelo contador de passos em varreduras completas e pelo plano, não pelo relógio.
+    #[test]
+    fn periodic_queries_do_not_scan_every_item() {
+        use rusqlite::trace::{TraceEvent, TraceEventCodes};
+
+        const ITEMS: usize = 5_000;
+        // Percorrer um índice parcial (só os fixados, só os editados) não é percorrer os itens.
+        const PARTIAL_INDEXES: [&str; 3] = ["items_pinned", "items_edited", "items_in_trash"];
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let mut items: Vec<_> = (0..ITEMS)
+            .map(|n| Item {
+                size: 10,
+                ..item(&format!("f{n:05}"), Some("root"))
+            })
+            .collect();
+        items[7].pin = PinState::Pinned;
+        items[8].local_state = LocalState::Dirty;
+        store.upsert_items(&items).unwrap();
+        store.ranges_add(&id("f00009"), 0, 10).unwrap();
+
+        let (sink, profiled) = std::sync::mpsc::channel();
+        store
+            .conn()
+            .trace_v2(
+                TraceEventCodes::SQLITE_TRACE_PROFILE,
+                Some(move |event: TraceEvent<'_>| {
+                    if let TraceEvent::Profile(stmt, _) = event {
+                        let _ = sink.send((
+                            stmt.expanded_sql().unwrap_or_default(),
+                            stmt.get_status(rusqlite::StatementStatus::FullscanStep),
+                        ));
+                    }
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(store.incomplete_pinned_files().unwrap(), [id("f00007")]);
+        assert_eq!(store.count_incomplete_pinned().unwrap(), 1);
+        assert_eq!(store.count_top_pinned().unwrap(), 1);
+        assert_eq!(store.pinned_bytes().unwrap(), 10);
+        let pending: Vec<_> = store
+            .pending_items()
+            .unwrap()
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+        assert_eq!(pending, [id("f00008")]);
+        assert_eq!(store.pinned_children(Some(&id("root"))).unwrap().len(), 1);
+        assert!(store.has_pinned_inside(&id("root")).unwrap());
+        store.queue_stats().unwrap();
+        store.job_errors().unwrap();
+        store.next_job(i64::MAX).unwrap();
+        store.cached_bytes().unwrap();
+        store.eviction_candidates(10).unwrap();
+        const CALLS: usize = 12;
+
+        let profiled: Vec<_> = profiled.try_iter().collect();
+        assert_eq!(profiled.len(), CALLS, "{profiled:?}");
+        for (sql, fullscan_steps) in profiled {
+            assert!(
+                fullscan_steps < 100,
+                "{fullscan_steps} passos em varredura completa: {sql}"
+            );
+            let plan = query_plan(&store, &sql, []);
+            let full_scan = plan.iter().any(|step| {
+                (step == "SCAN i" || step.starts_with("SCAN i ") || step.starts_with("SCAN items"))
+                    && !PARTIAL_INDEXES.iter().any(|index| step.contains(index))
+            });
+            assert!(!full_scan, "plano: {plan:?}\nconsulta: {sql}");
+        }
     }
 }

@@ -7,6 +7,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Mudado
+- Desempenho: o serviço parado gastava ~2,5% de um núcleo com um Drive grande (~610 mil itens),
+  porque a busca de arquivos off-line a baixar, a cada 30 s, percorria todos os itens. Essa busca,
+  a contagem do estado da bandeja, a lista de pendentes da Atividade, a tela de arquivos off-line
+  e o menu do botão direito agora usam só os índices dos itens fixados ou editados (índice novo
+  para os editados).
+
 ### Corrigido
 - Compilado sem todas as dependências já baixadas (CI com cache novo), o Sobre saía sem a lista
   de softwares de terceiros: a lista agora baixa o que falta, sempre com o `Cargo.lock` como está.

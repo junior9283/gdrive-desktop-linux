@@ -13,6 +13,8 @@ rusqlite.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+# Os testes de desempenho contam os passos de varredura de cada consulta.
+rusqlite = { workspace = true, features = ["trace"] }
 tempfile.workspace = true
 
 [lints]

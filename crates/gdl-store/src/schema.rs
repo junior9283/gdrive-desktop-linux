@@ -88,6 +88,10 @@ const MIGRATIONS: &[&str] = &[
         uri         TEXT NOT NULL
     ) WITHOUT ROWID;
 ",
+    "
+    -- Itens com edição local (sujos, subindo, em conflito) sem varrer todos os itens.
+    CREATE INDEX items_edited ON items (local_name) WHERE local_state IN (1, 2, 3);
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.
@@ -174,7 +178,7 @@ mod tests {
         let version: usize = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, MIGRATIONS.len());
         let items: u32 = conn
             .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
             .unwrap();
@@ -184,5 +188,32 @@ mod tests {
             [],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn migration_7_indexes_the_edited_items() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..6] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 6).unwrap();
+        conn.execute(
+            "INSERT INTO items (id, inode, remote_name, local_name, kind, size, modified_ms, \
+             created_ms, trashed, can_edit, local_state, pin) \
+             VALUES ('a', 2, 'a', 'a', 'file', 7, 0, 0, 0, 1, 1, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let edited: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items INDEXED BY items_edited WHERE local_state IN (1, 2, 3)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(edited, 1);
     }
 }

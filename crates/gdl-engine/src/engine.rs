@@ -254,6 +254,11 @@ impl Engine {
         self.uploads.cancel(id).await
     }
 
+    /// O arquivo está aberto para escrita (ver `UploadWorker::mark_writing`).
+    pub fn mark_writing(&self, inode: gdl_store::Inode) -> crate::uploads::WritingMark {
+        self.uploads.mark_writing(inode)
+    }
+
     pub fn account_email(&self) -> Result<String> {
         Ok(self.store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default())
     }

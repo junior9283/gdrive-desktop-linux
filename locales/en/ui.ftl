@@ -110,6 +110,7 @@ row-cancel-upload = Cancel upload
 link-copied = Link copied
 upload-canceled = Upload canceled. The local version is in "Canceled uploads".
 upload-finished-first = The upload finished before it could be canceled.
+upload-in-use = The file is still open in another program. Close it and try again.
 
 offline-empty = No files are available offline.
 offline-manage = Manage offline files

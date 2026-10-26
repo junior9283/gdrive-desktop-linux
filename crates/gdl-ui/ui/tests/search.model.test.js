@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { debounce, folderOf, iconFor, moveSelection } from '../screens/search/model.js';
+import { debounce, folderOf, iconFor, moveSelection, shownFor } from '../screens/search/model.js';
 
 test('debounce chama uma vez só, com o último valor, depois da pausa', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -56,4 +56,13 @@ test('o caminho do resultado é a pasta dentro do Drive', () => {
   assert.equal(folderOf(`${mount}/Meu Drive/Documentos/relatório.pdf`, mount), 'Meu Drive/Documentos');
   assert.equal(folderOf(`${mount}/Meu Drive`, mount), '');
   assert.equal(folderOf('/outro/lugar/a.txt', mount), '/outro/lugar');
+});
+
+test('a lista mostrada só vale para o texto que a gerou', () => {
+  assert.equal(shownFor('relatorio', 'relatorio'), true);
+  assert.equal(shownFor('  relatorio ', 'relatorio'), true);
+  // Enter logo depois de digitar: a lista ainda é a do texto anterior.
+  assert.equal(shownFor('relatorio 2', 'relatorio'), false);
+  assert.equal(shownFor('', 'relatorio'), false);
+  assert.equal(shownFor('', ''), true);
 });

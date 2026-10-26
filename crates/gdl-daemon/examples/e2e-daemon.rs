@@ -33,6 +33,7 @@ async fn main() -> Result<(), Error> {
     let docs = fake.add_folder(&root, "Documentos");
     fake.add_file(&docs, "relatório.pdf", vec![7; 300 * 1024]);
     fake.add_file(&root, "notas.txt", b"lembrar de testar".to_vec());
+    fake.add_file(&root, "inventario.ods", b"tabela".to_vec());
     fake.add_gdoc(&root, "Planilha", "application/vnd.google-apps.spreadsheet");
 
     let dir = tempfile::tempdir()?;

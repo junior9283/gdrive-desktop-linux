@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures_util::stream::{BoxStream, StreamExt, select_all};
-use gdl_ipc::{ServiceError, ServiceProxy, nobody_there};
+use gdl_ipc::{ServiceError, ServiceProxy, nobody_there, service_lost};
 use serde::Serialize;
 use serde_json::{Value, json};
 use zbus::Connection;
@@ -203,18 +203,30 @@ impl Bridge {
     }
 
     /// Enquanto o serviço estiver fora, tenta a cada `every`; quando ele volta, emite
-    /// `service-up` (as telas recarregam o que mostram).
+    /// `service-up` (as telas recarregam o que mostram). Quando o nome do serviço perde o dono,
+    /// emite `service-down` na hora (as telas mostram o aviso sem esperar uma chamada falhar).
     pub async fn watch(self: Arc<Self>, every: Duration, emit: Emit) {
         let mut ticker = tokio::time::interval(every);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Sem os avisos do barramento, a queda só aparece quando uma chamada falhar.
+        let mut lost = service_lost(self.service.inner().connection())
+            .await
+            .unwrap_or_else(|_| futures_util::stream::pending().boxed());
         loop {
-            ticker.tick().await;
-            if self.is_up() {
-                continue;
-            }
-            let _ = self.call("status", Value::Null).await;
-            if self.is_up() {
-                emit("service-up", Value::Null);
+            tokio::select! {
+                _ = ticker.tick() => {
+                    if self.is_up() {
+                        continue;
+                    }
+                    let _ = self.call("status", Value::Null).await;
+                    if self.is_up() {
+                        emit("service-up", Value::Null);
+                    }
+                }
+                Some(_) = lost.next() => {
+                    self.up.store(false, Ordering::Relaxed);
+                    emit("service-down", Value::Null);
+                }
             }
         }
     }
@@ -375,5 +387,11 @@ mod tests {
         let event = tokio::time::timeout(Duration::from_secs(5), up.recv()).await;
         assert_eq!(event.ok().flatten(), Some("service-up"));
         assert!(bridge.is_up());
+
+        // O serviço sai: o aviso vem do barramento, sem nenhuma chamada falhar antes.
+        service.release_name(BUS_NAME).await.unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(5), up.recv()).await;
+        assert_eq!(event.ok().flatten(), Some("service-down"));
+        assert!(!bridge.is_up());
     }
 }

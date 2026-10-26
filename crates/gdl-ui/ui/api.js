@@ -17,7 +17,10 @@ export function createApi(tauri) {
 
     async call(method, args = {}) {
       try {
-        return await invoke('call', { method, args });
+        const reply = await invoke('call', { method, args });
+        // Quem responde está no ar, mesmo que o `service-up` da ponte nunca tenha chegado.
+        setUp(true);
+        return reply;
       } catch (error) {
         if (error?.name === 'Unavailable') setUp(false);
         throw error;
@@ -33,7 +36,7 @@ export function createApi(tauri) {
     // `handler(up)` quando o serviço cai ou volta (um só: o `app.js`).
     onService(handler) {
       onChange = handler;
-      return api.on('service-up', () => setUp(true));
+      return Promise.all([api.on('service-up', () => setUp(true)), api.on('service-down', () => setUp(false))]);
     },
 
     strings: () => invoke('strings'),

@@ -1000,7 +1000,7 @@ impl Daemon {
     }
 
     /// Cancela o envio do arquivo: `canceled` (a versão local foi para `Uploads cancelados`) ou
-    /// `too-late` (o envio já terminou).
+    /// `too-late` (o envio já terminou) ou `in-use` (o arquivo está aberto para escrita).
     pub async fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError> {
         let engine = self.connected_engine().await?;
         let outcome = engine

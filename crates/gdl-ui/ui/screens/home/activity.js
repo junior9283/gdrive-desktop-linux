@@ -7,6 +7,8 @@ import { paginate, sortRows } from './model.js';
 const SIZES = [10, 25, 50];
 // Os envios que ainda dá para cancelar.
 const CANCELABLE = new Set(['upload-queued', 'uploading']);
+// O aviso de cada resultado do cancelamento além de `canceled`.
+const CANCEL_TOASTS = { 'too-late': 'upload-finished-first', 'in-use': 'upload-in-use' };
 
 // Ordem e página continuam ao recarregar (os eventos de atividade chegam o tempo todo).
 const table = { key: 'time', dir: 'desc', page: 1, size: 10 };
@@ -96,6 +98,6 @@ function rowMenu(row, { api, t }) {
       ) },
     { id: 'cancel-upload', label: t('row-cancel-upload'), disabled: !CANCELABLE.has(row.state),
       action: () => attempt(api.call('cancel_upload', { item_id: id }), (result) =>
-        toast(t(result === 'too-late' ? 'upload-finished-first' : 'upload-canceled'))) },
+        toast(t(CANCEL_TOASTS[result] ?? 'upload-canceled'))) },
   ];
 }

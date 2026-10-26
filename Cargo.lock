@@ -1664,6 +1664,7 @@ dependencies = [
 name = "gdl-ipc"
 version = "0.2.0"
 dependencies = [
+ "futures-util",
  "serde",
  "tempfile",
  "tokio",

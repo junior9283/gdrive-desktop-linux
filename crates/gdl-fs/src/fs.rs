@@ -86,6 +86,8 @@ pub(crate) struct Writer {
     pub mtime: Option<i64>,
     /// Um registro da gravação por vez: `flush` de cópias do descritor (`fork`) chegam juntos.
     pub serial: Arc<Mutex<()>>,
+    /// Enquanto houver descritor aberto, o cancelamento do envio é recusado.
+    pub mark: Option<gdl_engine::uploads::WritingMark>,
 }
 
 struct Entry {

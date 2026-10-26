@@ -426,3 +426,32 @@ async fn canceled_uploads_folder_is_hidden_and_read_only() {
     assert!(std::fs::write(dir.join("outro.txt"), b"x").is_err());
     assert_eq!(names(&m.mnt.join(".Lost and Found")), Vec::<String>::new());
 }
+
+/// Cancelar com o arquivo aberto tiraria o conteúdo do programa que grava: só depois de fechar.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancel_waits_for_the_file_to_close() {
+    use std::io::Write;
+    let m = Mounted::new(FakeDrive::start().await).await;
+    m.fake.inject(Fault::Offline);
+    let file = m.drive().join("aberto.txt");
+    std::fs::write(&file, b"primeira parte").unwrap();
+    let id = ItemId(xattr(&file, "user.gdl.id"));
+    let mut open = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&file)
+        .unwrap();
+
+    assert_eq!(
+        m.engine.cancel_upload(&id).await.unwrap(),
+        CancelOutcome::InUse
+    );
+    open.write_all(b" e segunda").unwrap();
+    drop(open);
+    assert_eq!(std::fs::read(&file).unwrap(), b"primeira parte e segunda");
+
+    assert_eq!(
+        m.engine.cancel_upload(&id).await.unwrap(),
+        CancelOutcome::Canceled
+    );
+    assert!(!file.exists());
+}

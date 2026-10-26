@@ -120,6 +120,7 @@ impl Inner {
                 .store()
                 .transition_local_state(&item.id, LocalState::Clean, LocalState::Dirty)
                 .unwrap_or(false);
+            writer.mark = Some(self.engine.mark_writing(item.inode));
         }
         writer.handles += 1;
         writer.wrote |= wrote;

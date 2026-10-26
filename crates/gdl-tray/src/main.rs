@@ -268,6 +268,8 @@ async fn run() -> Result<(), Error> {
     let mut changes = service.receive_status_changed().await?;
     let mut quitting = service.receive_quitting().await?;
     let mut prefs_changed = service.receive_preferences_changed().await?;
+    // O serviço caiu: sem isto o ícone seguiria "em dia" até a próxima mudança de estado.
+    let mut lost = gdl_ipc::service_lost(&conn).await?;
     let mut app = App {
         launcher: Launcher::new(conn.clone(), Launcher::default_program()),
         i18n,
@@ -286,6 +288,7 @@ async fn run() -> Result<(), Error> {
         tokio::select! {
             _ = retry.tick(), if app.status.is_none() => app.refresh().await,
             Some(_) = changes.next() => app.refresh().await,
+            Some(_) = lost.next() => app.refresh().await,
             Some(_) = quitting.next() => break,
             Some(_) = prefs_changed.next() => {
                 let wanted = search_trigger();

@@ -53,3 +53,8 @@ export function folderOf(path, mount) {
   const inside = path.startsWith(`${mount}/`) ? path.slice(mount.length + 1) : path;
   return inside.slice(0, Math.max(0, inside.lastIndexOf('/')));
 }
+
+// A lista na tela (gerada pelo texto `shown`, já sem espaços) é a do que está no campo agora?
+export function shownFor(field, shown) {
+  return field.trim() === shown;
+}

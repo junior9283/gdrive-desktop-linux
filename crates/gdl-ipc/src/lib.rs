@@ -45,6 +45,23 @@ pub async fn claim_name(conn: &zbus::Connection, name: &str) -> zbus::Result<boo
     }
 }
 
+/// Os avisos de que o nome do serviço ficou sem dono (o serviço saiu ou caiu), vindos do barramento.
+pub async fn service_lost(
+    conn: &zbus::Connection,
+) -> zbus::Result<futures_util::stream::BoxStream<'static, ()>> {
+    use futures_util::StreamExt;
+    let bus = zbus::fdo::DBusProxy::new(conn).await?;
+    let changes = bus
+        .receive_name_owner_changed_with_args(&[(0, BUS_NAME)])
+        .await?;
+    Ok(changes
+        .filter(|change| {
+            futures_util::future::ready(change.args().is_ok_and(|a| a.new_owner().is_none()))
+        })
+        .map(|_| ())
+        .boxed())
+}
+
 /// Ninguém atende do outro lado: o nome não tem dono (ou, ponto a ponto, não há o objeto).
 pub fn nobody_there(e: &zbus::Error) -> bool {
     const NOBODY: [&str; 3] = [
@@ -272,7 +289,7 @@ pub trait Service {
     fn notification_settings(&self) -> Result<Vec<NotificationSetting>, ServiceError>;
     fn set_notification_enabled(&self, kind: &str, enabled: bool) -> Result<(), ServiceError>;
     fn retry(&self, item_id: &str) -> Result<(), ServiceError>;
-    /// `canceled` ou `too-late`.
+    /// `canceled`, `too-late` ou `in-use` (o arquivo está aberto para escrita).
     fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError>;
     fn pin(&self, path: &str) -> Result<(), ServiceError>;
     fn unpin(&self, path: &str) -> Result<(), ServiceError>;

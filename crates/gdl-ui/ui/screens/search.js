@@ -4,13 +4,13 @@
 
 import { el, errorText, icon, stylesheet, toastError } from '../components.js';
 import { screenArg } from '../router.js';
-import { debounce, folderOf, iconFor, moveSelection } from './search/model.js';
+import { debounce, folderOf, iconFor, moveSelection, shownFor } from './search/model.js';
 
 // Espera entre teclas antes de pesquisar.
 const TYPING_MS = 250;
 
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
-const screen = { ctx: null, field: null, list: null, mount: '', results: [], rows: [], selected: -1, asked: 0, wired: false };
+const screen = { ctx: null, field: null, list: null, mount: '', shown: null, results: [], rows: [], selected: -1, asked: 0, wired: false };
 
 export async function render(root, ctx) {
   const css = stylesheet('screens/search.css');
@@ -64,8 +64,15 @@ function keydown(e, typed) {
   } else if (e.key === 'Enter') {
     e.preventDefault();
     typed.cancel();
-    open(screen.results[Math.max(0, screen.selected)]);
+    enter();
   }
+}
+
+// Abre o escolhido pelas setas (ou o primeiro). Enter logo depois de digitar: a lista ainda é a
+// do texto anterior, então antes pesquisa o texto do campo (a lista nova vem sem escolha).
+async function enter() {
+  if (!shownFor(screen.field.value, screen.shown)) await find(screen.field.value);
+  if (shownFor(screen.field.value, screen.shown)) open(screen.results[Math.max(0, screen.selected)]);
 }
 
 // Pesquisa `query` (vazia: os recentes): `{ text, results }` ou, se falhou, `{ text, error }`.
@@ -102,7 +109,7 @@ function draw({ text, results, error }) {
         el('span', { class: 'name' }, result.name),
         el('span', { class: 'meta name' }, folderOf(result.path, screen.mount))),
     ));
-  Object.assign(screen, { results, rows, selected: -1 });
+  Object.assign(screen, { shown: text, results, rows, selected: -1 });
   screen.list.replaceChildren(...(notice ? [notice] : []), ...rows);
 }
 

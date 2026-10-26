@@ -383,9 +383,18 @@ impl BlockCache {
         self.drop_content(id).await
     }
 
-    /// Acompanha a troca do ID temporário pelo do Drive (`Store::replace_id`).
-    pub async fn rename_local(&self, old: &ItemId, new: &ItemId) -> Result<()> {
-        ignore_not_found(tokio::fs::rename(self.local_path(old), self.local_path(new)).await)?;
+    /// Primeiro passo da troca do ID temporário pelo do Drive: o conteúdo ganha o nome novo, ainda
+    /// com o velho. Entre `Store::replace_id` e `unlink_old_id`, quem lê por qualquer um dos dois
+    /// IDs acha o arquivo; uma queda no meio só deixa um nome a mais.
+    pub async fn link_local(&self, old: &ItemId, new: &ItemId) -> Result<()> {
+        ignore_not_found(tokio::fs::hard_link(self.local_path(old), self.local_path(new)).await)?;
+        Ok(())
+    }
+
+    /// Último passo da troca de ID (depois de `link_local` e de `Store::replace_id`): tira o nome
+    /// velho do conteúdo e passa o estado do item para o ID novo.
+    pub async fn unlink_old_id(&self, old: &ItemId, new: &ItemId) -> Result<()> {
+        ignore_not_found(tokio::fs::remove_file(self.local_path(old)).await)?;
         let mut items = self.items();
         if let Some(state) = items.remove(old) {
             items.insert(new.clone(), state);
@@ -589,6 +598,26 @@ mod tests {
             s.cache.read(id, 0, 10).await.unwrap().as_ref(),
             &data(10)[..]
         );
+    }
+
+    /// A troca do ID temporário pelo do Drive tem um instante em que o banco já tem o ID novo e o
+    /// arquivo ainda não foi renomeado: uma leitura nesse instante não pode dar erro.
+    #[tokio::test]
+    async fn read_between_id_swap_and_rename_still_finds_the_content() {
+        let (s, ids) = setup(&[("a.bin", 10)], None).await;
+        let old = &ids[0];
+        s.cache.read(old, 0, 10).await.unwrap();
+        let new = ItemId("id-do-drive".into());
+
+        s.cache.link_local(old, &new).await.unwrap();
+        s.env.store.replace_id(old, &new).unwrap();
+        let during = s.cache.read(&new, 0, 10).await;
+        s.cache.unlink_old_id(old, &new).await.unwrap();
+        let after = s.cache.read(&new, 0, 10).await;
+
+        assert_eq!(during.unwrap().as_ref(), &data(10)[..]);
+        assert_eq!(after.unwrap().as_ref(), &data(10)[..]);
+        assert!(!s.cache.local_path(old).exists(), "o nome velho some");
     }
 
     /// "Limpar cache" das Preferências: sai tudo o que não é off-line nem edição por enviar.

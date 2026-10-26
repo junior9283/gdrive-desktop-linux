@@ -1,7 +1,7 @@
 //! Fila de envio persistente: sobe as edições locais, detecta conflitos, guarda no
 //! `Lost and Found` o que não pode subir e cancela envios a pedido do usuário.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -107,6 +107,8 @@ pub enum CancelOutcome {
     Canceled,
     /// Nada a cancelar: o envio já terminou (ou o item não existe mais).
     TooLate,
+    /// O arquivo está aberto para escrita: cancelar agora tiraria o conteúdo do programa.
+    InUse,
 }
 
 impl CancelOutcome {
@@ -114,6 +116,7 @@ impl CancelOutcome {
         match self {
             CancelOutcome::Canceled => "canceled",
             CancelOutcome::TooLate => "too-late",
+            CancelOutcome::InUse => "in-use",
         }
     }
 }
@@ -283,6 +286,25 @@ pub struct UploadWorker {
     turns: Mutex<HashMap<Inode, Arc<tokio::sync::Mutex<()>>>>,
     /// Cancelamentos pedidos (e envios de arquivo em andamento), por inode.
     cancels: Mutex<HashMap<Inode, CancellationToken>>,
+    /// Arquivos abertos para escrita na pasta montada (ver `mark_writing`).
+    writing: Arc<Mutex<HashSet<Inode>>>,
+}
+
+/// O arquivo segue aberto para escrita enquanto esta marca existir.
+pub struct WritingMark {
+    writing: Arc<Mutex<HashSet<Inode>>>,
+    inode: Inode,
+}
+
+impl Drop for WritingMark {
+    fn drop(&mut self) {
+        lock(&self.writing).remove(&self.inode);
+    }
+}
+
+/// Uma trava envenenada (pânico com ela tomada) continua usável: o conjunto segue consistente.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl UploadWorker {
@@ -305,6 +327,7 @@ impl UploadWorker {
             activity: Arc::default(),
             turns: Mutex::default(),
             cancels: Mutex::default(),
+            writing: Arc::default(),
         }
     }
 
@@ -424,8 +447,9 @@ impl UploadWorker {
         match result {
             Ok(remote) => {
                 let id = ItemId(remote.id.clone());
+                self.cache.link_local(&item.id, &id).await?;
                 self.store.replace_id(&item.id, &id)?;
-                self.cache.rename_local(&item.id, &id).await?;
+                self.cache.unlink_old_id(&item.id, &id).await?;
                 self.uploaded(job, &id, remote)
             }
             Err(e) => self.failed(job, item, e).await,
@@ -634,6 +658,20 @@ impl UploadWorker {
         self.cancels().entry(inode).or_default().clone()
     }
 
+    /// Marca o arquivo `inode` como aberto para escrita (a pasta montada, da primeira abertura
+    /// ao último fechamento): o cancelamento do envio é recusado enquanto a marca existir.
+    pub fn mark_writing(&self, inode: Inode) -> WritingMark {
+        lock(&self.writing).insert(inode);
+        WritingMark {
+            writing: self.writing.clone(),
+            inode,
+        }
+    }
+
+    fn is_writing(&self, inode: Inode) -> bool {
+        lock(&self.writing).contains(&inode)
+    }
+
     /// Roda o envio do arquivo `inode` até ele terminar ou ser cancelado (`None`).
     async fn unless_canceled<T>(&self, inode: Inode, upload: impl Future<Output = T>) -> Option<T> {
         let token = self.cancel_token(inode);
@@ -656,6 +694,10 @@ impl UploadWorker {
         let Some(item) = self.store.get(id)? else {
             return Ok(CancelOutcome::TooLate);
         };
+        // Antes de interromper o envio: recusado, ele segue como estava.
+        if self.is_writing(item.inode) {
+            return Ok(CancelOutcome::InUse);
+        }
         self.cancel_token(item.inode).cancel();
         let result = self.cancel_in_turn(item.inode).await;
         self.cancels().remove(&item.inode);
@@ -675,6 +717,10 @@ impl UploadWorker {
         }) else {
             return Ok(CancelOutcome::TooLate);
         };
+        // Aberto enquanto esperava a vez.
+        if self.is_writing(inode) {
+            return Ok(CancelOutcome::InUse);
+        }
         let activity = Activity::of(&self.store, &item, ActivityState::UploadCanceling, None);
         self.activity.record(activity.clone());
         match self.keep(KeptFolder::CanceledUploads, &item).await {
@@ -1281,6 +1327,28 @@ mod tests {
         assert!(s.env.store.get(&local).unwrap().is_none());
         assert!(s.env.store.next_job(i64::MAX).unwrap().is_none());
         assert!(s.canceled()[0].1 == data, "a cópia local está íntegra");
+    }
+
+    /// Com o arquivo aberto para escrita, cancelar tiraria o conteúdo de baixo do programa que
+    /// grava: recusa, e o envio continua como estava.
+    #[tokio::test]
+    async fn cancel_while_open_for_writing_is_refused() {
+        let s = setup(Env::new().await).await;
+        s.env.fake.inject(Fault::Offline);
+        let local = s.write_new(&s.env.root(), "aberto.txt", b"gravando");
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
+        let inode = s.env.store.get(&local).unwrap().unwrap().inode;
+
+        let writing = s.worker.mark_writing(inode);
+        assert_eq!(s.worker.cancel(&local).await.unwrap(), CancelOutcome::InUse);
+        assert!(s.canceled().is_empty());
+        assert!(s.env.store.get(&local).unwrap().is_some());
+
+        drop(writing);
+        assert_eq!(
+            s.worker.cancel(&local).await.unwrap(),
+            CancelOutcome::Canceled
+        );
     }
 
     #[tokio::test]

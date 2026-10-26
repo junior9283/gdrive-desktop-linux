@@ -448,6 +448,24 @@ async fn search_finds_by_name_and_opens() {
     );
 }
 
+/// Enter logo depois de digitar, antes da pesquisa voltar: abre o resultado do texto novo, não o
+/// primeiro da lista que ainda estava na tela.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn search_enter_right_after_typing_opens_the_new_result() {
+    let session = Session::open("search").await;
+    session.wait_text(".results", "Recentes").await;
+
+    session.fill(".search-field", "inventario").await;
+    session.keys(".search-field", ENTER).await;
+
+    assert!(
+        opened("inventario.ods")
+            .await
+            .ends_with("Meu Drive/inventario.ods")
+    );
+}
+
 /// O armazenamento do Drive simulado cheio enquanto existir (sinais do `e2e-daemon`). Ao sair,
 /// libera o espaço e refaz os envios barrados, para um teste que falhou no meio não deixar a
 /// cota cheia para os outros.

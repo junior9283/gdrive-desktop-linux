@@ -256,10 +256,17 @@ impl State {
         id
     }
 
-    /// Arquivo de outra pessoa compartilhado com o usuário. Como no Drive real, ele não está em
-    /// nenhuma pasta do Meu Drive: só aparece em `sharedWithMe = true` (nem nas mudanças).
-    pub(crate) fn add_shared(&mut self, name: &str, owner: &str, content: Vec<u8>) -> String {
-        let id = self.add("", name, "application/octet-stream", content, None);
+    /// Item de outra pessoa compartilhado com o usuário. Como no Drive real, ele não está em
+    /// nenhuma pasta do Meu Drive (sem pai) nem nas mudanças, mas a listagem traz o item e o que
+    /// houver dentro dele.
+    pub(crate) fn add_shared(
+        &mut self,
+        name: &str,
+        mime: &str,
+        owner: &str,
+        content: Vec<u8>,
+    ) -> String {
+        let id = self.add("", name, mime, content, None);
         self.changes.pop();
         let shared_ms = self.tick();
         let file = self.file_mut(&id);

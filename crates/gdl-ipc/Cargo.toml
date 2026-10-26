@@ -12,6 +12,7 @@ publish = false
 testing = ["dep:tempfile", "dep:tokio"]
 
 [dependencies]
+futures-util.workspace = true
 serde.workspace = true
 tempfile = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }

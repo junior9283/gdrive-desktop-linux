@@ -177,12 +177,26 @@ fn read_layer(path: &Path) -> Result<(Layer, HashSet<&'static str>), ConfigError
     Ok((layer, defined))
 }
 
+/// A camada do usuário. Um arquivo que ele editou à mão e ficou ilegível (TOML quebrado ou valor
+/// de tipo errado) não derruba o app: vai para o log e vale como vazio até ser corrigido ou
+/// restaurado pelas Preferências.
+fn read_user_layer(paths: &Paths) -> Layer {
+    let path = user_path(paths);
+    match read_layer(&path) {
+        Ok((layer, _)) => layer,
+        Err(e) => {
+            tracing::warn!(arquivo = %path.display(), erro = %e, "preferências do usuário ilegíveis, usando os padrões");
+            Layer::default()
+        }
+    }
+}
+
 /// Carrega as preferências efetivas e o conjunto de chaves definidas pela política.
 pub fn load_preferences(
     paths: &Paths,
 ) -> Result<(Preferences, HashSet<&'static str>), ConfigError> {
     let (policy, managed) = read_layer(&policies_path(paths))?;
-    let (user, _) = read_layer(&user_path(paths))?;
+    let user = read_user_layer(paths);
     let (defaults, _) = read_layer(&defaults_path(paths))?;
     Ok((policy.over(user).over(defaults).resolve(), managed))
 }
@@ -221,11 +235,9 @@ pub struct PrefValue {
 /// Todas as preferências conhecidas, com o valor efetivo de cada uma.
 pub fn pref_values(paths: &Paths) -> Result<Vec<PrefValue>, ConfigError> {
     let policy = read_table(&policies_path(paths))?;
-    let layers = [
-        &policy,
-        &read_table(&user_path(paths))?,
-        &read_table(&defaults_path(paths))?,
-    ];
+    // Um arquivo do usuário ilegível não mostra valor nenhum dele (ver `read_user_layer`).
+    let user = read_table(&user_path(paths)).unwrap_or_default();
+    let layers = [&policy, &user, &read_table(&defaults_path(paths))?];
     Ok(KNOWN_KEYS
         .iter()
         .map(|&key| PrefValue {
@@ -277,6 +289,19 @@ impl Layer {
                     "endereço de proxy esperado ({}://)",
                     PROXY_SCHEMES.join("://, ")
                 )));
+            }
+        }
+        let fail = |msg: &str| Err(serde::de::Error::custom(msg));
+        let paths = [&self.content_cache_path, &self.default_mount_point];
+        if paths.into_iter().flatten().any(|p| !p.is_absolute()) {
+            return fail("caminho absoluto esperado");
+        }
+        if let Some(cache) = &self.content_cache_path {
+            // O serviço cria o que falta; a pasta que já existe precisa aceitar gravação. Criar
+            // (e apagar) um arquivo nela é o único jeito certo de saber.
+            let existing = cache.ancestors().find(|p| p.exists()).unwrap_or(cache);
+            if tempfile::tempfile_in(existing).is_err() {
+                return fail("pasta com permissão de gravação esperada");
             }
         }
         Ok(())
@@ -359,6 +384,24 @@ mod tests {
         assert_eq!(prefs.default_mount_point, Some("/b".into()));
         assert!(managed.contains("ContentCacheMaxKbytes"));
         assert!(!managed.contains("DefaultMountPoint"));
+    }
+
+    #[test]
+    fn unreadable_user_file_does_not_stop_the_app() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let (untouched, _) = load_preferences(&paths).unwrap();
+        for broken in ["BandwidthRxKBPS = [", "BandwidthRxKBPS = \"rápido\"\n"] {
+            write(&user_path(&paths), broken);
+
+            let (prefs, managed) = load_preferences(&paths).unwrap();
+            let shown = pref_values(&paths).unwrap();
+
+            assert_eq!(prefs, untouched, "{broken}");
+            assert!(managed.is_empty());
+            assert!(!shown.is_empty());
+            reset_user_preferences(&paths).unwrap();
+        }
     }
 
     #[test]
@@ -547,5 +590,42 @@ mod tests {
         ] {
             save_user_preference(&paths, "ProxyServer", good.into()).unwrap();
         }
+    }
+
+    /// Um caminho que o serviço não pode usar não chega ao arquivo: senão a conta não sobe na
+    /// próxima partida.
+    #[test]
+    fn path_preferences_must_be_usable() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let locked = tmp.path().join("trancada");
+        fs::create_dir(&locked).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+        let file = tmp.path().join("arquivo");
+        fs::write(&file, "").unwrap();
+        let text = |p: &Path| p.display().to_string();
+
+        for (key, bad) in [
+            ("ContentCachePath", "cache/relativo".to_string()),
+            ("ContentCachePath", text(&locked)),
+            ("ContentCachePath", text(&locked.join("sub"))),
+            ("ContentCachePath", text(&file)),
+            ("DefaultMountPoint", "Google Drive".to_string()),
+        ] {
+            let err = save_user_preference(&paths, key, bad.as_str().into()).unwrap_err();
+            assert!(
+                matches!(&err, ConfigError::InvalidValue { key: k, .. } if k == key),
+                "{key} = {bad}: {err}"
+            );
+        }
+        assert!(!user_path(&paths).exists());
+
+        save_user_preference(&paths, "ContentCachePath", text(tmp.path()).into()).unwrap();
+        // As pastas do cache e da montagem podem ainda não existir: o serviço as cria.
+        let cache = text(&tmp.path().join("outro disco/cache"));
+        save_user_preference(&paths, "ContentCachePath", cache.into()).unwrap();
+        let mount = text(&tmp.path().join("nova/Google Drive"));
+        save_user_preference(&paths, "DefaultMountPoint", mount.into()).unwrap();
     }
 }

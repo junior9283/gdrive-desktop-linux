@@ -631,27 +631,28 @@ impl Store {
     }
 
     /// Caminho de `id` a partir da raiz do Meu Drive (`Pasta/arquivo.txt`), pelos nomes locais;
-    /// `None` se algum pai estiver faltando.
+    /// `None` se algum pai estiver faltando ou se a cadeia não termina na raiz (itens de pastas
+    /// compartilhadas por outras pessoas, que não aparecem na montagem).
     pub fn path_of(&self, id: &ItemId) -> Result<Option<String>> {
         // Sobe pelos pais numa consulta só; `depth` ordena do item para a raiz.
         let conn = self.conn();
         let mut stmt = conn.prepare_cached(
-            "WITH RECURSIVE up(id, parent, name, depth) AS ( \
-                 SELECT id, parent, local_name, 0 FROM items WHERE id = ?1 \
+            "WITH RECURSIVE up(id, parent, name, inode, depth) AS ( \
+                 SELECT id, parent, local_name, inode, 0 FROM items WHERE id = ?1 \
                  UNION ALL \
-                 SELECT i.id, i.parent, i.local_name, up.depth + 1 \
+                 SELECT i.id, i.parent, i.local_name, i.inode, up.depth + 1 \
                  FROM items i JOIN up ON i.id = up.parent) \
-             SELECT parent, name FROM up ORDER BY depth DESC",
+             SELECT parent, name, inode FROM up ORDER BY depth DESC",
         )?;
-        let rows: Vec<(Option<String>, String)> = stmt
-            .query_map(params![id.0], |r| Ok((r.get(0)?, r.get(1)?)))?
+        let rows: Vec<(Option<String>, String, u64)> = stmt
+            .query_map(params![id.0], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        // Chegou à raiz (sem pai) só se nenhum pai faltou no caminho.
+        // Chegou à raiz do Meu Drive só se nenhum pai faltou e a cadeia termina nela.
         match rows.first() {
-            Some((None, _)) => Ok(Some(
+            Some((None, _, inode)) if *inode == Inode::ROOT.0 => Ok(Some(
                 rows.iter()
                     .skip(1)
-                    .map(|(_, name)| name.as_str())
+                    .map(|(_, name, _)| name.as_str())
                     .collect::<Vec<_>>()
                     .join("/"),
             )),
@@ -901,6 +902,37 @@ mod tests {
             local_state: LocalState::Clean,
             pin: PinState::None,
         }
+    }
+
+    #[test]
+    fn path_of_only_reaches_the_my_drive_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let folder = |name: &str, parent: Option<&str>| Item {
+            kind: ItemKind::Folder,
+            ..item(name, parent)
+        };
+        store
+            .upsert_item(&Item {
+                inode: Inode::ROOT,
+                ..folder("root", None)
+            })
+            .unwrap();
+        store.upsert_item(&folder("Docs", Some("root"))).unwrap();
+        store.upsert_item(&item("a.txt", Some("Docs"))).unwrap();
+        // Pasta de outra pessoa, compartilhada: sem pai, mas não é a raiz.
+        store.upsert_item(&folder("Projeto", None)).unwrap();
+        store
+            .upsert_item(&item("orcamento.xlsx", Some("Projeto")))
+            .unwrap();
+
+        assert_eq!(
+            store.path_of(&id("a.txt")).unwrap().as_deref(),
+            Some("Docs/a.txt")
+        );
+        assert_eq!(store.path_of(&id("root")).unwrap().as_deref(), Some(""));
+        assert_eq!(store.path_of(&id("orcamento.xlsx")).unwrap(), None);
+        assert_eq!(store.path_of(&id("Projeto")).unwrap(), None);
     }
 
     #[test]

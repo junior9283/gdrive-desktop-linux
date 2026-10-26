@@ -872,7 +872,10 @@ mod tests {
         })
         .await
         .unwrap();
-        assert!(all.iter().all(|f| f.id != shared), "não está no Meu Drive");
+        // Como no Drive real, a listagem traz também o compartilhado comigo, mas sem pai no Meu
+        // Drive: quem indexa é que não o põe na montagem.
+        let listed = all.iter().find(|f| f.id == shared).expect("na listagem");
+        assert!(!listed.parents.contains(&root), "não está no Meu Drive");
     }
 
     fn temp_file(dir: &tempfile::TempDir, name: &str, len: usize) -> (std::path::PathBuf, Vec<u8>) {

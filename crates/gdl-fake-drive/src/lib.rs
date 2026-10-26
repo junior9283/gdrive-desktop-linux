@@ -129,7 +129,17 @@ impl FakeDrive {
 
     /// Arquivo de `owner` compartilhado com o usuário ("Compartilhados comigo").
     pub fn add_shared_file(&self, name: &str, owner: &str, bytes: Vec<u8>) -> String {
-        self.shared.state().add_shared(name, owner, bytes)
+        self.shared
+            .state()
+            .add_shared(name, "application/octet-stream", owner, bytes)
+    }
+
+    /// Pasta de `owner` compartilhada com o usuário; o que for posto nela (`add_file`) também é
+    /// compartilhado.
+    pub fn add_shared_folder(&self, name: &str, owner: &str) -> String {
+        self.shared
+            .state()
+            .add_shared(name, FOLDER_MIME, owner, vec![])
     }
 
     /// Simula uma edição feita por outra pessoa: novo conteúdo, nova revisão e uma mudança.

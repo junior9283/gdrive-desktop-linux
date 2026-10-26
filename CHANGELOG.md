@@ -7,7 +7,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
-## [0.2.0] - 2026-10-25
+## [0.2.0] - 2026-10-26
 
 ### Adicionado
 - Plano de implementação da versão 0.2 (interface) em `docs/superpowers/plans/` e o registro das
@@ -62,6 +62,22 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - Os atalhos `.desktop` e o início automático apontam para o caminho completo dos programas
   (entre aspas), para funcionarem também fora do `PATH`.
 - O build de release falha se não conseguir montar a lista de licenças de terceiros.
+
+### Corrigido
+- Itens compartilhados por outras pessoas apareciam na pesquisa e nos recentes com um caminho que
+  não existe na montagem.
+- Ler um arquivo novo no instante em que o envio terminava podia dar erro de E/S.
+- Um `preferences.toml` editado à mão e ilegível impedia o serviço de subir; agora vale como
+  vazio, com aviso no log.
+- A janela e a bandeja não percebiam a queda do serviço (e o aviso "serviço indisponível" podia
+  ficar preso depois da volta).
+- `ContentCachePath` e `DefaultMountPoint` aceitavam caminhos relativos ou uma pasta sem
+  permissão de gravação, e a conta não subia na partida seguinte.
+- Cancelar o envio de um arquivo ainda aberto para escrita tirava o conteúdo do programa que
+  gravava; agora o cancelamento é recusado até o arquivo ser fechado.
+- Enter logo depois de digitar na pesquisa abria um resultado da lista anterior.
+- Sem rede, a pesquisa rápida podia esperar até um minuto; agora espera a API por 2,5 s e mostra
+  os nomes do banco.
 
 ## [0.1.0] - 2026-10-25
 

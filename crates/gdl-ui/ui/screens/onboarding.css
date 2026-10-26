@@ -3,7 +3,7 @@
 .onboarding {
   display: grid;
   grid-template-columns: 168px 1fr;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 .steps {
@@ -51,20 +51,84 @@
 }
 
 .step {
-  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* O conteúdo rola (o guia do Client ID é longo); os botões ficam sempre à vista. */
+.step-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 24px 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
 .step > .actions {
-  margin-top: auto;
-  padding-top: 16px;
+  padding: 16px 24px 24px;
 }
 
-.step > button.text,
-.step > button.tonal {
+.step-body > button.text,
+.step-body > button.tonal,
+.guide-part > button {
   align-self: flex-start;
+}
+
+.guide {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: part;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Cada parte é um `.card` numerado; o valor para copiar ocupa a largura toda. */
+.guide-part {
+  counter-increment: part;
+  align-items: stretch;
+}
+
+.guide-part h2::before {
+  content: counter(part) '. ';
+}
+
+.guide-part p {
+  margin: 0;
+}
+
+.copy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copy-row code {
+  flex: 1;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+  border-radius: var(--md-shape-small);
+  background: var(--md-surface-container-high);
+  font: var(--md-body-medium);
+  font-family: monospace;
+}
+
+.troubles summary {
+  cursor: pointer;
+  font: var(--md-label-large);
+}
+
+.troubles dt {
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.troubles dd {
+  margin: 2px 0 0;
+  color: var(--md-on-surface-variant);
 }
 
 .field {

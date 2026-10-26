@@ -1,8 +1,23 @@
 // A lógica do primeiro uso sem DOM: em que passo está, para onde cada botão (ou o fim do login)
 // leva e quais botões aparecem. Os erros saem como `[chave, argumentos]` do `ui.ftl`.
 
-// Os passos da 0.2 (escolher pastas e o resumo chegam na 0.4, com o backup de pastas).
-const LOGIN = ['sign-in', 'waiting'];
+// Os passos da 0.2 (escolher pastas e o resumo chegam na 0.4, com o backup de pastas). O login
+// começa pelo guia do Client ID, que quem já tem um passa com Continuar.
+const LOGIN = ['setup', 'sign-in', 'waiting'];
+
+// O guia do Client ID (base: `docs/guia-client-id.md`): cada parte abre a sua página do Google
+// Cloud pelo nome do link (`gdl_common::links`); `copy` são os valores para colar lá.
+export const GUIDE = [
+  { id: 'project', link: 'gcp-new-project' },
+  { id: 'drive-api', link: 'gcp-drive-api' },
+  { id: 'branding', link: 'gcp-branding' },
+  { id: 'scopes', link: 'gcp-scopes', copy: ['https://www.googleapis.com/auth/drive', 'openid', 'email'] },
+  { id: 'audience', link: 'gcp-audience' },
+  { id: 'client', link: 'gcp-new-client' },
+];
+
+// Os problemas mais comuns do login, com o que fazer (os mesmos do fim do guia em `docs/`).
+export const TROUBLES = ['access-denied', 'redirect-mismatch', 'weekly-logout', 'api-disabled'];
 const TOUR = ['intro', 'files', 'offline'];
 
 // Os passos mostrados: com `DisableOnboardingDialog`, só os do login.
@@ -13,7 +28,7 @@ export function stepsFor(loginOnly) {
 // Onde começa: sem conta, no login; com a conta conectada, na apresentação (ou no fim, se ela
 // está desligada). `mount` é a pasta do Drive.
 export function firstState({ signedIn, loginOnly, mount = '' }) {
-  const step = !signedIn ? 'sign-in' : loginOnly ? 'end' : 'intro';
+  const step = !signedIn ? 'setup' : loginOnly ? 'end' : 'intro';
   return { step, loginOnly, mount, clientId: '', secret: '', url: null, linkShown: false, error: null };
 }
 
@@ -25,9 +40,11 @@ function after(state) {
 
 // O passo de `Voltar`, ou `null` sem volta (depois do login não se volta para ele).
 function previous(step) {
-  if (step === 'waiting') return 'sign-in';
-  const i = TOUR.indexOf(step);
-  return i > 0 ? TOUR[i - 1] : null;
+  for (const steps of [LOGIN, TOUR]) {
+    const i = steps.indexOf(step);
+    if (i > 0) return steps[i - 1];
+  }
+  return null;
 }
 
 // Os botões do passo: `skip` e `back` aparecem ou não; `primary` é o rótulo do botão principal

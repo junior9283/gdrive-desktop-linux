@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFtl } from '../i18n.js';
 import { CATEGORIES } from '../screens/errors/model.js';
+import { GUIDE, TROUBLES, stepsFor } from '../screens/onboarding/model.js';
 
 const ui = fileURLToPath(new URL('..', import.meta.url));
 const locale = (lang) =>
@@ -31,7 +32,9 @@ test('toda chave usada nas telas existe nos dois idiomas', () => {
     'downloading', 'downloaded', 'trashing', 'trashed', 'restoring', 'restored',
   ]) used.add(`activity-${state}`);
   for (const link of ['help', 'privacy', 'terms', 'faq', 'drive-web']) used.add(`link-${link}`);
-  for (const step of ['sign-in', 'waiting', 'intro', 'files', 'offline']) used.add(`onboarding-step-${step}`);
+  for (const step of stepsFor(false)) used.add(`onboarding-step-${step}`);
+  for (const { id } of GUIDE) used.add(`onboarding-setup-${id}-title`).add(`onboarding-setup-${id}-text`);
+  for (const id of TROUBLES) used.add(`onboarding-trouble-${id}`).add(`onboarding-trouble-${id}-fix`);
   for (const category of CATEGORIES) used.add(`error-category-${category}`).add(`error-category-${category}-text`);
   for (const part of ['offline', 'cache', 'free']) used.add(`offline-usage-${part}`);
   for (const block of ['stream', 'sync', 'offline']) {

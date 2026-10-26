@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { actions, firstState, nextStep, stepsFor } from '../screens/onboarding/model.js';
+import { readFileSync } from 'node:fs';
+import { GUIDE, actions, firstState, nextStep, stepsFor } from '../screens/onboarding/model.js';
 
-const signIn = (fields = {}) => ({ ...firstState({ signedIn: false, loginOnly: false }), ...fields });
+const signIn = (fields = {}) => ({ ...firstState({ signedIn: false, loginOnly: false }), step: 'sign-in', ...fields });
 
 test('Continuar no login sem Client ID não avança', () => {
   const state = nextStep(signIn({ secret: 'segredo' }), { type: 'continue' });
@@ -55,12 +56,38 @@ test('Continuar e Voltar percorrem os passos depois do login', () => {
 test('com a conta já conectada começa na apresentação; só login, no fim', () => {
   assert.equal(firstState({ signedIn: true, loginOnly: false }).step, 'intro');
   assert.equal(firstState({ signedIn: true, loginOnly: true }).step, 'end');
-  assert.equal(firstState({ signedIn: false, loginOnly: true }).step, 'sign-in');
+  assert.equal(firstState({ signedIn: false, loginOnly: true }).step, 'setup');
+});
+
+test('sem conta começa pelo guia do Client ID, que leva ao login e volta dele', () => {
+  const setup = firstState({ signedIn: false, loginOnly: false });
+  assert.equal(setup.step, 'setup');
+  const state = nextStep(setup, { type: 'continue' });
+  assert.equal(state.step, 'sign-in');
+  assert.equal(state.error, null, 'o guia não pede o Client ID');
+  assert.equal(nextStep(state, { type: 'back' }).step, 'setup');
+  assert.equal(nextStep(setup, { type: 'back' }).step, 'setup');
+});
+
+// Um arquivo do repositório, a partir da raiz.
+const repo = (path) => readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8');
+
+test('o guia tem os passos do Google Cloud, cada um com um link da tabela fixa', () => {
+  // Os textos citam as partes pelo número ("parte 5"): a ordem faz parte do contrato.
+  assert.deepEqual(GUIDE.map((s) => s.id), ['project', 'drive-api', 'branding', 'scopes', 'audience', 'client']);
+  const known = new Set([...repo('crates/gdl-common/src/links.rs').matchAll(/"(gcp-[a-z-]+)" =>/g)].map((m) => m[1]));
+  for (const section of GUIDE) assert.ok(known.has(section.link), section.link);
+});
+
+test('os escopos para copiar são os que o login pede', () => {
+  const [, scopes] = repo('crates/gdl-drive/src/oauth.rs').match(/const SCOPES: &str = "([^"]+)";/);
+  const copy = GUIDE.find((s) => s.id === 'scopes').copy;
+  assert.deepEqual([...copy].sort(), scopes.split(' ').sort());
 });
 
 test('DisableOnboardingDialog deixa só os passos do login', () => {
-  assert.deepEqual(stepsFor(true), ['sign-in', 'waiting']);
-  assert.deepEqual(stepsFor(false), ['sign-in', 'waiting', 'intro', 'files', 'offline']);
+  assert.deepEqual(stepsFor(true), ['setup', 'sign-in', 'waiting']);
+  assert.deepEqual(stepsFor(false), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'offline']);
 });
 
 test('editar um campo guarda o valor e limpa o erro', () => {
@@ -71,7 +98,8 @@ test('editar um campo guarda o valor e limpa o erro', () => {
 
 test('botões de cada passo', () => {
   const at = (step, extra = {}) => actions({ ...signIn(), step, ...extra });
-  assert.deepEqual(at('sign-in'), { skip: true, back: false, primary: 'continue' });
+  assert.deepEqual(at('setup'), { skip: true, back: false, primary: 'continue' });
+  assert.deepEqual(at('sign-in'), { skip: true, back: true, primary: 'continue' });
   assert.deepEqual(at('sign-in', { error: ['onboarding-login-failed', { error: 'x' }] }).primary, 'retry');
   assert.deepEqual(at('waiting'), { skip: false, back: true, primary: null });
   assert.deepEqual(at('intro'), { skip: true, back: false, primary: 'continue' });

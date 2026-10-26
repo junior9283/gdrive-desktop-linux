@@ -7,9 +7,12 @@ const PROJECT: &str = "https://github.com/junior9283/gdrive-desktop-linux";
 pub const DRIVE_WEB: &str = "https://drive.google.com/drive/my-drive";
 
 /// O endereço de `name` (`drive-web`, `storage`, `gemini`, `project`, `privacy`, `terms`,
-/// `faq`, `help` ou `client-id-guide`).
+/// `faq`, `help`, `client-id-guide` ou as páginas do Google Cloud do guia do primeiro uso,
+/// `gcp-*`).
 pub fn url(name: &str) -> Option<String> {
     let doc = |file: &str| format!("{PROJECT}/blob/main/docs/{file}");
+    // O Google Cloud Console, no projeto que estiver escolhido lá.
+    let cloud = |page: &str| format!("https://console.cloud.google.com/{page}");
     Some(match name {
         "drive-web" => DRIVE_WEB.into(),
         "storage" => "https://one.google.com/storage".into(),
@@ -20,6 +23,12 @@ pub fn url(name: &str) -> Option<String> {
         "faq" => doc("perguntas-frequentes.md"),
         "help" => doc("ajuda.md"),
         "client-id-guide" => doc("guia-client-id.md"),
+        "gcp-new-project" => cloud("projectcreate"),
+        "gcp-drive-api" => cloud("apis/library/drive.googleapis.com"),
+        "gcp-branding" => cloud("auth/branding"),
+        "gcp-scopes" => cloud("auth/scopes"),
+        "gcp-audience" => cloud("auth/audience"),
+        "gcp-new-client" => cloud("auth/clients/create"),
         _ => return None,
     })
 }
@@ -43,6 +52,25 @@ mod tests {
             let url = url(name).unwrap();
             let file = url.rsplit('/').next().unwrap();
             assert!(docs.join(file).is_file(), "{file}");
+        }
+    }
+    /// As páginas do guia do Client ID (o teste da janela confere que o guia só usa estas).
+    #[test]
+    fn cloud_pages_open_the_cloud_console() {
+        let pages = [
+            "new-project",
+            "drive-api",
+            "branding",
+            "scopes",
+            "audience",
+            "new-client",
+        ];
+        for page in pages {
+            let url = url(&format!("gcp-{page}")).unwrap();
+            assert!(
+                url.starts_with("https://console.cloud.google.com/"),
+                "{page}: {url}"
+            );
         }
     }
 }

@@ -292,12 +292,32 @@ async fn onboarding_logs_in_with_client_id() {
     status_until(&service, "sem conta", |s| s.state == "signed-out").await;
     let session = Session::open("onboarding").await;
 
+    // Primeiro o guia do Client ID: cada parte abre a sua página do Google Cloud.
+    let guide = session.wait_text(".step-title", "Client ID").await;
+    let parts = session
+        .eval("return document.querySelectorAll('.guide-part').length")
+        .await;
+    let troubles = session
+        .eval("return document.querySelectorAll('.troubles dt').length")
+        .await;
+    session.click(".guide-part button.tonal").await;
+    let project = opened("console.cloud.google.com/projectcreate").await;
+    session.click(".continue").await;
+
     // Sem o segredo, Continuar não sai do lugar.
     session.fill("#client-id", "id-de-teste").await;
     session.click(".continue").await;
     let missing = session.text(".step-error").await;
     session.fill("#client-secret", "segredo").await;
     session.click(".continue").await;
+    // O botão só vale com o link pedido ao serviço; antes disso, o clique se perde.
+    until("o link de login", async || {
+        let ready = session
+            .eval("return document.querySelector('.generate-link')?.disabled === false")
+            .await;
+        ready.as_bool().unwrap_or(false).then_some(())
+    })
+    .await;
     session.click(".generate-link").await;
     let mut url = Value::Null;
     for _ in 0..100 {
@@ -316,6 +336,10 @@ async fn onboarding_logs_in_with_client_id() {
     let title = session.wait_text(".step-title", "computador").await;
     let account = service.status().await.unwrap().account;
 
+    assert!(guide.contains("Google Cloud"), "{guide}");
+    assert_eq!(parts, 6);
+    assert_eq!(troubles, 4, "os problemas comuns viram itens da lista");
+    assert_eq!(project, "https://console.cloud.google.com/projectcreate");
     assert!(missing.contains("Client ID"), "{missing}");
     assert!(title.contains("Seu Drive"), "{title}");
     assert!(!account.is_empty());

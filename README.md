@@ -112,9 +112,10 @@ a ativação do serviço e da janela pelo D-Bus, o atalho no menu de aplicativos
 ponteiros `.gdoc` e os ícones.
 
 **3. Abrir:** procure **Google Drive** no menu de aplicativos (ou rode
-`gdrive-desktop-linux-tray`). A bandeja liga o serviço e, sem conta, abre o primeiro uso: cole o
-seu Client ID e o segredo (veja o [guia](docs/guia-client-id.md)) e entre pelo navegador. A pasta
-aparece em `~/Google Drive/Meu Drive`.
+`gdrive-desktop-linux-tray`). A bandeja liga o serviço e, sem conta, abre o primeiro uso, que
+guia a criação do seu Client ID parte por parte, com botões que abrem cada página do Google Cloud
+e copiam os valores (o mesmo passo a passo do [guia](docs/guia-client-id.md)). Depois, cole o
+Client ID e o segredo e entre pelo navegador. A pasta aparece em `~/Google Drive/Meu Drive`.
 
 Na bandeja: estado da sincronização, pausar/retomar, pesquisa (também pelo atalho global, se o
 portal do KDE aceitar), lista de erros, arquivos off-line, preferências e sair. A janela

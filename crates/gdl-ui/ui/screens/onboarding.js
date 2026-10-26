@@ -3,7 +3,7 @@
 
 import { prefValue } from '../api.js';
 import { attempt, card, el, errorText, stylesheet, toast } from '../components.js';
-import { actions, firstState, nextStep, stepsFor } from './onboarding/model.js';
+import { GUIDE, TROUBLES, actions, firstState, nextStep, stepsFor } from './onboarding/model.js';
 
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
 const screen = { root: null, ctx: null, state: null, listening: null };
@@ -64,7 +64,7 @@ function draw(moved = true) {
     ),
   );
   screen.root.replaceChildren(
-    el('div', { class: 'onboarding' }, list, el('main', { class: 'step' }, ...STEPS[state.step](ctx, state), footer())),
+    el('div', { class: 'onboarding' }, list, el('main', { class: 'step' }, el('div', { class: 'step-body' }, ...STEPS[state.step](ctx, state)), footer())),
   );
   if (moved) screen.root.querySelector('input, .continue')?.focus();
 }
@@ -87,9 +87,41 @@ function footer() {
 
 const title = (text) => el('h1', { class: 'step-title' }, text);
 
+// Um valor para colar no Google Cloud, com o botão que o copia.
+function copyRow({ api, t }, text) {
+  const copy = () => attempt(api.copy(text), () => toast(t('onboarding-setup-copied')));
+  return el('div', { class: 'copy-row' }, el('code', {}, text), el('button', { class: 'text', onclick: copy }, t('onboarding-setup-copy')));
+}
+
+// Uma parte do guia: o que fazer na página, os valores para copiar e o botão que a abre.
+function guideSection(ctx, { id, link, copy = [] }) {
+  const { api, t } = ctx;
+  return el('li', { class: 'card guide-part' },
+    el('h2', {}, t(`onboarding-setup-${id}-title`)),
+    el('p', {}, t(`onboarding-setup-${id}-text`)),
+    copy.map((text) => copyRow(ctx, text)),
+    el('button', { class: 'tonal', onclick: () => attempt(api.openLink(link)) }, t('onboarding-setup-open')));
+}
+
+// Um problema comum do login e o que fazer.
+const trouble = (t, id) => [el('dt', {}, t(`onboarding-trouble-${id}`)), el('dd', {}, t(`onboarding-trouble-${id}-fix`))];
+
 // O conteúdo de cada passo: `(ctx, state) => [nós]`.
 const STEPS = {
-  'sign-in'({ api, t }, state) {
+  setup(ctx) {
+    const { api, t } = ctx;
+    return [
+      title(t('onboarding-setup-title')),
+      el('p', {}, t('onboarding-setup-text')),
+      el('ol', { class: 'guide' }, GUIDE.map((section) => guideSection(ctx, section))),
+      el('details', { class: 'troubles' },
+        el('summary', {}, t('onboarding-trouble-title')),
+        el('dl', {}, TROUBLES.flatMap((id) => trouble(t, id)))),
+      el('button', { class: 'text', onclick: () => attempt(api.openLink('client-id-guide')) }, t('onboarding-client-guide')),
+    ];
+  },
+
+  'sign-in'({ t }, state) {
     const error = el('p', { class: 'step-error', role: 'alert' }, state.error ? t(...state.error) : []);
     const field = (id, key, label, type) => {
       const input = el('input', { id, type, value: state[key], autocomplete: 'off', spellcheck: 'false' });
@@ -105,7 +137,6 @@ const STEPS = {
     return [
       title(t('onboarding-sign-in-title')),
       el('p', {}, t('onboarding-sign-in-text')),
-      el('button', { class: 'text', onclick: () => api.openLink('client-id-guide') }, t('onboarding-client-guide')),
       field('client-id', 'clientId', t('onboarding-client-id'), 'text'),
       field('client-secret', 'secret', t('onboarding-client-secret'), 'password'),
       el('p', { class: 'meta' }, t('onboarding-client-note')),
@@ -125,6 +156,7 @@ const STEPS = {
     return [
       title(t('onboarding-waiting-title')),
       el('p', {}, t('onboarding-waiting-text')),
+      el('p', {}, t('onboarding-waiting-unverified')),
       el('p', {}, t('onboarding-waiting-other')),
       generate,
       state.linkShown

@@ -48,6 +48,11 @@ pids="$pids $!"
 # O que o "navegador" do serviço de teste abriu, o estado do armazenamento simulado e onde os
 # testes acham a bandeja.
 export GDL_E2E_OPENED="$work/opened" GDL_E2E_QUOTA="$work/quota" GDL_E2E_BIN="$PWD/target/debug"
+# A janela abre os links pelo navegador das preferências dela: um que só anota, como o do serviço.
+mkdir -p "$XDG_CONFIG_HOME/gdrive-desktop-linux"
+printf '#!/bin/sh\nprintf "%%s\\n" "$1" >> "%s"\n' "$GDL_E2E_OPENED" > "$work/navegador"
+chmod +x "$work/navegador"
+printf 'DefaultWebBrowser = "%s"\n' "$work/navegador" > "$XDG_CONFIG_HOME/gdrive-desktop-linux/preferences.toml"
 target/debug/examples/e2e-daemon > "$work/daemon.out" 2> "$work/daemon.log" &
 pids="$pids $!"
 export GDL_E2E_DAEMON_PID=$!

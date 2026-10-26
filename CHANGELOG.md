@@ -7,6 +7,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.2.1] - 2026-10-26
+
+### Adicionado
+- Primeiro uso com o guia do Client ID dentro do app: as seis partes no Google Cloud (projeto,
+  Drive API, tela de consentimento, escopos, publicação e credencial), cada uma com a explicação e
+  um botão que abre a página certa, botões para copiar os escopos e os problemas mais comuns com o
+  que fazer. A espera do login explica o aviso "O Google não verificou este app".
+
 ## [0.2.0] - 2026-10-26
 
 ### Adicionado

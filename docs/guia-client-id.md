@@ -3,6 +3,9 @@
 Nas versões 0.x, o gdrive-desktop-linux não vem com uma identidade própria no Google. Cada pessoa cria
 a sua, de graça, no Google Cloud. Leva uns 10 minutos e só precisa ser feito uma vez.
 
+O primeiro uso do app traz este mesmo guia, com um botão que abre cada página do Google Cloud e
+botões para copiar os escopos.
+
 O Client ID e o segredo ficam guardados no chaveiro do sistema (KWallet ou GNOME Keyring), junto com o
 login, e nunca em arquivo.
 
@@ -42,7 +45,7 @@ login, e nunca em arquivo.
 
 ## 5. Primeiro login
 
-1. Rode o login do app e cole o ID e a chave secreta quando ele pedir.
+1. No primeiro uso do app, passe do guia (Continuar) e cole o ID e a chave secreta.
 2. O navegador abre a página de login do Google. Escolha a conta.
 3. Como o app não passou pela verificação do Google, aparece o aviso **"O Google não verificou este app"**.
    Clique em **Avançado → Acessar (nome do app) (não seguro)**. O aviso existe porque o app é seu e não

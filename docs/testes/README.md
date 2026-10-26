@@ -92,6 +92,10 @@ o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$G
 
 ## Armadilhas conhecidas
 
+- **Clique em botão desabilitado no e2e se perde em silêncio:** espere o estado que habilita o
+  botão (ex.: `.generate-link` só vale depois de o serviço devolver o link de login) antes do
+  `click`. Uma vez só, sem reproduzir em 45 rodadas, o primeiro uso apareceu em "Entrar na conta"
+  antes do clique no guia; se voltar, instrumente os eventos do `dispatch` (`window.__eventos`).
 - **FUSE na CI:** é preciso instalar `fuse3` e liberar `/dev/fuse` (`chmod 666`) antes dos testes.
 - **Montagens órfãs:** um teste que entra em pânico pode deixar uma montagem `gdrive-desktop-*`
   em pasta temporária. Confira com `mount | grep -c gdrive-desktop`, que deve dar 0. Para limpar
@@ -162,6 +166,8 @@ o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$G
 | Cancelar envio com o arquivo aberto quebrava o item | o cancelamento trocava o conteúdo com um descritor de escrita aberto | marca de escrita (`mark_writing`) do primeiro `open` ao último `release`; cancelamento devolve `in-use` | `cancel_while_open_for_writing_is_refused`, `cancel_waits_for_the_file_to_close` | o FUSE e o motor precisam se avisar do que está aberto |
 | Enter abria o resultado errado na pesquisa | o Enter usava a lista da tela, ainda do texto anterior (debounce) | se a lista não é do texto do campo, pesquisa antes de abrir | `shownFor` (JS), e2e `search_enter_right_after_typing_opens_the_new_result` | lista na tela tem dono: o texto que a gerou |
 | Pesquisa sem rede travava por um minuto | a pesquisa da API seguia o recuo do cliente | prazo de 2,5 s para a API (`SEARCH_API_WAIT`) | `search_does_not_wait_long_for_a_stuck_network` | chamada interativa precisa de prazo próprio; teste de prazo com limite fixo, não derivado da constante |
+| "Problemas comuns" do guia mostrava `[object HTMLElement]` | `el()` achata os filhos só um nível; `map` devolvia pares `[dt, dd]` dentro de outra lista | `flatMap` | e2e `onboarding_logs_in_with_client_id` conta os `.troubles dt` | teste de unidade do modelo não vê o DOM: confira a tela (captura no Xvfb) |
+| e2e do primeiro uso falhava 1 em 4 ("sem o link de login") | o clique em "Gerar link" chegava antes do link, com o botão desabilitado | o teste espera o botão habilitar | `onboarding_logs_in_with_client_id` (30 de 30) | clique em elemento desabilitado não dá erro: espere o estado |
 
 ## Teste manual com conta real
 

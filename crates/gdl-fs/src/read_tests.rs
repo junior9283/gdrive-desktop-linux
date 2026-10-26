@@ -257,6 +257,24 @@ async fn slow_thumbnails_do_not_hold_listing_past_deadline() {
     wait_until("miniatura em segundo plano", || png.exists());
 }
 
+/// Reabrir a pasta enquanto a semeadura de fundo (da primeira abertura) continua: lista na hora,
+/// sem esperar o prazo de novo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reopening_during_background_seeding_does_not_wait_again() {
+    let m = photos().await;
+    m.fake.inject(Fault::DelayThumbs(Duration::from_secs(5)));
+    let folder = m.drive().join("Fotos de Março #1");
+    let (_, first) = timed_names(folder.clone()).await;
+    assert!(first >= Duration::from_millis(1400), "demorou só {first:?}");
+
+    let (listed, again) = timed_names(folder.clone()).await;
+    assert_eq!(listed, ["foto (1).jpg"]);
+    assert!(
+        again < Duration::from_millis(700),
+        "esperou de novo: {again:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn other_fuse_ops_are_not_blocked_while_seeding_thumbnails() {
     let m = photos().await;

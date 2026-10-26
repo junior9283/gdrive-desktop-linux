@@ -596,6 +596,9 @@ async fn thumb(State(shared): Shr, Path(spec): Path<String>) -> Response {
     if let Some(delay) = delay {
         tokio::time::sleep(delay).await;
     }
+    if let Some(code) = shared.state().thumb_status {
+        return api_error(code, "thumbnailError", "miniatura indisponível");
+    }
     if let Some(to) = shared.state().thumb_redirect.clone() {
         return (StatusCode::FOUND, [(header::LOCATION, to)]).into_response();
     }

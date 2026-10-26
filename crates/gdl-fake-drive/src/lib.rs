@@ -39,6 +39,8 @@ pub enum Fault {
     Offline,
     /// As miniaturas (`/thumb`) demoram este tempo para responder, até `clear_faults`.
     DelayThumbs(std::time::Duration),
+    /// As miniaturas (`/thumb`) respondem o erro `code` da API, até `clear_faults`.
+    ThumbStatus(u16),
 }
 
 pub struct FakeDrive {
@@ -246,6 +248,7 @@ impl FakeDrive {
             Fault::LoseCreateResponses { times } => self.shared.state().lose_responses = times,
             Fault::Offline => self.shared.offline.store(true, Ordering::SeqCst),
             Fault::DelayThumbs(delay) => self.shared.state().thumb_delay = Some(delay),
+            Fault::ThumbStatus(code) => self.shared.state().thumb_status = Some(code),
         }
     }
 
@@ -255,6 +258,7 @@ impl FakeDrive {
             state.fault = None;
             state.lose_responses = 0;
             state.thumb_delay = None;
+            state.thumb_status = None;
         }
         self.shared.drop_budget.store(-1, Ordering::SeqCst);
         self.shared.stall.store(false, Ordering::SeqCst);

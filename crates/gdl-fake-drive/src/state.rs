@@ -138,6 +138,8 @@ pub(crate) struct State {
     pub(crate) thumb_redirect: Option<String>,
     /// Atraso antes de responder cada miniatura (`Fault::DelayThumbs`).
     pub(crate) thumb_delay: Option<std::time::Duration>,
+    /// Erro de cada miniatura (`Fault::ThumbStatus`).
+    pub(crate) thumb_status: Option<u16>,
     pub(crate) files: BTreeMap<String, FileRec>,
     pub(crate) root_id: String,
     pub(crate) email: String,
@@ -176,6 +178,7 @@ impl State {
             origin,
             thumb_redirect: None,
             thumb_delay: None,
+            thumb_status: None,
             files: BTreeMap::new(),
             root_id: String::new(),
             email: "teste@example.com".into(),

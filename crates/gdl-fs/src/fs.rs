@@ -41,6 +41,27 @@ pub const THUMB_WAIT: Duration = Duration::from_millis(1500);
 /// Quantos `opendir` podem esperar miniaturas ao mesmo tempo; os demais listam na hora, para
 /// sobrar thread do FUSE às outras operações.
 const MAX_THUMB_WAITERS: usize = 4;
+/// Indexadores de arquivos (início do `comm`, que o kernel corta em 15 bytes): percorrem pastas
+/// sem ninguém olhando, e semear para eles buscaria no Google as miniaturas do Drive inteiro.
+const INDEXERS: [&str; 6] = [
+    "baloo_file",
+    "tracker-miner",
+    "localsearch",
+    "updatedb",
+    "plocate",
+    "mlocate",
+];
+
+/// O `comm` (de `/proc/<pid>/comm`) é de um indexador (`INDEXERS`)?
+fn is_indexer(comm: &str) -> bool {
+    INDEXERS.iter().any(|name| comm.starts_with(name))
+}
+
+/// O processo `pid` é um indexador? Sem `/proc` legível (processo que já saiu), não.
+fn opened_by_indexer(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|comm| is_indexer(&comm))
+}
+
 /// Threads do FUSE: fixas, porque ficam paradas em E/S (e na espera das miniaturas), não na CPU.
 const FUSE_THREADS: usize = 8;
 
@@ -502,7 +523,7 @@ impl Inner {
 
     /// Semeia as miniaturas de uma pasta do Meu Drive (`my_drive_folder`) e espera até
     /// `THUMB_WAIT`; o resto segue em segundo plano. Sem rede ou sem vaga entre os que esperam,
-    /// só dispara.
+    /// só dispara; com a pasta já em semeadura (reaberta antes de terminar), nem espera.
     fn wait_thumbnails(&self, node: &Node) {
         let Some((id, path)) = self.my_drive_folder(node) else {
             return;
@@ -519,8 +540,9 @@ impl Inner {
             return;
         };
         self.rt.block_on(async {
-            let seeding = self.engine.seed_thumbnails(&id, path);
-            let _ = tokio::time::timeout(THUMB_WAIT, seeding).await;
+            if let Some(seeding) = self.engine.seed_thumbnails(&id, path) {
+                let _ = tokio::time::timeout(THUMB_WAIT, seeding).await;
+            }
         });
     }
 
@@ -854,9 +876,11 @@ impl Filesystem for DriveFs {
         }
     }
 
-    fn opendir(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
+    fn opendir(&self, req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         let listed = self.0.node(ino).and_then(|n| {
-            self.0.wait_thumbnails(&n);
+            if !opened_by_indexer(req.pid()) {
+                self.0.wait_thumbnails(&n);
+            }
             self.0.list(&n)
         });
         match listed {
@@ -958,4 +982,35 @@ pub fn mount(fs: DriveFs, at: &Path) -> std::io::Result<BackgroundSession> {
     ];
     config.n_threads = Some(FUSE_THREADS);
     fuser::spawn_mount(fs, at, &config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_indexer;
+
+    #[test]
+    fn indexers_are_recognized_by_comm() {
+        // O `comm` vem de `/proc/<pid>/comm`: com quebra de linha e cortado em 15 bytes.
+        for comm in [
+            "baloo_file\n",
+            "baloo_file_extr\n",
+            "tracker-miner-f\n",
+            "localsearch-3\n",
+            "updatedb\n",
+            "plocate-build\n",
+            "mlocate\n",
+        ] {
+            assert!(is_indexer(comm), "{comm:?}");
+        }
+        for comm in [
+            "dolphin\n",
+            "ls\n",
+            "nautilus",
+            "kioworker\n",
+            "",
+            "baloo\n",
+        ] {
+            assert!(!is_indexer(comm), "{comm:?}");
+        }
+    }
 }

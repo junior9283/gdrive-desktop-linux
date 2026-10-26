@@ -267,14 +267,14 @@ impl Engine {
     }
 
     /// Semeia, em segundo plano, as miniaturas dos arquivos da pasta `folder` (montada em
-    /// `folder_path`). Abrir a mesma pasta enquanto isso só espera a semeadura em andamento.
-    /// Descartar o handle (ou desistir de esperar) não interrompe o trabalho; erros só vão para o
-    /// log.
+    /// `folder_path`). Com a mesma pasta já em semeadura, devolve `None`: só quem a iniciou
+    /// espera, e reabrir a pasta não espera de novo. Descartar o handle (ou desistir de esperar)
+    /// não interrompe o trabalho; erros só vão para o log.
     pub fn seed_thumbnails(
         &self,
         folder: &gdl_store::ItemId,
         folder_path: PathBuf,
-    ) -> tokio::task::JoinHandle<()> {
+    ) -> Option<tokio::task::JoinHandle<()>> {
         self.thumbs.seed(folder, folder_path)
     }
 
@@ -408,6 +408,8 @@ impl Engine {
             () = self.every(self.intervals.maintenance, true, || self.maintain()) => {}
             () = self.every(self.intervals.eviction, false, || self.evict()) => {}
         }
+        // Desmontagem: as semeaduras em curso param junto, sem apagar nada.
+        self.thumbs.stop();
     }
 
     /// Roda `work` a cada `interval`; com `pausable`, não roda enquanto pausado. Pausar ou

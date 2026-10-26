@@ -83,16 +83,34 @@ pub fn file_for(thumbs_dir: &Path, size: ThumbSize, uri: &str) -> PathBuf {
     thumbs_dir.join(size.dir_name()).join(format!("{hash}.png"))
 }
 
-/// O `Thumb::MTime` de uma miniatura existente, lendo só o cabeçalho do PNG.
-pub fn stored_mtime(file: &Path) -> Option<i64> {
+/// O `Thumb::MTime` e o `Thumb::Size` de uma miniatura existente (cada um `None` se faltar).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp {
+    pub mtime: Option<i64>,
+    pub size: Option<u64>,
+}
+
+/// O `Stamp` de uma miniatura existente, lendo só o cabeçalho do PNG.
+pub fn stored_stamp(file: &Path) -> Option<Stamp> {
     let reader = png::Decoder::new(BufReader::new(File::open(file).ok()?))
         .read_info()
         .ok()?;
-    reader
-        .info()
-        .uncompressed_latin1_text
+    let info = reader.info();
+    Some(Stamp {
+        mtime: text_of(info, "Thumb::MTime"),
+        size: text_of(info, "Thumb::Size"),
+    })
+}
+
+/// O `Thumb::MTime` de uma miniatura existente.
+pub fn stored_mtime(file: &Path) -> Option<i64> {
+    stored_stamp(file)?.mtime
+}
+
+fn text_of<T: std::str::FromStr>(info: &png::Info, key: &str) -> Option<T> {
+    info.uncompressed_latin1_text
         .iter()
-        .find(|t| t.keyword == "Thumb::MTime")?
+        .find(|t| t.keyword == key)?
         .text
         .trim()
         .parse()
@@ -270,6 +288,13 @@ mod tests {
         write_all(tmp.path(), URI, 1_700_000_000, 1, &jpeg(50, 50)).unwrap();
         let f = file_for(tmp.path(), ThumbSize::Normal, URI);
         assert_eq!(stored_mtime(&f), Some(1_700_000_000));
+        assert_eq!(
+            stored_stamp(&f),
+            Some(Stamp {
+                mtime: Some(1_700_000_000),
+                size: Some(1)
+            })
+        );
         assert_eq!(stored_mtime(&tmp.path().join("nao-existe.png")), None);
         let lixo = tmp.path().join("lixo.png");
         std::fs::write(&lixo, [7u8, 1, 200, 33, 9, 250, 0, 4, 5, 6, 77, 88]).unwrap();

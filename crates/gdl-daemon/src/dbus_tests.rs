@@ -95,6 +95,7 @@ async fn logout_removes_seeded_thumbnails() {
     let engine = h.daemon.engine().await.unwrap();
     engine
         .seed_thumbnails(&gdl_store::ItemId(folder), h.drive().join("Fotos"))
+        .expect("nenhuma semeadura em andamento")
         .await
         .unwrap();
 

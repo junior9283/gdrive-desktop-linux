@@ -35,6 +35,8 @@ pub struct RemoteFile {
 pub struct ThumbLink {
     pub id: String,
     pub link: String,
+    /// A data da versão que o Google tem agora (para não gravar a miniatura de outra versão).
+    pub modified_ms: i64,
 }
 
 /// Item de "Compartilhados comigo", com quem compartilhou e quando.
@@ -65,7 +67,7 @@ pub struct About {
     pub quota_used: u64,
 }
 
-fn parse_ms(text: Option<&str>) -> i64 {
+pub(crate) fn parse_ms(text: Option<&str>) -> i64 {
     text.and_then(parse_rfc3339).unwrap_or(0)
 }
 

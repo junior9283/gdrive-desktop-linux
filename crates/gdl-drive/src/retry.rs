@@ -51,9 +51,10 @@ impl From<AuthError> for DriveError {
 
 impl From<reqwest::Error> for DriveError {
     fn from(e: reqwest::Error) -> Self {
-        // Resposta ilegível ou pedido mal montado não se resolvem esperando a rede voltar.
+        // Resposta ilegível ou pedido mal montado não se resolvem esperando a rede voltar. Sem a
+        // URL na mensagem: a de uma miniatura dá acesso à imagem, e o erro vai para o log.
         if e.is_decode() || e.is_builder() {
-            DriveError::Protocol(e.to_string())
+            DriveError::Protocol(e.without_url().to_string())
         } else {
             DriveError::Offline
         }

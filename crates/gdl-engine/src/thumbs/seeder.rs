@@ -4,15 +4,17 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock, RwLockWriteGuard};
 
-use gdl_drive::client::DriveClient;
+use gdl_drive::client::{DriveClient, DriveError, ThumbLink};
 use gdl_store::{Item, ItemId, ItemKind, LocalState, Store, StoreError, ThumbRec};
 use tokio::sync::Semaphore;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 
-use super::freedesktop::{ThumbSize, file_for, remove_all, stored_mtime, uri_of, write_all};
+use super::freedesktop::{
+    Stamp, ThumbError, ThumbSize, file_for, remove_all, stored_stamp, uri_of, write_all,
+};
 use super::mtime_secs;
 
 /// Downloads (com a gravação) de miniatura em paralelo, somando todas as pastas.
@@ -43,17 +45,22 @@ fn needs_seed(
     Ok(!up_to_date && !complete()?)
 }
 
+/// Falha de download que não passa esperando (link que não é de imagem do Google, item sumido,
+/// sem permissão, redirecionamento): o Google responderia igual na próxima abertura.
+fn permanent(e: &DriveError) -> bool {
+    matches!(
+        e,
+        DriveError::Protocol(_)
+            | DriveError::NotFound
+            | DriveError::PermissionDenied
+            | DriveError::Http(300..=399)
+    )
+}
+
 /// Um arquivo a semear: o registro que fica no banco depois de gravado e o tamanho do arquivo.
 struct Job {
     rec: ThumbRec,
     size: u64,
-}
-
-/// Semeadura em andamento de uma pasta.
-struct Running {
-    id: u64,
-    /// Cancelado quando a semeadura termina; quem pediu a mesma pasta espera por ele.
-    done: CancellationToken,
 }
 
 pub(crate) struct ThumbSeeder {
@@ -63,7 +70,8 @@ pub(crate) struct ThumbSeeder {
     /// Token da geração atual. Cada gravação roda com a trava de leitura e confere antes o seu
     /// token; a limpeza cancela com a de escrita, então nada grava depois dela.
     generation: RwLock<CancellationToken>,
-    running: Mutex<HashMap<ItemId, Running>>,
+    /// Pastas em semeadura, com o número de cada semeadura.
+    running: Mutex<HashMap<ItemId, u64>>,
     next_id: AtomicU64,
     /// Limite de downloads e gravações em curso, para o motor inteiro.
     permits: Arc<Semaphore>,
@@ -72,22 +80,20 @@ pub(crate) struct ThumbSeeder {
     busy: tests::Busy,
 }
 
-/// Ao fim da semeadura (inclusive por pânico): sai da lista e avisa quem espera.
+/// Ao fim da semeadura (inclusive por pânico): sai da lista.
 struct Finish {
     seeder: Arc<ThumbSeeder>,
     folder: ItemId,
     id: u64,
-    done: CancellationToken,
 }
 
 impl Drop for Finish {
     fn drop(&mut self) {
         let mut running = self.seeder.running();
         // A limpeza esvazia a lista: a pasta pode já ser de uma semeadura nova.
-        if running.get(&self.folder).is_some_and(|r| r.id == self.id) {
+        if running.get(&self.folder) == Some(&self.id) {
             running.remove(&self.folder);
         }
-        self.done.cancel();
     }
 }
 
@@ -106,12 +112,16 @@ impl ThumbSeeder {
         }
     }
 
-    fn running(&self) -> MutexGuard<'_, HashMap<ItemId, Running>> {
+    fn running(&self) -> MutexGuard<'_, HashMap<ItemId, u64>> {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Ver `Engine::seed_thumbnails`.
-    pub(crate) fn seed(self: &Arc<Self>, folder: &ItemId, folder_path: PathBuf) -> JoinHandle<()> {
+    pub(crate) fn seed(
+        self: &Arc<Self>,
+        folder: &ItemId,
+        folder_path: PathBuf,
+    ) -> Option<JoinHandle<()>> {
         // Travas sempre na ordem `generation` → `running`, como na limpeza. Com a de leitura
         // presa até registrar a pasta, uma limpeza vem inteira antes (e esta semeadura nasce na
         // geração nova) ou inteira depois (e cancela esta, mesmo antes de começar).
@@ -120,33 +130,26 @@ impl ThumbSeeder {
             .read()
             .unwrap_or_else(PoisonError::into_inner);
         let mut running = self.running();
-        if let Some(r) = running.get(folder) {
-            return tokio::spawn(r.done.clone().cancelled_owned());
+        if running.contains_key(folder) {
+            return None;
         }
         let finish = Finish {
             seeder: self.clone(),
             folder: folder.clone(),
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
-            done: CancellationToken::new(),
         };
-        running.insert(
-            folder.clone(),
-            Running {
-                id: finish.id,
-                done: finish.done.clone(),
-            },
-        );
+        running.insert(folder.clone(), finish.id);
         let cancel = generation.child_token();
         drop(running);
         drop(generation);
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             let seeder = finish.seeder.clone();
             tokio::select! {
                 () = cancel.cancelled() => {}
                 () = seeder.seed_folder(&finish.folder, folder_path, &cancel) => {}
             }
             drop(finish);
-        })
+        }))
     }
 
     async fn seed_folder(
@@ -167,11 +170,13 @@ impl ThumbSeeder {
             Ok(jobs) => jobs,
             Err(e) => return tracing::debug!(erro = %e, "falha ao ler a pasta para miniaturas"),
         };
-        let mut links: HashMap<String, String> = match self.client.thumbnail_links(&folder.0).await
-        {
-            Ok(links) => links.into_iter().map(|l| (l.id, l.link)).collect(),
-            Err(e) => return tracing::debug!(erro = %e, "falha ao listar as miniaturas da pasta"),
-        };
+        let mut links: HashMap<String, ThumbLink> =
+            match self.client.thumbnail_links(&folder.0).await {
+                Ok(links) => links.into_iter().map(|l| (l.id.clone(), l)).collect(),
+                Err(e) => {
+                    return tracing::debug!(erro = %e, "falha ao listar as miniaturas da pasta");
+                }
+            };
         let mut tasks = JoinSet::new();
         let mut without_link = Vec::new();
         for job in pending {
@@ -179,6 +184,11 @@ impl ThumbSeeder {
                 without_link.push(job.rec);
                 continue;
             };
+            // O Google já tem outra versão, que o feed de mudanças ainda não trouxe: a miniatura
+            // seria dela. Sem memória, para tentar de novo quando o banco alcançar.
+            if link.modified_ms != job.rec.modified_ms {
+                continue;
+            }
             let (this, cancel) = (self.clone(), cancel.clone());
             tasks.spawn(async move {
                 // Presa até o fim da gravação.
@@ -187,7 +197,7 @@ impl ThumbSeeder {
                 };
                 #[cfg(test)]
                 let _busy = this.busy.enter();
-                this.seed_one(job, &link, cancel).await;
+                this.seed_one(job, &link.link, cancel).await;
             });
         }
         // Sem miniatura no Google: lembra mesmo assim, para não listar a pasta a cada abertura;
@@ -203,8 +213,8 @@ impl ThumbSeeder {
         }
     }
 
-    /// Os arquivos da pasta que precisam de miniatura. Os que já têm os três PNGs em dia (de
-    /// uma semeadura cuja memória se perdeu) só voltam para a memória.
+    /// Os arquivos da pasta que precisam de miniatura. Os sem memória que já têm os três PNGs em
+    /// dia (de uma semeadura cuja memória se perdeu) só voltam para ela.
     fn pending(
         &self,
         folder: &ItemId,
@@ -218,6 +228,7 @@ impl ThumbSeeder {
         for item in self.store.children(folder)?.into_iter().filter(seedable) {
             let uri = uri_of(&folder_path.join(&item.local_name));
             let rec = recs.remove(&item.id);
+            let remembered = rec.is_some();
             if !needs_seed(&item, rec.as_ref(), &uri, || {
                 self.store.is_complete(&item.id, item.size)
             })? {
@@ -236,10 +247,15 @@ impl ThumbSeeder {
                 },
                 size: item.size,
             };
-            let mtime = mtime_secs(job.rec.modified_ms);
-            if ThumbSize::ALL
-                .iter()
-                .all(|&s| stored_mtime(&file_for(&self.dir, s, &job.rec.uri)) == Some(mtime))
+            // Só sem memória: com a de outra versão, a mesma data não prova que a imagem é desta.
+            let stamp = Stamp {
+                mtime: Some(mtime_secs(job.rec.modified_ms)),
+                size: Some(job.size),
+            };
+            if !remembered
+                && ThumbSize::ALL
+                    .iter()
+                    .all(|&s| stored_stamp(&file_for(&self.dir, s, &job.rec.uri)) == Some(stamp))
             {
                 current.push(job.rec);
                 continue;
@@ -258,7 +274,18 @@ impl ThumbSeeder {
         let image = match self.client.fetch_thumbnail(link, FETCH_SIZE).await {
             Ok(image) => image,
             Err(e) => {
-                return tracing::debug!(erro = %e, item = %job.rec.id.0, "falha ao baixar a miniatura");
+                tracing::debug!(erro = %e, item = %job.rec.id.0, "falha ao baixar a miniatura");
+                // Lembrada sem PNG, como o item sem miniatura; uma versão nova tenta de novo. As
+                // passageiras (rede, servidor, limite de taxa) ficam sem memória.
+                if permanent(&e) {
+                    let this = self.clone();
+                    let remembered =
+                        tokio::task::spawn_blocking(move || this.remember(&[job.rec], &cancel));
+                    if let Err(e) = remembered.await {
+                        tracing::debug!(erro = %e, "falha ao lembrar a miniatura que falhou");
+                    }
+                }
+                return;
             }
         };
         let this = self.clone();
@@ -269,17 +296,18 @@ impl ThumbSeeder {
     }
 
     /// Grava os três tamanhos e lembra deles. Se algo falha, apaga o que ficou pela metade:
-    /// um PNG sem memória não seria apagado na saída da conta.
+    /// um PNG sem memória não seria apagado na saída da conta. Imagem que não decodifica é
+    /// lembrada sem PNG: o Google mandaria a mesma de novo.
     fn write(&self, job: &Job, image: &[u8], cancel: &CancellationToken) {
         let rec = &job.rec;
         let result = self.unless_cancelled(cancel, || {
-            write_all(
-                &self.dir,
-                &rec.uri,
-                mtime_secs(rec.modified_ms),
-                job.size,
-                image,
-            )?;
+            let mtime = mtime_secs(rec.modified_ms);
+            match write_all(&self.dir, &rec.uri, mtime, job.size, image) {
+                Err(ThumbError::Decode(e)) => {
+                    tracing::debug!(erro = %e, item = %rec.id.0, "miniatura ilegível; lembrada sem PNG");
+                }
+                written => written?,
+            }
             self.store.put_thumb(rec)?;
             Ok::<_, AnyError>(())
         });
@@ -304,9 +332,9 @@ impl ThumbSeeder {
         (!cancel.is_cancelled()).then(f)
     }
 
-    /// Ver `Engine::purge_thumbnails`.
-    pub(crate) fn purge(&self) {
-        // A trava de escrita espera as gravações em curso; depois dela, as antigas não gravam.
+    /// Cancela as semeaduras em curso e passa para uma geração nova. Devolve a trava de escrita,
+    /// que esperou as gravações em curso: enquanto ela vive, nada grava.
+    fn cancel_all(&self) -> RwLockWriteGuard<'_, CancellationToken> {
         // Ordem das travas: `generation` → `running`, a mesma de `seed`.
         let mut generation = self
             .generation
@@ -314,14 +342,26 @@ impl ThumbSeeder {
             .unwrap_or_else(PoisonError::into_inner);
         generation.cancel();
         *generation = CancellationToken::new();
-        // Uma semeadura nova da mesma pasta não deve esperar a cancelada.
+        // Uma semeadura nova da mesma pasta não deve esbarrar na cancelada.
         self.running().clear();
+        generation
+    }
+
+    /// O motor parou: cancela as semeaduras em curso, sem apagar nada.
+    pub(crate) fn stop(&self) {
+        drop(self.cancel_all());
+    }
+
+    /// Ver `Engine::purge_thumbnails`.
+    pub(crate) fn purge(&self) {
+        // Com a trava presa até o fim, nenhuma gravação antiga volta depois da limpeza.
+        let _generation = self.cancel_all();
         match self.store.all_thumbs() {
             Ok(recs) => recs.iter().for_each(|r| remove_all(&self.dir, &r.uri)),
-            Err(e) => tracing::debug!(erro = %e, "falha ao listar as miniaturas semeadas"),
+            Err(e) => tracing::warn!(erro = %e, "falha ao listar as miniaturas semeadas"),
         }
         if let Err(e) = self.store.clear_thumbs() {
-            tracing::debug!(erro = %e, "falha ao esquecer as miniaturas semeadas");
+            tracing::warn!(erro = %e, "falha ao esquecer as miniaturas semeadas");
         }
     }
 }
@@ -337,7 +377,9 @@ mod tests {
     use super::*;
     use crate::engine::Engine;
     use crate::testutil::{indexed_engine, wait_until};
-    use crate::thumbs::freedesktop::{ThumbSize, file_for, stored_mtime, uri_of, write_all};
+    use crate::thumbs::freedesktop::{
+        ThumbSize, file_for, stored_mtime, stored_stamp, uri_of, write_all,
+    };
     use crate::thumbs::mtime_secs;
 
     /// Conta o trabalho em curso e guarda o máximo simultâneo.
@@ -503,6 +545,7 @@ mod tests {
         async fn seed(&self) {
             self.engine
                 .seed_thumbnails(&self.folder, self.folder_path.clone())
+                .expect("nenhuma semeadura em andamento")
                 .await
                 .unwrap();
         }
@@ -597,6 +640,7 @@ mod tests {
         let list = fake.requests(LIST);
         engine
             .seed_thumbnails(&ItemId(folder), tmp.path().join("m/Docs"))
+            .unwrap()
             .await
             .unwrap();
         assert_eq!(fake.requests(LIST), list);
@@ -615,8 +659,9 @@ mod tests {
         let list = s.fake.requests(LIST);
         let first = s.engine.seed_thumbnails(&s.folder, s.folder_path.clone());
         let second = s.engine.seed_thumbnails(&s.folder, s.folder_path.clone());
-        first.await.unwrap();
-        second.await.unwrap();
+        // Quem chega durante a semeadura não recebe o que esperar: só quem a iniciou espera.
+        assert!(second.is_none());
+        first.expect("a primeira inicia").await.unwrap();
         assert_eq!(s.fake.requests("/thumb"), 2);
         assert_eq!(s.fake.requests(LIST) - list, alone_lists, "uma só listagem");
         assert_eq!(s.pngs(), 6);
@@ -639,7 +684,11 @@ mod tests {
         let engine = Arc::new(engine);
         let handles: Vec<_> = folders
             .iter()
-            .map(|f| engine.seed_thumbnails(&ItemId(f.clone()), tmp.path().join("m").join(f)))
+            .map(|f| {
+                engine
+                    .seed_thumbnails(&ItemId(f.clone()), tmp.path().join("m").join(f))
+                    .unwrap()
+            })
             .collect();
         for h in handles {
             h.await.unwrap();
@@ -661,19 +710,125 @@ mod tests {
         assert!(s.engine.store.all_thumbs().unwrap().is_empty());
     }
 
+    /// Falha que não passa esperando (redirecionamento, 403, 404): lembrada sem PNG, como o item
+    /// sem miniatura; a próxima abertura não chama a API. Antes, nada ficava na memória e cada
+    /// abertura da pasta repetia a listagem e os downloads condenados.
     #[tokio::test]
-    async fn thumbnail_download_error_leaves_no_record() {
-        let (s, [a, b, _]) = setup().await;
-        s.fake.redirect_thumbs_to("http://exemplo.invalid/x");
-        s.seed().await;
-        assert_eq!(s.pngs(), 0);
-        for id in [a, b] {
-            assert!(s.engine.store.thumb(&ItemId(id)).unwrap().is_none());
+    async fn permanent_thumbnail_errors_are_remembered() {
+        for fault in ["redirecionamento", "403", "404"] {
+            let (s, [a, b, _]) = setup().await;
+            match fault {
+                "redirecionamento" => s.fake.redirect_thumbs_to("http://exemplo.invalid/x"),
+                code => s.fake.inject(Fault::ThumbStatus(code.parse().unwrap())),
+            }
+            s.seed().await;
+            assert_eq!(s.pngs(), 0, "{fault}");
+            for id in [&a, &b] {
+                let rec = s.engine.store.thumb(&ItemId(id.clone())).unwrap();
+                assert_eq!(
+                    rec.map(|r| r.revision),
+                    Some(s.item(id).head_revision),
+                    "{fault}"
+                );
+            }
+            assert_eq!(s.fake.requests("/thumb"), 2, "{fault}");
+            let list = s.fake.requests(LIST);
+            s.seed().await;
+            assert_eq!(s.fake.requests("/thumb"), 2, "{fault}: baixou de novo");
+            assert_eq!(s.fake.requests(LIST), list, "{fault}: listou de novo");
         }
-        assert_eq!(s.fake.requests("/thumb"), 2);
-        // Sem memória, a próxima abertura tenta de novo.
+    }
+
+    /// Falha passageira (servidor, limite de taxa): sem memória, a próxima abertura tenta de novo.
+    #[tokio::test]
+    async fn transient_thumbnail_errors_are_not_remembered() {
+        for code in [500, 429] {
+            let (s, [a, b, _]) = setup().await;
+            s.fake.inject(Fault::ThumbStatus(code));
+            s.seed().await;
+            assert_eq!(s.pngs(), 0, "{code}");
+            for id in [&a, &b] {
+                let rec = s.engine.store.thumb(&ItemId(id.clone())).unwrap();
+                assert!(rec.is_none(), "{code}");
+            }
+            let thumbs = s.fake.requests("/thumb");
+            s.fake.clear_faults();
+            s.seed().await;
+            assert_eq!(s.fake.requests("/thumb"), thumbs + 2, "{code}");
+            assert_eq!(s.pngs(), 6, "{code}");
+        }
+    }
+
+    /// Imagem que não decodifica: o Google mandaria a mesma de novo; lembrada sem PNG.
+    #[tokio::test]
+    async fn undecodable_thumbnail_is_remembered_without_png() {
+        let (s, [a, ..]) = setup().await;
+        let item = s.item(&a);
+        let job = Job {
+            rec: rec_of(&item, &s.uri(FOTO)),
+            size: item.size,
+        };
+        s.engine
+            .thumbs
+            .write(&job, b"nao e imagem", &CancellationToken::new());
+        assert_eq!(s.pngs(), 0);
+        assert_eq!(s.engine.store.thumb(&ItemId(a)).unwrap(), Some(job.rec));
+    }
+
+    /// Memória de outra revisão: baixa de novo, mesmo com PNGs do mesmo `Thumb::MTime` (a data
+    /// sozinha não prova que a imagem é desta versão).
+    #[tokio::test]
+    async fn rec_of_old_revision_redownloads_despite_current_pngs() {
+        let (s, [a, ..]) = setup().await;
         s.seed().await;
-        assert_eq!(s.fake.requests("/thumb"), 4);
+        let old = ThumbRec {
+            revision: Some("r-antiga".into()),
+            ..s.engine.store.thumb(&ItemId(a.clone())).unwrap().unwrap()
+        };
+        s.engine.store.put_thumb(&old).unwrap();
+        let thumbs = s.fake.requests("/thumb");
+
+        s.seed().await;
+        assert_eq!(s.fake.requests("/thumb"), thumbs + 1);
+        let rec = s.engine.store.thumb(&ItemId(a.clone())).unwrap().unwrap();
+        assert_eq!(rec.revision, s.item(&a).head_revision);
+    }
+
+    /// Sem memória, os PNGs só são adotados se também o `Thumb::Size` bate com o arquivo.
+    #[tokio::test]
+    async fn pngs_of_other_size_are_not_adopted() {
+        let (s, [a, ..]) = setup().await;
+        s.seed().await;
+        s.engine.store.clear_thumbs().unwrap();
+        let mtime = mtime_secs(s.item(&a).modified_ms);
+        write_all(s.dir(), &s.uri(FOTO), mtime, 999, &tiny_png()).unwrap();
+        let thumbs = s.fake.requests("/thumb");
+
+        s.seed().await;
+        assert_eq!(s.fake.requests("/thumb"), thumbs + 1, "só a foto é baixada");
+        let size = stored_stamp(&file_for(s.dir(), ThumbSize::Normal, &s.uri(FOTO)))
+            .and_then(|st| st.size);
+        assert_eq!(size, Some(s.item(&a).size));
+    }
+
+    /// O Google já tem uma versão mais nova que o banco (o feed de mudanças ainda não chegou):
+    /// a miniatura seria da outra versão. Pula sem memória e semeia depois do feed.
+    #[tokio::test]
+    async fn remote_version_ahead_of_local_is_skipped_without_memory() {
+        let (s, [a, b, _]) = setup().await;
+        s.fake.modify_remote(&a, vec![3; 20]);
+
+        s.seed().await;
+        assert_eq!(s.mtimes(FOTO), vec![None; 3]);
+        assert!(s.engine.store.thumb(&ItemId(a.clone())).unwrap().is_none());
+        assert!(s.engine.store.thumb(&ItemId(b)).unwrap().is_some());
+        assert_eq!(s.fake.requests("/thumb"), 1);
+
+        s.engine.poller.run_once().await.unwrap();
+        s.seed().await;
+        let mtime = mtime_secs(s.item(&a).modified_ms);
+        assert_eq!(s.mtimes(FOTO), vec![Some(mtime); 3]);
+        assert_eq!(s.fake.requests("/thumb"), 2);
     }
 
     #[tokio::test]
@@ -740,10 +895,10 @@ mod tests {
     #[tokio::test]
     async fn dropped_handle_keeps_seeding() {
         let (s, _) = setup().await;
-        drop(s.engine.seed_thumbnails(&s.folder, s.folder_path.clone()));
+        let first = s.engine.seed_thumbnails(&s.folder, s.folder_path.clone());
         let timed_out = tokio::time::timeout(
             std::time::Duration::from_millis(1),
-            s.engine.seed_thumbnails(&s.folder, s.folder_path.clone()),
+            first.expect("a primeira inicia"),
         )
         .await;
         drop(timed_out);
@@ -751,6 +906,37 @@ mod tests {
             s.engine.store.all_thumbs().unwrap().len() == 3
         })
         .await;
+        assert_eq!(s.pngs(), 6);
+    }
+
+    /// Parar o motor (desmontagem) cancela as semeaduras em curso, sem apagar o que já foi feito.
+    #[tokio::test]
+    async fn engine_stop_cancels_running_seeds_without_purging() {
+        let (s, [a, ..]) = setup().await;
+        s.seed().await;
+        s.fake.modify_remote(&a, vec![3; 20]);
+        s.engine.poller.run_once().await.unwrap();
+        s.fake
+            .inject(Fault::DelayThumbs(std::time::Duration::from_secs(10)));
+        let running = s
+            .engine
+            .seed_thumbnails(&s.folder, s.folder_path.clone())
+            .unwrap();
+
+        let stop = CancellationToken::new();
+        let run = tokio::spawn({
+            let (engine, stop) = (s.engine.clone(), stop.clone());
+            async move { engine.run(stop).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        stop.cancel();
+        run.await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), running)
+            .await
+            .expect("a semeadura parou com o motor")
+            .unwrap();
+        // Nada foi apagado: a memória e os PNGs da semeadura anterior ficam.
+        assert_eq!(s.engine.store.all_thumbs().unwrap().len(), 3);
         assert_eq!(s.pngs(), 6);
     }
 
@@ -773,7 +959,7 @@ mod tests {
         let (s, _) = setup().await;
         let running = s.engine.seed_thumbnails(&s.folder, s.folder_path.clone());
         s.engine.purge_thumbnails();
-        running.await.unwrap();
+        running.unwrap().await.unwrap();
         assert_eq!(s.pngs(), 0, "nada gravado depois da limpeza");
         assert!(s.engine.store.all_thumbs().unwrap().is_empty());
 
@@ -797,7 +983,7 @@ mod tests {
             let running = s.engine.seed_thumbnails(&s.folder, s.folder_path.clone());
             tokio::time::sleep(full * i / 8).await;
             s.engine.purge_thumbnails();
-            running.await.unwrap();
+            running.unwrap().await.unwrap();
             // Uma gravação que escapasse da limpeza terminaria aqui.
             tokio::time::sleep(full).await;
             assert_eq!(s.pngs(), 0, "rodada {i}");

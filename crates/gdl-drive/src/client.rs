@@ -307,11 +307,12 @@ impl DriveClient {
     }
 
     /// `link` como endereço de imagem (`what`: "foto", "miniatura"), recusando quem não seja o
-    /// servidor de imagens do Google nem a origem da API.
+    /// servidor de imagens do Google nem a origem da API. O erro (que vai para o log) mostra no
+    /// máximo o host: o caminho do link dá acesso à imagem.
     fn checked_image_url(&self, link: &str, what: &str) -> Result<Url> {
         let url: Url = link
             .parse()
-            .map_err(|_| DriveError::Protocol(format!("endereço de {what} inválido: {link}")))?;
+            .map_err(|_| DriveError::Protocol(format!("endereço de {what} inválido")))?;
         if !image_host_allowed(&url, &self.base) {
             let host = url.host_str().unwrap_or_default();
             return Err(DriveError::Protocol(format!(
@@ -328,18 +329,25 @@ impl DriveClient {
         struct Item {
             id: String,
             thumbnail_link: Option<String>,
+            modified_time: Option<String>,
         }
         let q = format!("'{folder_id}' in parents and trashed = false");
         let mut links = Vec::new();
-        self.list(&q, "id,thumbnailLink", 1000, |items: Vec<Item>| {
-            links.extend(items.into_iter().filter_map(|i| {
-                Some(ThumbLink {
-                    id: i.id,
-                    link: i.thumbnail_link?,
-                })
-            }));
-            Ok::<_, DriveError>(true)
-        })
+        self.list(
+            &q,
+            "id,thumbnailLink,modifiedTime",
+            1000,
+            |items: Vec<Item>| {
+                links.extend(items.into_iter().filter_map(|i| {
+                    Some(ThumbLink {
+                        id: i.id,
+                        link: i.thumbnail_link?,
+                        modified_ms: parse_ms(i.modified_time.as_deref()),
+                    })
+                }));
+                Ok::<_, DriveError>(true)
+            },
+        )
         .await?;
         Ok(links)
     }
@@ -1060,7 +1068,19 @@ mod tests {
             .join(&format!("/thumb/{foto}=s220"))
             .unwrap()
             .to_string();
-        assert_eq!(links, vec![ThumbLink { id: foto, link }]);
+        let modified = fake.meta(&foto)["modifiedTime"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let modified_ms = gdl_common::time::parse_rfc3339(&modified).unwrap();
+        assert_eq!(
+            links,
+            vec![ThumbLink {
+                id: foto,
+                link,
+                modified_ms
+            }]
+        );
     }
 
     #[tokio::test]
@@ -1117,6 +1137,22 @@ mod tests {
                 ),
                 "{link}"
             );
+        }
+    }
+
+    /// O `thumbnailLink` dá acesso à imagem: o erro (que vai para o log) não mostra o caminho.
+    #[tokio::test]
+    async fn bad_thumbnail_link_error_hides_the_path() {
+        let fake = FakeDrive::start().await;
+        let c = client(&fake);
+        for link in [
+            "https://lh3.googleusercontent.com:99999/caminho-secreto=s220",
+            "https://exemplo.com/caminho-secreto=s220",
+        ] {
+            let Err(DriveError::Protocol(msg)) = c.fetch_thumbnail(link, 512).await else {
+                panic!("{link} deveria ser recusado");
+            };
+            assert!(!msg.contains("caminho-secreto"), "{msg}");
         }
     }
 

@@ -58,6 +58,8 @@ Servidor HTTP local com a Drive API v3, o OAuth com PKCE e falhas injetáveis
 | `DropConnectionAfterBytes(n)` | a conexão cai depois de `n` bytes |
 | `StallConnectionAfterBytes(n)` | a transferência empaca depois de `n` bytes (o serviço "morre" no meio) |
 | `LoseCreateResponses { times }` | a criação é feita, mas a resposta não chega |
+| `DelayThumbs(d)` | cada miniatura (`/thumb`) demora `d` para responder |
+| `ThumbStatus(code)` | cada miniatura (`/thumb`) responde o erro `code` da API |
 
 Ele também conta requisições (`requests`, `requests_by_method`) e bytes baixados, que é como os
 testes provam desempenho.
@@ -206,3 +208,11 @@ Roteiro da 0.3 no Plasma (Nobara). **Situação: pendente.**
 1. [ ] Abrir no Dolphin uma pasta de fotos nunca aberta: as miniaturas aparecem e o cache de
    conteúdo não cresce (confira na tabela `ranges` do `metadata.db` da conta, ou no tamanho de
    `content/`, antes e depois). Sair da conta apaga as miniaturas gravadas.
+2. [ ] Conferir os PNGs gravados em `~/.cache/thumbnails/{normal,large,x-large}` (um por
+   tamanho, com data de agora; `xx-large` não é gravado). O nome é o MD5 da URI `file://` do
+   arquivo na montagem.
+3. [ ] Procurar falhas de miniatura no journal:
+   `journalctl --user -u gdrive-desktop-linuxd | grep -i miniatura`. Só as da limpeza na saída
+   da conta (`warn`) aparecem: o serviço registra de `info` para cima, e as de listagem,
+   download e gravação são `debug`. Nenhuma mensagem pode mostrar o `thumbnailLink` inteiro
+   (no máximo o host ou o ID do arquivo).

@@ -1,7 +1,8 @@
 #!/bin/sh
 # Instala o app para uso, sem root, em <prefixo> (padrão ~/.local): os programas, o serviço do
 # usuário (systemd), a ativação do serviço e da janela pelo D-Bus, o .desktop (menu e ponteiros
-# dos Documentos Google), os tipos dos ponteiros e os ícones.
+# dos Documentos Google), os tipos dos ponteiros, os ícones e o menu do botão direito nos
+# gerenciadores de arquivos GTK.
 #
 #   scripts/install-dev.sh [--prefix DIR] [--destdir DIR] [--from DIR] [--dry-run] [--no-activate]
 #
@@ -88,6 +89,12 @@ remove "$share/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLin
 # Os ícones da bandeja, no tema próprio que ela procura ao lado dos programas.
 for file in "$repo"/assets/icons/hicolor/scalable/status/*.svg; do
   install_as 644 "$file" "$share/gdrive-desktop-linux/icons/hicolor/scalable/status/$(basename "$file")"
+done
+# O menu do botão direito no Nautilus, no Nemo, no Caja e no Thunar: a mesma extensão na pasta de
+# cada um (só carrega onde o pacote de Python do gerenciador estiver instalado).
+for manager in nautilus nemo caja thunarx; do
+  install_as 644 "$repo/integrations/gtk/gdrive_desktop_linux_menu.py" \
+    "$share/$manager-python/extensions/gdrive_desktop_linux_menu.py"
 done
 
 # Os pacotes trazem um marcador do formato no lugar da lista (o gerenciador sabe o que é dele).

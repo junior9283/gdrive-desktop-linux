@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Serviço falso para os testes do plugin do Dolphin: responde `Menu` e `MenuAction` como o
-serviço real, com o "Meu Drive" na pasta do segundo argumento. Cada `MenuAction` vai para o
-arquivo do primeiro argumento."""
+"""Serviço falso para os testes das extensões dos gerenciadores de arquivos: responde `Menu` e
+`MenuAction` como o serviço real, com o "Meu Drive" na pasta do segundo argumento. Cada
+`MenuAction` vai para o arquivo do primeiro argumento."""
 
 import sys
 

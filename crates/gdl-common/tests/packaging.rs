@@ -24,6 +24,10 @@ const FILES: &[&str] = &[
     "share/icons/hicolor/256x256/apps/io.github.junior9283.GDriveDesktopLinux.png",
     "share/gdrive-desktop-linux/icons/hicolor/scalable/status/gdl-synced.svg",
     "share/gdrive-desktop-linux/icons/hicolor/scalable/status/gdl-syncing-4.svg",
+    "share/nautilus-python/extensions/gdrive_desktop_linux_menu.py",
+    "share/nemo-python/extensions/gdrive_desktop_linux_menu.py",
+    "share/caja-python/extensions/gdrive_desktop_linux_menu.py",
+    "share/thunarx-python/extensions/gdrive_desktop_linux_menu.py",
 ];
 
 fn repo() -> PathBuf {

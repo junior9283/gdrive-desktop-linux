@@ -29,7 +29,7 @@ expect() { # NOME ESPERADO OBTIDO
 
 expect "sem o serviço, nada aparece" "(sem menu)" "$("$probe" "$d/a.txt")"
 
-python3 -I -W ignore::DeprecationWarning "$here/fake_service.py" "$work/actions" "$d" >"$work/ready" &
+python3 -I -W ignore::DeprecationWarning "$here/../../testing/fake_service.py" "$work/actions" "$d" >"$work/ready" &
 fake=$!
 until grep -q pronto "$work/ready" 2>/dev/null; do sleep 0.1; done
 

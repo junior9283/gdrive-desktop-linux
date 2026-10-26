@@ -41,6 +41,7 @@ use gdl_ipc::{
     SyncErrorItem,
 };
 
+use crate::cosmic;
 use crate::dbus::Service;
 use crate::desktop;
 use crate::history::History;
@@ -201,6 +202,12 @@ fn picked(engine: &Engine, item: &Item) -> Result<menu::Picked, ServiceError> {
     })
 }
 
+/// A pasta dos programas: a bandeja e a CLI ficam ao lado do serviço (em /usr/bin, ou no prefixo
+/// do install-dev.sh).
+fn bin_dir() -> PathBuf {
+    gdl_common::paths::exe_dir().unwrap_or_else(|| "/usr/bin".into())
+}
+
 fn web_link(item: &Item) -> Result<String, ServiceError> {
     web_url(item).ok_or_else(|| ServiceError::NotFound(item.id.0.clone()))
 }
@@ -291,6 +298,7 @@ impl Daemon {
         let _ = self.notifier.set(notifier);
         let _ = self.conn.set(conn);
         self.apply_autostart();
+        self.apply_cosmic_actions();
         let daemon = Arc::downgrade(self);
         tokio::spawn(async move {
             while let Some(signal) = actions.next().await {
@@ -450,10 +458,19 @@ impl Daemon {
     /// `AutoStartOnLogin` em `~/.config/autostart`.
     fn apply_autostart(&self) {
         let enabled = self.prefs().auto_start_on_login;
-        // A bandeja fica ao lado do serviço (em /usr/bin, ou no prefixo do install-dev.sh).
-        let bin = gdl_common::paths::exe_dir().unwrap_or_else(|| "/usr/bin".into());
-        if let Err(e) = desktop::set_autostart(&self.config.paths.config_home, &bin, enabled) {
+        if let Err(e) = desktop::set_autostart(&self.config.paths.config_home, &bin_dir(), enabled)
+        {
             tracing::warn!(erro = %e, "não deu para ajustar o início automático");
+        }
+    }
+
+    /// As ações do Google Drive no menu do botão direito do COSMIC Files (que não aceita
+    /// extensões; os outros gerenciadores trazem a sua dos pacotes).
+    fn apply_cosmic_actions(&self) {
+        let label = |action: menu::Action| self.i18n.tr(action.label_key(), &[]);
+        let config_home = &self.config.paths.config_home;
+        if let Err(e) = cosmic::add_actions(config_home, &bin_dir(), label) {
+            tracing::warn!(erro = %e, "não deu para ajustar as ações do COSMIC Files");
         }
     }
 
@@ -1404,6 +1421,7 @@ impl Daemon {
         let paths = self.config.paths.clone();
         tokio::task::spawn_blocking(move || {
             desktop::remove_autostart(&paths.config_home)?;
+            cosmic::remove_actions(&paths.config_home)?;
             let places = paths.data_home.join("user-places.xbel");
             desktop::set_sidebar_place(&places, &mount_point, "", false)?;
             // Desmontada, a pasta fica vazia; com algo dentro, fica.

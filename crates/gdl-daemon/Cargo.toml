@@ -22,6 +22,7 @@ gdl-ipc.workspace = true
 gdl-store.workspace = true
 regex.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
+ron.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

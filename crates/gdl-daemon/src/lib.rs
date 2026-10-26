@@ -1,5 +1,6 @@
 //! Serviço do usuário: login, montagem da conta, interface D-Bus e notificações.
 
+pub mod cosmic;
 pub mod daemon;
 pub mod dbus;
 pub mod desktop;

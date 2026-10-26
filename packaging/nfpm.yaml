@@ -1,6 +1,7 @@
 # Os pacotes .deb, .rpm e Arch (scripts/package.sh acrescenta a lista de arquivos). As dependências
 # são só o que os programas carregam (a janela: WebKitGTK e D-Bus) e o FUSE 3 da montagem; no .rpm
-# vão pelo nome da biblioteca, que serve ao Fedora e ao openSUSE.
+# vão pelo nome da biblioteca, que serve ao Fedora e ao openSUSE. Os bindings Python do menu do
+# botão direito no Nautilus, Nemo, Caja e Thunar são só sugeridos: o apt instalaria recomendações.
 name: gdrive-desktop-linux
 arch: amd64
 platform: linux
@@ -21,11 +22,22 @@ overrides:
       - fuse3
       - libwebkit2gtk-4.1-0
       - libdbus-1-3
+    # O menu do botão direito em cada gerenciador GTK (sem eles, só não aparece).
+    suggests:
+      - python3-nautilus
+      - python3-nemo
+      - python-caja
+      - thunarx-python
   rpm:
     depends:
       - fuse3
       - libwebkit2gtk-4.1.so.0()(64bit)
       - libdbus-1.so.3()(64bit)
+    suggests:
+      - nautilus-python
+      - nemo-python
+      - python3-caja
+      - thunarx-python
   archlinux:
     depends:
       - fuse3

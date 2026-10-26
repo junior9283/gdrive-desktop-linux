@@ -7,11 +7,20 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.5.0] - 2026-10-26
+
 ### Adicionado
-- Menu "Google Drive" no botão direito do Dolphin, só nos itens do Meu Drive: abrir no navegador,
-  copiar link, Disponível off-line / Somente on-line (com a marca atual), novo Documento, Planilha
-  ou Apresentação Google na pasta, atualizar a pasta e ver a lixeira. O serviço decide os itens
-  (métodos D-Bus `Menu` e `MenuAction`), e o plugin vai nos pacotes `.deb`, `.rpm` e Arch.
+- Menu "Google Drive" no botão direito, só nos itens do Meu Drive: abrir no navegador, copiar link,
+  Disponível off-line / Somente on-line (com a marca atual), novo Documento, Planilha ou
+  Apresentação Google na pasta, atualizar a pasta e ver a lixeira. O serviço decide os itens
+  (métodos D-Bus `Menu` e `MenuAction`) e cada gerenciador só desenha:
+  - Dolphin: plugin KF6 nos pacotes `.deb`, `.rpm` e Arch;
+  - Nautilus, Nemo, Caja e Thunar: uma extensão Python em todos os formatos (os pacotes sugerem
+    os bindings de cada um);
+  - COSMIC Files: ações soltas "Google Drive: …", gravadas pelo serviço na configuração dele e
+    removidas na desinstalação.
+- `gdrive-desktop-linux menu-action <ação> <caminho>…`, com o link na área de transferência e os
+  erros em notificação.
 
 ## [0.4.0] - 2026-10-26
 

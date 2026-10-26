@@ -64,12 +64,13 @@ done
 
 # O .tar.gz: os programas (os mesmos dos pacotes) e o que o install-dev.sh precisa ao lado deles.
 dir="$work/$name-$version"
-mkdir -p "$dir/scripts" "$dir/packaging" "$dir/assets/icons"
+mkdir -p "$dir/scripts" "$dir/packaging" "$dir/assets/icons" "$dir/integrations/gtk"
 cp -r "$work/stage/usr/bin" "$dir/"
 cp "$repo/scripts/install-dev.sh" "$dir/scripts/"
 cp -r "$repo/packaging/systemd" "$repo/packaging/dbus" "$repo/packaging/desktop" "$repo/packaging/mime" \
   "$dir/packaging/"
 cp -r "$repo/assets/icons/hicolor" "$dir/assets/icons/"
+cp "$repo/integrations/gtk/gdrive_desktop_linux_menu.py" "$dir/integrations/gtk/"
 cp "$repo/LICENSE" "$repo/README.md" "$repo/packaging/install.sh" "$repo/packaging/uninstall.sh" "$dir/"
 tar -C "$work" -czf "$out/$name-$version-x86_64.tar.gz" "$name-$version"
 

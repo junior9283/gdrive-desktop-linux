@@ -4,7 +4,7 @@
 #   integrations/dolphin/build.sh <saída>
 #
 # Precisa do CMake, do ECM, do Qt 6 e do KIO 6, e para os testes do PyGObject e do D-Bus (no
-# Debian 13, o debian-deps.sh ao lado instala tudo).
+# Debian 13, o integrations/debian-deps.sh instala tudo).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$1"

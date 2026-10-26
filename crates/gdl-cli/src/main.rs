@@ -15,6 +15,7 @@ use gdl_common::time::rfc3339;
 use gdl_engine::gdocs::{open_url, pointer_doc_id};
 use gdl_ipc::{ServiceError, ServiceProxy};
 
+mod menu_action;
 mod uninstall;
 
 #[derive(Parser)]
@@ -64,6 +65,13 @@ enum Command {
     },
     /// Abre um ponteiro (`.gdoc`, `.gsheet`…) no navegador.
     OpenPointer { file: PathBuf },
+    /// Faz uma ação do menu do botão direito (`copy-link`, `offline`…) nos itens; o resultado
+    /// aparece na área de trabalho (o COSMIC Files roda isto sem terminal).
+    MenuAction {
+        action: String,
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
     /// Desinstala o app (pede a senha de administrador se ele veio de um pacote).
     Uninstall {
         /// Apaga também os dados deste computador (desconecte a conta antes).
@@ -159,8 +167,40 @@ async fn service(command: Command, i18n: &I18n) -> Res {
             };
             proxy.logout(mode, &dir).await
         }
+        Command::MenuAction { action, paths } => {
+            menu_action(&conn, &proxy, &action, &paths, i18n).await
+        }
         Command::Uninstall { purge, yes } => uninstall(&proxy, purge, yes, i18n).await,
         Command::OpenPointer { .. } => unreachable!("tratado sem o serviço"),
+    }
+}
+
+/// O link vai para a área de transferência (sem programa para isso, aparece numa notificação) e
+/// o erro, numa notificação.
+async fn menu_action(
+    conn: &zbus::Connection,
+    proxy: &ServiceProxy<'_>,
+    action: &str,
+    paths: &[PathBuf],
+    i18n: &I18n,
+) -> Res {
+    let paths = paths.iter().map(|p| absolute(p)).collect::<Res<Vec<_>>>()?;
+    let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
+    match proxy.menu_action(action, &paths).await {
+        Ok(link) if !link.is_empty() => {
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            if !menu_action::copy(&link, &path) {
+                menu_action::notify(conn, &i18n.tr("cli-menu-link", &[]), &link).await;
+            }
+            Ok(())
+        }
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // Fora do Meu Drive, o serviço já diz qual item e por quê.
+            let body = describe(e, i18n);
+            menu_action::notify(conn, &i18n.tr("cli-menu-failed", &[]), &body).await;
+            Err(ServiceError::Failed(body))
+        }
     }
 }
 

@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dependências
-        run: integrations/dolphin/debian-deps.sh
+        run: integrations/debian-deps.sh
       - name: Compila e testa
         run: integrations/dolphin/build.sh dolphin
       - uses: actions/upload-artifact@v4

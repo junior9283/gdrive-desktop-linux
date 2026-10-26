@@ -10,7 +10,6 @@
 #include <QClipboard>
 #include <QDBusArgument>
 #include <QDBusConnection>
-#include <QDBusConnectionInterface>
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
@@ -68,14 +67,11 @@ public:
         for (const QUrl &url : items.urlList()) {
             paths.append(url.toLocalFile());
         }
-        auto bus = QDBusConnection::sessionBus();
-        // Sem o serviço no ar, nem pergunta (perguntar o iniciaria a cada clique).
-        if (!bus.interface() || !bus.interface()->isServiceRegistered(SERVICE)) {
-            return {};
-        }
         auto call = QDBusMessage::createMethodCall(SERVICE, PATH, INTERFACE, QStringLiteral("Menu"));
         call << paths;
-        const QDBusMessage reply = bus.call(call, QDBus::Block, MENU_TIMEOUT_MS);
+        // Com o serviço parado, a resposta é um erro na hora (perguntar não o inicia).
+        call.setAutoStartService(false);
+        const QDBusMessage reply = QDBusConnection::sessionBus().call(call, QDBus::Block, MENU_TIMEOUT_MS);
         if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
             return {};
         }

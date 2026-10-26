@@ -15,6 +15,7 @@ node --test 'crates/gdl-ui/ui/tests/*.test.js'   # a lógica das telas (sem jane
 scripts/e2e.sh                               # a janela e a bandeja de verdade (ponta a ponta)
 scripts/e2e.sh search                        # só os de ponta a ponta com "search" no nome
 integrations/dolphin/build.sh /tmp/dolphin   # o plugin do Dolphin (C++/KF6) e os testes dele
+integrations/gtk/tests/run.sh                # a extensão do Nautilus, Nemo, Caja e Thunar
 ```
 
 Os testes de montagem precisam do FUSE 3 (`fusermount3`) e de acesso a `/dev/fuse`; os da bandeja e
@@ -32,7 +33,10 @@ ordem alfabética, um por vez. Nada aparece na tela.
 O plugin do Dolphin (`integrations/dolphin`) é testado pelo `tests/run.sh`: o `probe` monta o menu do
 botão direito como o Dolphin (`KFileItemActions`, Qt sem tela) contra um serviço falso em Python
 (`fake_service.py`) num barramento próprio. A regra de quais itens aparecem é testada no serviço
-(`menu.rs` e `dbus_tests.rs`); o plugin só desenha a resposta.
+(`menu.rs` e `dbus_tests.rs`); o plugin só desenha a resposta. A extensão GTK usa o mesmo serviço
+falso, com módulos falsos no lugar do Nautilus, Nemo, Caja e Thunar (não precisam estar instalados).
+As ações do COSMIC Files são testadas em `cosmic.rs` (preserva as do usuário, não duplica, sai na
+desinstalação, não mexe em arquivo ilegível).
 
 ## Onde fica cada coisa
 
@@ -45,6 +49,7 @@ botão direito como o Dolphin (`KFileItemActions`, Qt sem tela) contra um servi�
 | `gdl-fs` | montagem FUSE real: leitura, escrita, salvar por rename, lixeira do Dolphin, ponteiros | `testutil::Mounted` |
 | `gdl-daemon` | serviço completo pelo D-Bus (inclusive o menu do botão direito) e a suíte "nunca perder dados" | `testutil::Harness` |
 | `integrations/dolphin` | plugin do menu do Dolphin: itens, marcas, área de transferência, erros | `tests/run.sh` |
+| `integrations/gtk` | extensão do Nautilus, Nemo, Caja e Thunar: gerenciador pela pasta, submenu, separadores, ações e erros | módulos falsos de cada gerenciador e `tests/run.sh` |
 | `gdl-cli` | `open-pointer` com um navegador falso no `PATH` | binário compilado |
 | `gdl-ipc` | contrato D-Bus, erros tipados e o nome único (`claim_name`); utilidades de teste (`p2p_pair`, `PrivateBus`) | barramento privado |
 | `gdl-tray` | menu e ícone por estado, lançador da janela, atalho global sem portal, uma bandeja só | funções puras e barramento privado |

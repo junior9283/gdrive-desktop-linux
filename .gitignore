@@ -11,3 +11,4 @@
 *.dll
 *.sys
 /crates/gdl-ui/gen/
+__pycache__/

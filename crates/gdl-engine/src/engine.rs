@@ -27,6 +27,7 @@ use crate::events::{EngineEvent, SyncSummary};
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, initial_index};
 use crate::kept::{Kept, KeptCopies, KeptFolder};
 use crate::pins::PinManager;
+use crate::thumbs::seeder::ThumbSeeder;
 use crate::uploads::{CancelOutcome, UploadOutcome, UploadWorker, recover_on_start};
 
 /// De quanto em quanto tempo cada laço do serviço roda.
@@ -68,6 +69,7 @@ pub struct Engine {
     /// Já avisou desta pausa que uma gravação espera a sincronização voltar.
     saved_while_paused: AtomicBool,
     pub(crate) activity: Arc<ActivityLog>,
+    pub(crate) thumbs: Arc<ThumbSeeder>,
 }
 
 /// Motivos da pausa da sincronização.
@@ -181,6 +183,11 @@ impl Engine {
             )
             .with_activity(activity.clone()),
             activity,
+            thumbs: Arc::new(ThumbSeeder::new(
+                store.clone(),
+                client.clone(),
+                paths.thumbnails_dir.clone(),
+            )),
             poller: ChangePoller::new(store.clone(), client.clone(), cache.clone(), events.clone()),
             kept,
             data_dir,
@@ -257,6 +264,24 @@ impl Engine {
     /// O arquivo está aberto para escrita (ver `UploadWorker::mark_writing`).
     pub fn mark_writing(&self, inode: gdl_store::Inode) -> crate::uploads::WritingMark {
         self.uploads.mark_writing(inode)
+    }
+
+    /// Semeia, em segundo plano, as miniaturas dos arquivos da pasta `folder` (montada em
+    /// `folder_path`). Abrir a mesma pasta enquanto isso só espera a semeadura em andamento.
+    /// Descartar o handle (ou desistir de esperar) não interrompe o trabalho; erros só vão para o
+    /// log.
+    pub fn seed_thumbnails(
+        &self,
+        folder: &gdl_store::ItemId,
+        folder_path: PathBuf,
+    ) -> tokio::task::JoinHandle<()> {
+        self.thumbs.seed(folder, folder_path)
+    }
+
+    /// Cancela as semeaduras e apaga as miniaturas semeadas e a memória delas (saída da conta).
+    /// Espera as gravações em curso terminarem, para nenhuma recriar um PNG depois.
+    pub fn purge_thumbnails(&self) {
+        self.thumbs.purge();
     }
 
     pub fn account_email(&self) -> Result<String> {

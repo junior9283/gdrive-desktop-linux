@@ -4,11 +4,10 @@
 use std::io;
 use std::path::Path;
 
+use gdl_common::APP_ID;
 use gdl_common::fs::{remove_file_if_exists, write_atomic};
 use url::Url;
 
-/// ID do app (arquivo `.desktop` e ícone).
-pub const APP_ID: &str = "io.github.junior9283.GDriveDesktopLinux";
 /// Nome do arquivo em `~/.config/autostart`.
 pub const AUTOSTART_FILE: &str = "io.github.junior9283.GDriveDesktopLinux.desktop";
 

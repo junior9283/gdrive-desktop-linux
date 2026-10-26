@@ -50,7 +50,7 @@ jobs:
       - name: Dependências do sistema
         run: |
           sudo apt-get update
-          sudo apt-get install -y $SYSTEM_DEPS webkit2gtk-driver xvfb openbox
+          sudo apt-get install -y $SYSTEM_DEPS webkit2gtk-driver xvfb openbox xdotool
           sudo chmod 666 /dev/fuse
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: tauri-driver

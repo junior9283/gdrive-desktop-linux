@@ -6,6 +6,7 @@ use std::time::Duration;
 use ashpd::desktop::global_shortcuts::{BindShortcutsOptions, GlobalShortcuts, NewShortcut};
 use ashpd::desktop::{CreateSessionOptions, Session};
 use futures_util::StreamExt;
+use gdl_common::APP_ID;
 use tokio::task::JoinHandle;
 use zbus::Connection;
 
@@ -13,8 +14,6 @@ use zbus::Connection;
 pub const DEFAULT_TRIGGER: &str = "Ctrl+Alt+G";
 /// Identificador do atalho no portal.
 const SHORTCUT_ID: &str = "search";
-/// Identificador do app no registro do portal (apps fora de sandbox).
-const APP_ID: &str = "io.github.junior9283.GDriveDesktopLinux";
 /// Quanto esperar o portal responder que existe (ele pode estar subindo pela ativação do D-Bus).
 const PORTAL_TIMEOUT: Duration = Duration::from_secs(5);
 

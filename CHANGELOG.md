@@ -7,6 +7,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.2.5] - 2026-10-26
+
+### Corrigido
+- A janela aparecia sem o ícone do app na barra de tarefas e na barra de título (KDE Wayland): ela
+  se anunciava com o nome do programa, que não corresponde a nenhum `.desktop`. Agora usa o id do app.
+- Os testes de ponta a ponta abriam as janelas na sessão gráfica de quem os rodava, e não no
+  servidor gráfico de teste: o GTK caía no Wayland padrão. Agora ficam só no Xvfb.
+
 ## [0.2.4] - 2026-10-26
 
 ### Adicionado

@@ -3,7 +3,7 @@
 # janela num servidor gráfico próprio (Xvfb) e num barramento de sessão próprio, comandada pelo
 # tauri-driver, com o openbox cuidando do foco das janelas (sem gerenciador de janelas, o Xvfb
 # tira o foco da janela em momentos aleatórios). Nada aparece na tela de quem roda. Sai com 77
-# (pulado) sem o WebKitWebDriver, o tauri-driver ou o openbox.
+# (pulado) sem o WebKitWebDriver, o tauri-driver, o openbox ou o xdotool.
 # Um argumento filtra os testes pelo nome (`scripts/e2e.sh search`).
 set -eu
 cd "$(dirname "$0")/.."
@@ -21,6 +21,10 @@ if [ "${1:-}" != "--inside" ]; then
     echo "e2e pulado: falta o openbox (pacote openbox)" >&2
     exit 77
   fi
+  if ! command -v xdotool >/dev/null 2>&1; then
+    echo "e2e pulado: falta o xdotool (pacote xdotool)" >&2
+    exit 77
+  fi
   cargo build -q -p gdl-ui -p gdl-tray --bins
   cargo build -q -p gdl-daemon --example e2e-daemon
   cargo test -q -p gdl-ui --test e2e --no-run
@@ -33,6 +37,9 @@ shift
 work=$(mktemp -d)
 export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data" XDG_CACHE_HOME="$work/cache"
 export NO_AT_BRIDGE=1
+# Sem WAYLAND_DISPLAY, o GTK ainda tenta o wayland-0 e abriria as janelas na sessão de quem roda os
+# testes: só o X do Xvfb.
+export GDK_BACKEND=x11
 # Os testes conferem os textos em pt-BR.
 export LANG=pt_BR.UTF-8 LC_ALL=pt_BR.UTF-8
 pids=""

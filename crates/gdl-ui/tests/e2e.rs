@@ -197,6 +197,25 @@ async fn about_window_opens_and_shows_version() {
     assert_eq!(inter, Value::Bool(true));
 }
 
+/// A barra de tarefas e a barra de título acham o ícone pela classe da janela (o app_id no
+/// Wayland), que tem de ser o nome do `.desktop`; com o nome do programa, ficam sem ícone.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn window_class_is_the_desktop_file_id() {
+    let session = Session::open("about").await;
+    session.text(".about-version").await;
+
+    // A janela aparece no servidor gráfico um pouco depois da página.
+    until("uma janela com a classe do id do app", async || {
+        let found = std::process::Command::new("xdotool")
+            .args(["search", "--class", &format!("^{}$", gdl_common::APP_ID)])
+            .output()
+            .unwrap();
+        (!found.stdout.trim_ascii().is_empty()).then_some(())
+    })
+    .await;
+}
+
 /// O serviço de teste, pelo barramento do `scripts/e2e.sh`.
 async fn service() -> ServiceProxy<'static> {
     let conn = zbus::Connection::session().await.unwrap();

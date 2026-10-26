@@ -158,6 +158,9 @@ async fn start(screen: Option<&Screen>) -> zbus::Result<Option<(Bridge, Requests
 }
 
 fn main() -> ExitCode {
+    // Antes do GTK: vira a classe das janelas (o app_id no Wayland), pela qual a barra de tarefas
+    // e a barra de título acham o `.desktop` e o ícone.
+    gtk::glib::set_prgname(Some(gdl_common::APP_ID));
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();

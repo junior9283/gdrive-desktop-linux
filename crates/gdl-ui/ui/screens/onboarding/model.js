@@ -6,18 +6,35 @@
 const LOGIN = ['setup', 'sign-in', 'waiting'];
 
 // O guia do Client ID (base: `docs/guia-client-id.md`): cada parte abre a sua página do Google
-// Cloud pelo nome do link (`gdl_common::links`); `copy` são os valores para colar lá.
+// Cloud pelo nome do link (`gdl_common::links`); `copy` são os valores para colar lá, com o campo
+// (`label`) onde vão.
+const SITE = 'https://junior9283.github.io/gdrive-desktop-linux/';
 export const GUIDE = [
   { id: 'project', link: 'gcp-new-project' },
   { id: 'drive-api', link: 'gcp-drive-api' },
-  { id: 'branding', link: 'gcp-branding' },
-  { id: 'scopes', link: 'gcp-scopes', copy: ['https://www.googleapis.com/auth/drive', 'openid', 'email'] },
+  {
+    // Sem página inicial, política e domínio autorizado, o Google não deixa publicar o app. As
+    // páginas do site do projeto (GitHub Pages) servem para qualquer pessoa.
+    id: 'branding',
+    link: 'gcp-branding',
+    copy: [
+      { label: 'homepage', text: SITE },
+      { label: 'privacy', text: `${SITE}politica-de-privacidade.html` },
+      { label: 'terms', text: `${SITE}termos-de-uso.html` },
+      { label: 'domain', text: new URL(SITE).host },
+    ],
+  },
+  {
+    id: 'scopes',
+    link: 'gcp-scopes',
+    copy: ['https://www.googleapis.com/auth/drive', 'openid', 'email'].map((text) => ({ text })),
+  },
   { id: 'audience', link: 'gcp-audience' },
   { id: 'client', link: 'gcp-new-client' },
 ];
 
 // Os problemas mais comuns do login, com o que fazer (os mesmos do fim do guia em `docs/`).
-export const TROUBLES = ['access-denied', 'redirect-mismatch', 'weekly-logout', 'api-disabled'];
+export const TROUBLES = ['publish-blocked', 'access-denied', 'redirect-mismatch', 'weekly-logout', 'api-disabled'];
 const TOUR = ['intro', 'files', 'offline'];
 
 // Os passos mostrados: com `DisableOnboardingDialog`, só os do login.

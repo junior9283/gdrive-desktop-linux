@@ -81,8 +81,23 @@ test('o guia tem os passos do Google Cloud, cada um com um link da tabela fixa',
 
 test('os escopos para copiar são os que o login pede', () => {
   const [, scopes] = repo('crates/gdl-drive/src/oauth.rs').match(/const SCOPES: &str = "([^"]+)";/);
-  const copy = GUIDE.find((s) => s.id === 'scopes').copy;
+  const copy = GUIDE.find((s) => s.id === 'scopes').copy.map((c) => c.text);
   assert.deepEqual([...copy].sort(), scopes.split(' ').sort());
+});
+
+// Sem página inicial, política e domínio autorizado, o Google não deixa publicar o app; o site do
+// projeto (GitHub Pages, a pasta docs/) serve para qualquer pessoa.
+test('a tela de consentimento recebe as páginas do site do projeto', () => {
+  const copy = GUIDE.find((s) => s.id === 'branding').copy;
+  const site = 'https://junior9283.github.io/gdrive-desktop-linux/';
+  assert.deepEqual(copy, [
+    { label: 'homepage', text: site },
+    { label: 'privacy', text: `${site}politica-de-privacidade.html` },
+    { label: 'terms', text: `${site}termos-de-uso.html` },
+    { label: 'domain', text: 'junior9283.github.io' },
+  ]);
+  for (const page of ['politica-de-privacidade', 'termos-de-uso']) assert.ok(repo(`docs/${page}.md`));
+  assert.match(repo('docs/index.md'), /politica-de-privacidade\.md/);
 });
 
 test('DisableOnboardingDialog deixa só os passos do login', () => {

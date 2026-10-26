@@ -88,9 +88,12 @@ function footer() {
 const title = (text) => el('h1', { class: 'step-title' }, text);
 
 // Um valor para colar no Google Cloud, com o botão que o copia.
-function copyRow({ api, t }, text) {
+function copyRow({ api, t }, { label, text }) {
   const copy = () => attempt(api.copy(text), () => toast(t('onboarding-setup-copied')));
-  return el('div', { class: 'copy-row' }, el('code', {}, text), el('button', { class: 'text', onclick: copy }, t('onboarding-setup-copy')));
+  return el('div', { class: 'copy-row' },
+    label ? el('span', { class: 'copy-label' }, t(`onboarding-setup-field-${label}`)) : [],
+    el('code', {}, text),
+    el('button', { class: 'text', onclick: copy }, t('onboarding-setup-copy')));
 }
 
 // Uma parte do guia: o que fazer na página, os valores para copiar e o botão que a abre.

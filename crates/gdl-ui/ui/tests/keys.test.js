@@ -33,7 +33,10 @@ test('toda chave usada nas telas existe nos dois idiomas', () => {
   ]) used.add(`activity-${state}`);
   for (const link of ['help', 'privacy', 'terms', 'faq', 'drive-web']) used.add(`link-${link}`);
   for (const step of stepsFor(false)) used.add(`onboarding-step-${step}`);
-  for (const { id } of GUIDE) used.add(`onboarding-setup-${id}-title`).add(`onboarding-setup-${id}-text`);
+  for (const { id, copy = [] } of GUIDE) {
+    used.add(`onboarding-setup-${id}-title`).add(`onboarding-setup-${id}-text`);
+    for (const { label } of copy) if (label) used.add(`onboarding-setup-field-${label}`);
+  }
   for (const id of TROUBLES) used.add(`onboarding-trouble-${id}`).add(`onboarding-trouble-${id}-fix`);
   for (const category of CATEGORIES) used.add(`error-category-${category}`).add(`error-category-${category}-text`);
   for (const part of ['offline', 'cache', 'free']) used.add(`offline-usage-${part}`);

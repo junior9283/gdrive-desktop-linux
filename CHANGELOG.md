@@ -7,6 +7,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.2.4] - 2026-10-26
+
+### Adicionado
+- Site do projeto no GitHub Pages (página inicial, Política de Privacidade e termos), exigido pelo
+  Google para publicar a tela de consentimento.
+
+### Mudado
+- Guia do Client ID mais detalhado: a parte da tela de consentimento traz, com botões de copiar, a
+  página inicial, a política, os termos e o domínio autorizado, e avisa para não enviar logotipo; os
+  escopos lembram o Salvar no fim da página; a publicação explica o aviso de verificação e o modo de
+  teste. Novo problema comum: "Para publicar o app, conclua a configuração na página de branding".
+
 ## [0.2.3] - 2026-10-26
 
 ### Corrigido

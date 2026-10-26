@@ -300,6 +300,13 @@ async fn onboarding_logs_in_with_client_id() {
     let troubles = session
         .eval("return document.querySelectorAll('.troubles dt').length")
         .await;
+    // Os valores da tela de consentimento vêm com o campo onde colar; os escopos, sem rótulo.
+    let labels = session
+        .eval("return [...document.querySelectorAll('.copy-label')].map((l) => l.textContent)")
+        .await;
+    let guide_text = session
+        .eval("return document.querySelector('.guide').textContent")
+        .await;
     session.click(".guide-part button.tonal").await;
     let project = opened("console.cloud.google.com/projectcreate").await;
     session.click(".continue").await;
@@ -338,7 +345,20 @@ async fn onboarding_logs_in_with_client_id() {
 
     assert!(guide.contains("Google Cloud"), "{guide}");
     assert_eq!(parts, 6);
-    assert_eq!(troubles, 4, "os problemas comuns viram itens da lista");
+    assert_eq!(troubles, 5, "os problemas comuns viram itens da lista");
+    assert_eq!(
+        labels,
+        json!([
+            "Página inicial",
+            "Política de privacidade",
+            "Termos de serviço",
+            "Domínio autorizado"
+        ])
+    );
+    assert!(
+        !guide_text.as_str().unwrap().contains("undefined"),
+        "{guide_text}"
+    );
     assert_eq!(project, "https://console.cloud.google.com/projectcreate");
     assert!(missing.contains("Client ID"), "{missing}");
     assert!(title.contains("Seu Drive"), "{title}");

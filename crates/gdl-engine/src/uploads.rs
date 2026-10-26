@@ -30,8 +30,9 @@ use crate::{EngineError, Result};
 pub const LOCAL_ID_PREFIX: &str = "local:";
 /// Sem internet, a fila tenta de novo depois disto (sem contar tentativa).
 const OFFLINE_WAIT_MS: i64 = 30_000;
-/// Pasta-mãe ainda não criada no Drive: espera por ela.
-const PARENT_WAIT_MS: i64 = 5_000;
+/// Pasta-mãe ainda não criada no Drive: espera por ela (olhar de novo é só uma consulta ao banco,
+/// e a pasta costuma estar subindo ao lado, em outro envio).
+const PARENT_WAIT_MS: i64 = 1_000;
 /// Janela dos envios que entram na estimativa de tempo restante.
 const RATE_WINDOW_MS: i64 = 30_000;
 
@@ -288,6 +289,20 @@ pub struct UploadWorker {
     cancels: Mutex<HashMap<Inode, CancellationToken>>,
     /// Arquivos abertos para escrita na pasta montada (ver `mark_writing`).
     writing: Arc<Mutex<HashSet<Inode>>>,
+    /// Envios em andamento (fila e item), para os que rodam juntos não pegarem o mesmo.
+    running: Mutex<Vec<(i64, ItemId)>>,
+}
+
+/// Envio em andamento; sai da lista ao terminar (ou ser cancelado).
+struct RunningJob<'a> {
+    running: &'a Mutex<Vec<(i64, ItemId)>>,
+    job_id: i64,
+}
+
+impl Drop for RunningJob<'_> {
+    fn drop(&mut self) {
+        lock(self.running).retain(|(job_id, _)| *job_id != self.job_id);
+    }
 }
 
 /// O arquivo segue aberto para escrita enquanto esta marca existir.
@@ -328,6 +343,7 @@ impl UploadWorker {
             turns: Mutex::default(),
             cancels: Mutex::default(),
             writing: Arc::default(),
+            running: Mutex::default(),
         }
     }
 
@@ -340,9 +356,36 @@ impl UploadWorker {
         self.activity.note(&self.store, item, state, percent);
     }
 
-    /// Processa o próximo envio pronto; `None` quando a fila não tem nada para agora.
+    /// Pega o próximo envio pronto que nenhum outro em andamento está fazendo, nem de um item
+    /// que já está subindo: as versões de um arquivo sobem uma de cada vez, em ordem.
+    fn claim_job(&self) -> Result<Option<(UploadJob, RunningJob<'_>)>> {
+        let mut running = lock(&self.running);
+        let job = self.store.next_job_except(now_ms(), |job| {
+            running
+                .iter()
+                .any(|(job_id, item)| *job_id == job.job_id || *item == job.item)
+        })?;
+        let Some(job) = job else {
+            return Ok(None);
+        };
+        // O par todo: a criação troca o ID do item na fila, e o envio não pode ser pego de novo.
+        running.push((job.job_id, job.item.clone()));
+        let claim = RunningJob {
+            running: &self.running,
+            job_id: job.job_id,
+        };
+        Ok(Some((job, claim)))
+    }
+
+    /// Há envio pronto para agora.
+    pub fn has_ready(&self) -> Result<bool> {
+        Ok(self.store.next_job(now_ms())?.is_some())
+    }
+
+    /// Processa o próximo envio pronto; `None` quando a fila não tem nada para agora. Pode rodar
+    /// várias vezes ao mesmo tempo, cada uma com um envio diferente.
     pub async fn run_once(&self) -> Result<Option<UploadOutcome>> {
-        let Some(job) = self.store.next_job(now_ms())? else {
+        let Some((job, _running)) = self.claim_job()? else {
             return Ok(None);
         };
         let Some(inode) = self.store.get(&job.item)?.map(|i| i.inode) else {
@@ -852,6 +895,65 @@ mod tests {
                 })
                 .collect()
         }
+    }
+
+    /// Desempenho: os envios iam um de cada vez (~2 s por arquivo pequeno, 50 arquivos em 105 s).
+    /// Envios rodando juntos pegam cada um um envio diferente da fila.
+    #[tokio::test]
+    async fn concurrent_runs_send_different_files_at_once() {
+        let s = setup(Env::new().await).await;
+        let root = s.env.root();
+        for n in 0..4 {
+            s.write_new(
+                &root,
+                &format!("{n}.txt"),
+                format!("arquivo {n}").as_bytes(),
+            );
+        }
+        s.env
+            .fake
+            .inject(Fault::DelayUploads(std::time::Duration::from_millis(200)));
+
+        let (a, b, c, d) = tokio::join!(s.run(), s.run(), s.run(), s.run());
+
+        let outcomes = [a, b, c, d];
+        assert!(
+            outcomes
+                .iter()
+                .all(|o| matches!(o, Some(UploadOutcome::Uploaded(_)))),
+            "{outcomes:?}"
+        );
+        assert_eq!(s.env.fake.find_live("0.txt").len(), 1);
+        assert_eq!(s.env.fake.max_concurrent_uploads(), 4);
+    }
+
+    /// Duas versões do mesmo arquivo nunca sobem ao mesmo tempo: o segundo envio fica na fila.
+    #[tokio::test]
+    async fn versions_of_the_same_file_are_never_sent_together() {
+        let s = setup(Env::new().await).await;
+        let id = s
+            .env
+            .fake
+            .add_file(&s.env.fake.root_id(), "a.txt", b"v0".to_vec());
+        initial_index(&s.env.store, &s.env.client).await.unwrap();
+        let id = ItemId(id);
+        s.edit(&id, b"v1").await;
+        s.write(&id, b"v2");
+        s.env
+            .fake
+            .inject(Fault::DelayUploads(std::time::Duration::from_millis(200)));
+
+        let (first, second) = tokio::join!(s.run(), s.run());
+
+        assert!(
+            matches!(
+                (&first, &second),
+                (Some(UploadOutcome::Uploaded(_)), None) | (None, Some(UploadOutcome::Uploaded(_)))
+            ),
+            "{first:?} {second:?}"
+        );
+        assert_eq!(s.env.fake.max_concurrent_uploads(), 1);
+        assert_eq!(s.env.fake.content(&id.0), b"v2");
     }
 
     #[tokio::test]

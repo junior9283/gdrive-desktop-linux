@@ -441,20 +441,45 @@ impl Engine {
         }
     }
 
+    /// Quatro envios ao mesmo tempo: arquivo pequeno sobe no ritmo da espera de cada pedido,
+    /// não da banda, e um de cada vez deixava a fila lenta (~2 s por arquivo).
+    /// Fila parada custa uma consulta por intervalo. Com envio pronto, quatro rodam juntos:
+    /// arquivo pequeno sobe no ritmo da espera de cada pedido, não da banda, e um de cada vez
+    /// deixava a fila lenta (~2 s por arquivo).
     async fn upload_loop(&self) {
         loop {
-            // Sem rede, nenhum envio tenta: a próxima consulta bem-sucedida libera a fila.
-            if !self.is_paused() && !self.poller.is_offline() {
-                match self.uploads.run_once().await {
-                    // O envio é o primeiro a ver a rede cair; a consulta de mudanças vê a volta.
-                    Ok(Some(UploadOutcome::Offline)) => self.poller.report_offline(),
-                    // Tinha trabalho: tenta o próximo sem esperar.
-                    Ok(Some(_)) => continue,
-                    Ok(None) => {}
-                    Err(e) => tracing::warn!(erro = %e, "falha na fila de envio"),
+            match self.uploads.has_ready() {
+                Ok(true) if self.may_upload() => {
+                    tokio::join!(
+                        self.upload_burst(),
+                        self.upload_burst(),
+                        self.upload_burst(),
+                        self.upload_burst()
+                    );
                 }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(erro = %e, "falha na fila de envio"),
             }
             self.sleep(self.intervals.uploads_idle).await;
+        }
+    }
+
+    /// Sem pausa e com rede: sem rede, nenhum envio tenta, e a próxima consulta bem-sucedida
+    /// libera a fila.
+    fn may_upload(&self) -> bool {
+        !self.is_paused() && !self.poller.is_offline()
+    }
+
+    /// Envia um atrás do outro enquanto houver envio pronto que nenhum outro esteja fazendo.
+    async fn upload_burst(&self) {
+        while self.may_upload() {
+            match self.uploads.run_once().await {
+                // O envio é o primeiro a ver a rede cair; a consulta de mudanças vê a volta.
+                Ok(Some(UploadOutcome::Offline)) => return self.poller.report_offline(),
+                Ok(Some(_)) => {}
+                Ok(None) => return,
+                Err(e) => return tracing::warn!(erro = %e, "falha na fila de envio"),
+            }
         }
     }
 
@@ -554,6 +579,51 @@ mod tests {
         engine.set_metered_pause(true);
         engine.set_metered_pause(false);
         assert!(!engine.is_paused());
+    }
+
+    /// Uma pasta nova com vários arquivos sobe com envios em paralelo, a pasta antes deles.
+    #[tokio::test]
+    async fn many_new_files_upload_in_parallel_after_their_folder() {
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let (engine, _tmp) = crate::testutil::indexed_engine(&fake).await;
+        let engine = Arc::new(engine.with_intervals(fast()));
+        let root = gdl_store::ItemId(fake.root_id());
+        let folder = create_local_item(&engine.store, &root, "fotos", ItemKind::Folder).unwrap();
+        // Criada sem rede: sobe pela fila, como os arquivos.
+        crate::uploads::enqueue_upload(&engine.store, &folder.id, 0, None).unwrap();
+        for n in 0..8 {
+            let name = format!("{n}.txt");
+            let item = create_local_item(&engine.store, &folder.id, &name, ItemKind::File).unwrap();
+            let path = engine.cache.local_path(&item.id);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, name.as_bytes()).unwrap();
+            commit_local_write(&engine.store, &item.id, name.len() as u64, now_ms()).unwrap();
+        }
+        fake.inject(gdl_fake_drive::Fault::DelayUploads(Duration::from_millis(
+            100,
+        )));
+
+        let shutdown = CancellationToken::new();
+        let task = tokio::spawn({
+            let (engine, shutdown) = (engine.clone(), shutdown.clone());
+            async move { engine.run(shutdown).await }
+        });
+        wait_until("fila vazia", || {
+            engine.summary().unwrap().pending_uploads == 0
+        })
+        .await;
+        shutdown.cancel();
+        task.await.unwrap();
+
+        let folders = fake.find_live("fotos");
+        assert_eq!(folders.len(), 1);
+        for n in 0..8 {
+            let ids = fake.find_live(&format!("{n}.txt"));
+            assert_eq!(ids.len(), 1, "{n}.txt subiu uma vez");
+            assert_eq!(fake.meta(&ids[0])["parents"][0], folders[0]);
+        }
+        let parallel = fake.max_concurrent_uploads();
+        assert!((2..=4).contains(&parallel), "{parallel} envios juntos");
     }
 
     #[tokio::test]

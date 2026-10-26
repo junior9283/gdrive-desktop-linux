@@ -363,7 +363,10 @@ async fn upload_create(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    upload_start(&shared, None, &params, &headers, body)
+    counted_upload(&shared, || {
+        upload_start(&shared, None, &params, &headers, body)
+    })
+    .await
 }
 
 /// Upload que troca o conteúdo (`PATCH /upload/drive/v3/files/{id}`).
@@ -374,7 +377,32 @@ async fn upload_update(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    upload_start(&shared, Some(id), &params, &headers, body)
+    counted_upload(&shared, || {
+        upload_start(&shared, Some(id), &params, &headers, body)
+    })
+    .await
+}
+
+/// Conta o envio entre os simultâneos e aplica `Fault::DelayUploads` antes de responder.
+async fn counted_upload(shared: &Shared, respond: impl FnOnce() -> Response) -> Response {
+    /// Sai da contagem também se a conexão cair no meio da espera.
+    struct InFlight<'a>(&'a Shared);
+    impl Drop for InFlight<'_> {
+        fn drop(&mut self) {
+            self.0.state().uploads_in_flight -= 1;
+        }
+    }
+    let delay = {
+        let mut state = shared.state();
+        state.uploads_in_flight += 1;
+        state.max_uploads_in_flight = state.max_uploads_in_flight.max(state.uploads_in_flight);
+        state.upload_delay
+    };
+    let _in_flight = InFlight(shared);
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    }
+    respond()
 }
 
 fn upload_start(

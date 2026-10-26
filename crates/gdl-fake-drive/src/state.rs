@@ -138,6 +138,11 @@ pub(crate) struct State {
     pub(crate) thumb_redirect: Option<String>,
     /// Atraso antes de responder cada miniatura (`Fault::DelayThumbs`).
     pub(crate) thumb_delay: Option<std::time::Duration>,
+    /// Atraso antes de responder cada envio de conteúdo (`Fault::DelayUploads`).
+    pub(crate) upload_delay: Option<std::time::Duration>,
+    /// Envios de conteúdo em andamento agora e o máximo já visto.
+    pub(crate) uploads_in_flight: u32,
+    pub(crate) max_uploads_in_flight: u32,
     /// Erro de cada miniatura (`Fault::ThumbStatus`).
     pub(crate) thumb_status: Option<u16>,
     /// Corpo de cada miniatura cortado no meio (`Fault::CutThumbBody`).
@@ -180,6 +185,9 @@ impl State {
             origin,
             thumb_redirect: None,
             thumb_delay: None,
+            upload_delay: None,
+            uploads_in_flight: 0,
+            max_uploads_in_flight: 0,
             thumb_status: None,
             thumb_cut: false,
             files: BTreeMap::new(),

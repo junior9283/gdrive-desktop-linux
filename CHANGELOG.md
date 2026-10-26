@@ -24,6 +24,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   segue sequencial (um arquivo de 64 MiB passou de 16 para até 7 pedidos) e a próxima janela é
   pedida enquanto a anterior ainda chega. Saltos continuam baixando só os blocos lidos, e cada
   download usa ~1 MiB de memória em vez de 8 MiB.
+- Desempenho: os envios iam um de cada vez (~2 s por arquivo pequeno; 50 arquivos de 20 KB em
+  105 s). Agora até quatro sobem juntos, cada um com um arquivo diferente; versões do mesmo
+  arquivo continuam uma de cada vez e em ordem, e a pasta nova sobe antes do que está nela
+  (quem espera a pasta olha de novo a cada 1 s, eram 5 s). Com a fila parada, o serviço segue
+  com uma consulta por segundo.
 
 ### Corrigido
 - Compilado sem todas as dependências já baixadas (CI com cache novo), o Sobre saía sem a lista

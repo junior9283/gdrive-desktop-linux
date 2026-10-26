@@ -39,6 +39,8 @@ pub enum Fault {
     Offline,
     /// As miniaturas (`/thumb`) demoram este tempo para responder, até `clear_faults`.
     DelayThumbs(std::time::Duration),
+    /// Os envios de conteúdo (`/upload/…`) demoram este tempo para responder, até `clear_faults`.
+    DelayUploads(std::time::Duration),
     /// As miniaturas (`/thumb`) respondem o erro `code` da API, até `clear_faults`.
     ThumbStatus(u16),
     /// As miniaturas (`/thumb`) mandam o começo da imagem e a conexão cai no meio do corpo,
@@ -251,6 +253,7 @@ impl FakeDrive {
             Fault::LoseCreateResponses { times } => self.shared.state().lose_responses = times,
             Fault::Offline => self.shared.offline.store(true, Ordering::SeqCst),
             Fault::DelayThumbs(delay) => self.shared.state().thumb_delay = Some(delay),
+            Fault::DelayUploads(delay) => self.shared.state().upload_delay = Some(delay),
             Fault::ThumbStatus(code) => self.shared.state().thumb_status = Some(code),
             Fault::CutThumbBody => self.shared.state().thumb_cut = true,
         }
@@ -262,6 +265,7 @@ impl FakeDrive {
             state.fault = None;
             state.lose_responses = 0;
             state.thumb_delay = None;
+            state.upload_delay = None;
             state.thumb_status = None;
             state.thumb_cut = false;
         }
@@ -282,6 +286,11 @@ impl FakeDrive {
     /// `StallConnectionAfterBytes`.
     pub fn byte_limit_reached(&self) -> bool {
         self.shared.limit_reached.load(Ordering::SeqCst)
+    }
+
+    /// O maior número de envios de conteúdo que já correram ao mesmo tempo.
+    pub fn max_concurrent_uploads(&self) -> u32 {
+        self.shared.state().max_uploads_in_flight
     }
 
     /// Bytes de conteúdo entregues por `alt=media`.

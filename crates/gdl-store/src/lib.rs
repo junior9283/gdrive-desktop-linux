@@ -273,26 +273,40 @@ impl Store {
 
     /// O envio pronto para tentar agora (`next_try_ms <= now_ms`), o mais antigo primeiro.
     pub fn next_job(&self, now_ms: i64) -> Result<Option<UploadJob>> {
+        self.next_job_except(now_ms, |_| false)
+    }
+
+    /// Como `next_job`, pulando os envios em que `busy` diz sim (os que já estão subindo). As
+    /// linhas são lidas uma a uma, só até achar o primeiro livre.
+    pub fn next_job_except(
+        &self,
+        now_ms: i64,
+        busy: impl Fn(&UploadJob) -> bool,
+    ) -> Result<Option<UploadJob>> {
         let conn = self.conn();
         let mut stmt = conn.prepare_cached(
             "SELECT job_id, item_id, kind, attempts, next_try_ms, session_url, file_id \
              FROM upload_queue \
-             WHERE next_try_ms <= ?1 ORDER BY next_try_ms, job_id LIMIT 1",
+             WHERE next_try_ms <= ?1 ORDER BY next_try_ms, job_id",
         )?;
-        let job = stmt
-            .query_row([now_ms], |r| {
-                Ok(UploadJob {
-                    job_id: r.get(0)?,
-                    item: ItemId(r.get(1)?),
-                    kind: r.get(2)?,
-                    attempts: r.get(3)?,
-                    next_try_ms: r.get(4)?,
-                    session_url: r.get(5)?,
-                    file_id: r.get(6)?,
-                })
+        let jobs = stmt.query_map([now_ms], |r| {
+            Ok(UploadJob {
+                job_id: r.get(0)?,
+                item: ItemId(r.get(1)?),
+                kind: r.get(2)?,
+                attempts: r.get(3)?,
+                next_try_ms: r.get(4)?,
+                session_url: r.get(5)?,
+                file_id: r.get(6)?,
             })
-            .optional()?;
-        Ok(job)
+        })?;
+        for job in jobs {
+            let job = job?;
+            if !busy(&job) {
+                return Ok(Some(job));
+            }
+        }
+        Ok(None)
     }
 
     pub fn finish_job(&self, job_id: i64) -> Result<()> {

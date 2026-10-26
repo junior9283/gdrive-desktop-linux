@@ -7,6 +7,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.3.1] - 2026-10-26
+
+### Corrigido
+- O botão da conta mostrava só a inicial do e-mail; a foto aparecia apenas ao abrir o menu. Agora a
+  foto do perfil aparece no botão assim que a janela abre.
+- Com a janela em tela cheia, o menu da conta saía pela borda direita: a posição era calculada antes
+  de chegarem a foto, o nome e o uso. Agora o menu se reposiciona quando o conteúdo muda de tamanho.
+
 ## [0.3.0] - 2026-10-26
 
 ### Adicionado
@@ -239,7 +247,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.2.5...v0.3.0
 [0.2.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.0.1...v0.1.0

@@ -2,7 +2,7 @@
 // lateral com as visões e a área da visão escolhida. Atualiza com os eventos da ponte.
 
 import { attempt, el, icon, stylesheet } from '../components.js';
-import { accountMenu } from './home/account.js';
+import { accountButton, accountMenu } from './home/account.js';
 import { headerFor } from './home/model.js';
 import { moreMenu } from './home/more.js';
 import * as activity from './home/activity.js';
@@ -155,7 +155,7 @@ function updateHeader() {
   ui.pause.hidden = !header.pause;
   if (header.pause) ui.pause.textContent = t(header.pause);
   ui.nav.hidden = status.state === 'signed-out';
-  ui.account.textContent = (status.account || '?').slice(0, 1).toUpperCase();
+  accountButton(ui.account, home.ctx.api, status.account);
   ui.header.dataset.state = status.state;
 }
 

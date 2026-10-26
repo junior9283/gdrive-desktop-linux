@@ -87,10 +87,22 @@ export function confirmDialog({ title, body, confirm, cancel, danger = false, re
 // Menu suspenso abaixo de `anchor`: `items` são `{ label, action, disabled, id }`, `{ node }`
 // (conteúdo sem ação, como o cartão da conta) ou `'-'` (separador). Fecha ao escolher, ao clicar
 // fora ou com Esc.
+let closeOpenMenu = null;
 export function popupMenu(anchor, items) {
-  document.querySelector('.menu')?.remove();
+  closeOpenMenu?.();
   const menu = el('div', { class: 'menu', role: 'menu' });
+  // Recalcula a posição quando o conteúdo muda de tamanho (o menu da conta alarga quando chegam
+  // a foto e o nome): senão ele sai pela borda da janela.
+  const place = () => {
+    const box = anchor.getBoundingClientRect();
+    const left = Math.min(box.left, window.innerWidth - menu.offsetWidth - 8);
+    menu.style.left = `${Math.max(8, left)}px`;
+    menu.style.top = `${box.bottom + 4}px`;
+  };
+  const resized = new ResizeObserver(place);
   const close = () => {
+    if (closeOpenMenu === close) closeOpenMenu = null;
+    resized.disconnect();
     menu.remove();
     document.removeEventListener('pointerdown', outside, true);
     document.removeEventListener('keydown', escape, true);
@@ -118,10 +130,9 @@ export function popupMenu(anchor, items) {
     menu.append(button);
   }
   document.body.append(menu);
-  const box = anchor.getBoundingClientRect();
-  const left = Math.min(box.left, window.innerWidth - menu.offsetWidth - 8);
-  menu.style.left = `${Math.max(8, left)}px`;
-  menu.style.top = `${box.bottom + 4}px`;
+  closeOpenMenu = close;
+  place();
+  resized.observe(menu);
   document.addEventListener('pointerdown', outside, true);
   document.addEventListener('keydown', escape, true);
   menu.querySelector('button:not([disabled])')?.focus();

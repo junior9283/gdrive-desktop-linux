@@ -260,6 +260,53 @@ async fn home_shows_synced_and_activity() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
+async fn account_button_shows_photo_without_click() {
+    let session = Session::open("home").await;
+
+    let src = until("a foto no botão da conta", async || {
+        let src = session
+            .eval("return document.querySelector('.account-button img.avatar')?.src ?? null")
+            .await;
+        src.as_str().map(str::to_string)
+    })
+    .await;
+
+    assert!(src.starts_with("data:image/png;base64,"), "{src}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn account_menu_stays_inside_window() {
+    let session = Session::open("home").await;
+    // Janela larga: o botão da conta fica colado na borda direita, como em tela cheia.
+    session
+        .post("window/rect", json!({ "width": 1900, "height": 1000 }))
+        .await;
+    session.click(".account-button").await;
+    // O cartão alarga quando chegam o nome, a foto e o uso.
+    session
+        .wait_text(".menu .account-card", "Pessoa de Teste")
+        .await;
+
+    let [left, right, width] = until("o menu reposicionado", async || {
+        let rect = session
+            .eval(
+                "const r = document.querySelector('.menu').getBoundingClientRect(); \
+                 return [r.left, r.right, window.innerWidth]",
+            )
+            .await;
+        serde_json::from_value::<[f64; 3]>(rect).ok()
+    })
+    .await;
+
+    assert!(
+        left >= 0.0 && right <= width,
+        "menu em {left}..{right}, janela {width}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
 async fn pause_button_toggles() {
     let service = service().await;
     let session = Session::open("home").await;

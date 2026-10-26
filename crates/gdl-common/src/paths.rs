@@ -20,6 +20,14 @@ pub fn exe_dir() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
 }
 
+/// Base XDG: o valor da variável só vale se for caminho absoluto; senão, `<home>/<padrão>`.
+fn xdg_base(value: Option<std::ffi::OsString>, home: &Path, default: &str) -> PathBuf {
+    value
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home.join(default))
+}
+
 /// Onde o app guarda configuração, dados, estado e onde lê as políticas do sistema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
@@ -27,6 +35,8 @@ pub struct Paths {
     /// `autostart` e os Locais do KDE.
     pub config_home: PathBuf,
     pub data_home: PathBuf,
+    /// Cache de miniaturas do freedesktop (`$XDG_CACHE_HOME/thumbnails`).
+    pub thumbnails_dir: PathBuf,
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub state_dir: PathBuf,
@@ -40,16 +50,12 @@ impl Paths {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| "/".into());
-        let xdg = |var: &str, default: &str| {
-            std::env::var_os(var)
-                .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
-                .unwrap_or_else(|| home.join(default))
-        };
+        let xdg = |var: &str, default: &str| xdg_base(std::env::var_os(var), &home, default);
         Paths::under(
             &xdg("XDG_CONFIG_HOME", ".config"),
             &xdg("XDG_DATA_HOME", ".local/share"),
             &xdg("XDG_STATE_HOME", ".local/state"),
+            &xdg("XDG_CACHE_HOME", ".cache"),
             Path::new("/etc"),
         )
     }
@@ -60,15 +66,17 @@ impl Paths {
             &root.join("config"),
             &root.join("data"),
             &root.join("state"),
+            &root.join("cache"),
             &root.join("etc"),
         )
     }
 
     /// A subpasta do app dentro de cada diretório-base.
-    fn under(config: &Path, data: &Path, state: &Path, etc: &Path) -> Paths {
+    fn under(config: &Path, data: &Path, state: &Path, cache: &Path, etc: &Path) -> Paths {
         Paths {
             config_home: config.into(),
             data_home: data.into(),
+            thumbnails_dir: cache.join("thumbnails"),
             config_dir: config.join(APP),
             data_dir: data.join(APP),
             state_dir: state.join(APP),
@@ -97,5 +105,18 @@ mod tests {
             PathBuf::from("/tmp/x/state/gdrive-desktop-linux")
         );
         assert_eq!(p.etc_dir, PathBuf::from("/tmp/x/etc/gdrive-desktop-linux"));
+        assert_eq!(p.thumbnails_dir, PathBuf::from("/tmp/x/cache/thumbnails"));
+    }
+
+    #[test]
+    fn relative_xdg_cache_home_is_ignored() {
+        let home = Path::new("/home/fulano");
+        let base = |v: &str| xdg_base(Some(v.into()), home, ".cache");
+        assert_eq!(base("cache-relativo"), PathBuf::from("/home/fulano/.cache"));
+        assert_eq!(base("/c"), PathBuf::from("/c"));
+        assert_eq!(
+            xdg_base(None, home, ".cache"),
+            PathBuf::from("/home/fulano/.cache")
+        );
     }
 }

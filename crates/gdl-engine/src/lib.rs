@@ -15,6 +15,7 @@ pub mod pins;
 pub mod search;
 #[cfg(test)]
 mod testutil;
+pub mod thumbs;
 pub mod uploads;
 
 use gdl_drive::client::DriveError;

@@ -13,6 +13,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   a contagem do estado da bandeja, a lista de pendentes da Atividade, a tela de arquivos off-line
   e o menu do botão direito agora usam só os índices dos itens fixados ou editados (índice novo
   para os editados).
+- Desempenho: abrir pela primeira vez uma pasta sem imagens, vídeos nem PDFs (código, textos,
+  compactados) não espera mais as miniaturas nem consulta o Google. Buscas, cópias, backups,
+  controle de versão e IDEs (`find`, `rsync`, `git`, `code` etc.) percorrem as pastas sem semear
+  miniaturas, como já faziam os indexadores; a pasta de fotos continua com as miniaturas na
+  primeira abertura pelo gerenciador de arquivos.
 
 ### Corrigido
 - Compilado sem todas as dependências já baixadas (CI com cache novo), o Sobre saía sem a lista

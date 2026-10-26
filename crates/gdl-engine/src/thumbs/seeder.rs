@@ -25,9 +25,31 @@ const FETCH_SIZE: u32 = 512;
 /// Erro de uma etapa que mistura arquivo e banco; só vai para o log.
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Arquivo comum sem edição local: o que dá para decidir sem consultar o banco.
+/// Extensões das imagens, vídeos e documentos de que os gerenciadores de arquivos mostram prévia
+/// lendo o arquivo (KDE com kimageformats e ffmpegthumbs, GNOME, Xfce). Eles escolhem a prévia
+/// pela extensão, como aqui. Dos outros (código, texto, compactados), o Google até gera
+/// miniatura, mas ninguém a pede: semear só custaria rede e a espera do `opendir`. Sem `ts`, que
+/// também é TypeScript.
+const PREVIEWABLE: &[&str] = &[
+    "jpg", "jpeg", "jpe", "png", "gif", "bmp", "webp", "tif", "tiff", "heic", "heif", "avif",
+    "svg", "ico", "jxl", "jp2", "qoi", "tga", "exr", "psd", "xcf", "kra", "ora", "dng", "cr2",
+    "cr3", "nef", "arw", "orf", "rw2", "raf", "mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv",
+    "mpg", "mpeg", "3gp", "ogv", "flv", "m2ts", "mts", "pdf", "eps", "ps", "ai", "epub",
+];
+
+/// O gerenciador de arquivos mostra prévia de `name`?
+fn previewable(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| PREVIEWABLE.iter().any(|p| e.eq_ignore_ascii_case(p)))
+}
+
+/// Arquivo comum com prévia e sem edição local: o que dá para decidir sem consultar o banco.
 fn seedable(item: &Item) -> bool {
-    item.kind == ItemKind::File && item.local_state == LocalState::Clean
+    item.kind == ItemKind::File
+        && item.local_state == LocalState::Clean
+        && previewable(&item.local_name)
 }
 
 /// Um item `seedable` precisa de miniatura se não tem semeadura em dia (mesma revisão, mesma
@@ -222,11 +244,20 @@ impl ThumbSeeder {
         folder_path: &Path,
         cancel: &CancellationToken,
     ) -> Result<Vec<Job>, StoreError> {
+        let candidates: Vec<Item> = self
+            .store
+            .children(folder)?
+            .into_iter()
+            .filter(seedable)
+            .collect();
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut recs = self.store.thumbs_of_children(folder)?;
         let mut jobs = Vec::new();
         // Já com os três PNGs em dia: só voltam para a memória, todos de uma vez no fim.
         let mut current = Vec::new();
-        for item in self.store.children(folder)?.into_iter().filter(seedable) {
+        for item in candidates {
             let uri = uri_of(&folder_path.join(&item.local_name));
             let rec = recs.remove(&item.id);
             let remembered = rec.is_some();
@@ -519,13 +550,13 @@ mod tests {
         _tmp: tempfile::TempDir,
     }
 
-    /// Motor indexado com a pasta `Fotos` (duas imagens e um texto).
+    /// Motor indexado com a pasta `Fotos`: duas imagens e um PDF sem miniatura no Google.
     async fn setup() -> (Setup, [String; 3]) {
         let fake = FakeDrive::start().await;
         let folder = fake.add_folder(&fake.root_id(), "Fotos");
         let a = fake.add_file_with_mime(&folder, FOTO, "image/jpeg", vec![1; 10]);
         let b = fake.add_file_with_mime(&folder, "b.png", "image/png", vec![2; 10]);
-        let c = fake.add_file(&folder, "c.txt", b"texto".to_vec());
+        let c = fake.add_file(&folder, "c.pdf", b"%PDF".to_vec());
         let (engine, tmp) = indexed_engine(&fake).await;
         let folder_path = tmp.path().join("montagem/Meu Drive/Fotos");
         let s = Setup {
@@ -591,7 +622,7 @@ mod tests {
             s.uri(FOTO)
                 .contains("Fotos%20de%20Mar%C3%A7o%20%231%20(100%25).jpg")
         );
-        assert_eq!(s.mtimes("c.txt"), vec![None; 3]);
+        assert_eq!(s.mtimes("c.pdf"), vec![None; 3]);
         // Sem miniatura no Google: só lembrado, para a próxima abertura não chamar a API.
         assert!(s.engine.store.thumb(&ItemId(c)).unwrap().is_some());
         assert_eq!(s.pngs(), 6);
@@ -645,6 +676,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fake.requests(LIST), list);
+    }
+
+    /// Código, texto, compactados: nenhum gerenciador mostra prévia deles por padrão, então a
+    /// pasta não chama o Google nem guarda memória (uma pasta de 3.828 `.js` esperava 1,6 s).
+    #[tokio::test]
+    async fn folder_without_previewable_files_does_not_call_api() {
+        let fake = FakeDrive::start().await;
+        let folder = fake.add_folder(&fake.root_id(), "src");
+        let files: Vec<_> = ["app.js", "LEIA-ME.txt", "dados.zip", "sem-extensao"]
+            .into_iter()
+            .map(|name| fake.add_file(&folder, name, b"x".to_vec()))
+            .collect();
+        let (engine, tmp) = indexed_engine(&fake).await;
+        let engine = Arc::new(engine);
+        let list = fake.requests(LIST);
+        engine
+            .seed_thumbnails(&ItemId(folder), tmp.path().join("m/src"))
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(fake.requests(LIST), list);
+        for id in files {
+            assert!(engine.store.thumb(&ItemId(id)).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn previewable_by_extension() {
+        for name in [
+            "a.JPG", "b.jpeg", "c.png", "d.heic", "e.psd", "f.mp4", "g.MOV", "h.pdf",
+        ] {
+            assert!(previewable(name), "{name}");
+        }
+        for name in ["a.js", "b.txt", "c.zip", "d", ".jpg", "e.jpg.part", "f.ts"] {
+            assert!(!previewable(name), "{name}");
+        }
     }
 
     #[tokio::test]
@@ -895,7 +962,7 @@ mod tests {
         s.seed().await;
         assert_eq!(s.fake.requests("/thumb"), thumbs);
         assert_eq!(s.engine.store.all_thumbs().unwrap().len(), 3);
-        // Só o `c.txt` (sem PNG) ainda pede a listagem.
+        // Só o `c.pdf` (sem PNG) ainda pede a listagem.
         assert_eq!(s.fake.requests(LIST), list + 1);
     }
 

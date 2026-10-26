@@ -101,15 +101,7 @@ async fn logout_removes_seeded_thumbnails() {
 
     // Os PNGs de três tamanhos, mais um de outro caminho que não é do serviço.
     let thumbs = h.paths().thumbnails_dir;
-    let pngs = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
-        ["normal", "large", "x-large"]
-            .iter()
-            .filter_map(|s| std::fs::read_dir(dir.join(s)).ok())
-            .flatten()
-            .map(|e| e.unwrap().path())
-            .collect()
-    };
-    let seeded = pngs(&thumbs);
+    let seeded = seeded_pngs(&thumbs);
     assert_eq!(seeded.len(), 3, "{seeded:?}");
     let other = thumbs.join("normal").join("de-outro-caminho.png");
     std::fs::write(&other, b"png de outro programa").unwrap();
@@ -123,6 +115,53 @@ async fn logout_removes_seeded_thumbnails() {
         other.exists(),
         "apagou uma miniatura que não era do serviço"
     );
+}
+
+/// Os PNGs gravados nos três tamanhos de miniatura.
+fn seeded_pngs(thumbs: &std::path::Path) -> Vec<std::path::PathBuf> {
+    ["normal", "large", "x-large"]
+        .iter()
+        .filter_map(|s| std::fs::read_dir(thumbs.join(s)).ok())
+        .flatten()
+        .map(|e| e.unwrap().path())
+        .collect()
+}
+
+/// Quantos itens a pasta lista pela montagem (fora do runtime: o FUSE responde nele).
+async fn listed(dir: std::path::PathBuf) -> usize {
+    tokio::task::spawn_blocking(move || std::fs::read_dir(dir).unwrap().count())
+        .await
+        .unwrap()
+}
+
+/// A garantia das miniaturas: a primeira listagem de uma pasta de fotos pela montagem só
+/// responde com as miniaturas gravadas (o Dolphin as acha sem baixar as fotos). Uma pasta de
+/// código não espera nem chama o Google.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn first_listing_of_a_photo_folder_has_the_thumbnails() {
+    let h = Harness::new().await;
+    let photos = h.fake.add_folder(&h.fake.root_id(), "Camera");
+    for name in ["a.jpg", "b.jpg"] {
+        h.fake
+            .add_file_with_mime(&photos, name, "image/jpeg", vec![1; 10]);
+    }
+    let code = h.fake.add_folder(&h.fake.root_id(), "src");
+    for name in ["a.js", "b.js"] {
+        h.fake.add_file(&code, name, b"x".to_vec());
+    }
+    h.logged_in().await;
+    let lists = h.fake.requests("/drive/v3/files");
+    assert_eq!(listed(h.drive().join("src")).await, 2);
+    assert_eq!(
+        h.fake.requests("/drive/v3/files"),
+        lists,
+        "a pasta de código chamou o Google"
+    );
+
+    assert_eq!(listed(h.drive().join("Camera")).await, 2);
+    let seeded = seeded_pngs(&h.paths().thumbnails_dir).len();
+    assert_eq!(seeded, 2 * 3, "a listagem respondeu antes das miniaturas");
+    assert_eq!(h.fake.downloaded_bytes(), 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

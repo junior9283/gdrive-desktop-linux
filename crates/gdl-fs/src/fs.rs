@@ -52,14 +52,58 @@ const INDEXERS: [&str; 6] = [
     "mlocate",
 ];
 
+/// Programas que percorrem pastas sem usar o cache de miniaturas (`comm` exato, ao contrário dos
+/// `INDEXERS`, cujos nomes têm sufixos: `cp` não pode pegar `cpp`): buscas, cópias, backups,
+/// controle de versão e IDEs (que mostram imagens pelo arquivo, não pelo cache). Esperar e semear
+/// cada pasta para eles só deixava a varredura lenta; a pasta é semeada quando um gerenciador de
+/// arquivos a abre. Um programa de fora da lista só fica como antes: correto, mais lento.
+const WALKERS: &[&str] = &[
+    "find",
+    "fd",
+    "fdfind",
+    "rg",
+    "grep",
+    "du",
+    "ncdu",
+    "dust",
+    "tree",
+    "ls",
+    "stat",
+    "file",
+    "cp",
+    "mv",
+    "rsync",
+    "tar",
+    "zip",
+    "7z",
+    "7za",
+    "rclone",
+    "restic",
+    "borg",
+    "kopia",
+    "duplicity",
+    "deja-dup",
+    "rdiff-backup",
+    "git",
+    "code",
+    "codium",
+    "fsnotifier",
+];
+
 /// O `comm` (de `/proc/<pid>/comm`) é de um indexador (`INDEXERS`)?
 fn is_indexer(comm: &str) -> bool {
     INDEXERS.iter().any(|name| comm.starts_with(name))
 }
 
-/// Quem pediu (`pid` do FUSE) é um indexador? Sem `/proc` legível (processo que já saiu), não.
-fn opened_by_indexer(pid: u32) -> bool {
-    opened_by_indexer_in(Path::new("/proc"), pid)
+/// O `comm` é de um programa que percorre pastas (`WALKERS`)?
+fn is_walker(comm: &str) -> bool {
+    WALKERS.contains(&comm.trim_end())
+}
+
+/// Quem pediu (`pid` do FUSE) não usa miniaturas (indexador ou varredura)? Sem `/proc` legível
+/// (processo que já saiu), usa.
+fn skips_thumbnails(pid: u32) -> bool {
+    skips_thumbnails_in(Path::new("/proc"), pid)
 }
 
 /// Nome (`comm`) do processo da thread `tid`, lido de `proc_root` (o `/proc`). O `comm` da
@@ -77,10 +121,10 @@ fn process_name(proc_root: &Path, tid: u32) -> Option<String> {
 
 /// O FUSE informa o ID da thread que chamou, não o do processo: decide pelo nome do processo e,
 /// de quebra, pelo da thread. Erro de leitura é "não": a abertura segue normal.
-fn opened_by_indexer_in(proc_root: &Path, tid: u32) -> bool {
+fn skips_thumbnails_in(proc_root: &Path, tid: u32) -> bool {
+    let skips = |comm: &str| is_indexer(comm) || is_walker(comm);
     let thread = std::fs::read_to_string(proc_root.join(tid.to_string()).join("comm"));
-    thread.is_ok_and(|comm| is_indexer(&comm))
-        || process_name(proc_root, tid).is_some_and(|comm| is_indexer(&comm))
+    thread.is_ok_and(|comm| skips(&comm)) || process_name(proc_root, tid).is_some_and(|c| skips(&c))
 }
 
 /// Threads do FUSE: fixas, porque ficam paradas em E/S (e na espera das miniaturas), não na CPU.
@@ -899,7 +943,7 @@ impl Filesystem for DriveFs {
 
     fn opendir(&self, req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
         let listed = self.0.node(ino).and_then(|n| {
-            if !opened_by_indexer(req.pid()) {
+            if !skips_thumbnails(req.pid()) {
                 self.0.wait_thumbnails(&n);
             }
             self.0.list(&n)
@@ -1009,7 +1053,7 @@ pub fn mount(fs: DriveFs, at: &Path) -> std::io::Result<BackgroundSession> {
 mod tests {
     use std::path::Path;
 
-    use super::{is_indexer, opened_by_indexer_in, process_name};
+    use super::{is_indexer, is_walker, process_name, skips_thumbnails_in};
 
     /// `/proc` falso: a thread `tid` (com o nome `thread`) do processo `tgid` (com o nome `name`).
     fn fake_proc(root: &Path, tid: u32, thread: &str, tgid: u32, name: &str) {
@@ -1051,23 +1095,23 @@ mod tests {
                 .map(str::trim),
             Some("baloo_file")
         );
-        assert!(opened_by_indexer_in(proc_root.path(), 4321));
-        assert!(opened_by_indexer_in(proc_root.path(), 5321));
-        assert!(!opened_by_indexer_in(proc_root.path(), 6321));
+        assert!(skips_thumbnails_in(proc_root.path(), 4321));
+        assert!(skips_thumbnails_in(proc_root.path(), 5321));
+        assert!(!skips_thumbnails_in(proc_root.path(), 6321));
     }
 
     /// Sem `/proc` legível, ou com `status` sem `Tgid`, não é indexador (segue normal).
     #[test]
     fn unreadable_proc_is_not_an_indexer() {
         let proc_root = tempfile::tempdir().unwrap();
-        assert!(!opened_by_indexer_in(proc_root.path(), 1));
+        assert!(!skips_thumbnails_in(proc_root.path(), 1));
         assert_eq!(process_name(proc_root.path(), 1), None);
         let task = proc_root.path().join("7");
         std::fs::create_dir_all(&task).unwrap();
         std::fs::write(task.join("comm"), "Thread (pooled)\n").unwrap();
         std::fs::write(task.join("status"), "Name:\tThread (pooled)\n").unwrap();
         assert_eq!(process_name(proc_root.path(), 7), None);
-        assert!(!opened_by_indexer_in(proc_root.path(), 7));
+        assert!(!skips_thumbnails_in(proc_root.path(), 7));
     }
 
     /// No `/proc` de verdade: pelo ID de uma thread com nome próprio sai o nome do processo.
@@ -1114,5 +1158,32 @@ mod tests {
         ] {
             assert!(!is_indexer(comm), "{comm:?}");
         }
+    }
+
+    /// Varreduras (find, rsync, backup, IDE) não mostram miniaturas: uma subárvore de 75 pastas
+    /// levava 112 s esperando e semeando cada pasta. Pelo nome exato do processo: `cp` não é
+    /// `cpp`, e `find` não é `findmnt`.
+    #[test]
+    fn walkers_skip_thumbnails_by_exact_name() {
+        for comm in [
+            "find\n", "rsync\n", "rg\n", "du\n", "git\n", "restic\n", "code\n",
+        ] {
+            assert!(is_walker(comm), "{comm:?}");
+        }
+        for comm in [
+            "findmnt\n",
+            "cpp\n",
+            "dolphin\n",
+            "nautilus\n",
+            "kioworker\n",
+            "",
+        ] {
+            assert!(!is_walker(comm), "{comm:?}");
+        }
+        let proc_root = tempfile::tempdir().unwrap();
+        fake_proc(proc_root.path(), 7321, "find", 7000, "find");
+        fake_proc(proc_root.path(), 8321, "pool-dolphin", 8000, "dolphin");
+        assert!(skips_thumbnails_in(proc_root.path(), 7321));
+        assert!(!skips_thumbnails_in(proc_root.path(), 8321));
     }
 }

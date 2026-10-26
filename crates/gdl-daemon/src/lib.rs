@@ -4,6 +4,7 @@ pub mod daemon;
 pub mod dbus;
 pub mod desktop;
 pub mod history;
+pub mod menu;
 pub mod metered;
 pub mod mount;
 pub mod notify;

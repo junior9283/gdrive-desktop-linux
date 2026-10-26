@@ -220,6 +220,16 @@ pub struct SharedItem {
     pub shared_ms: i64,
 }
 
+/// Um item do menu "Google Drive" do botão direito (`Menu`), na ordem de exibição.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct MenuEntry {
+    /// A ação para `MenuAction`; `-` é um separador.
+    pub id: String,
+    pub label: String,
+    /// `on`, `off` ou `mixed` nas escolhas de acesso off-line; vazio nos outros.
+    pub state: String,
+}
+
 /// Uma linha de `Preferences`.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Pref {
@@ -325,6 +335,10 @@ pub trait Service {
     fn shared_with_me(&self) -> Result<Vec<SharedItem>, ServiceError>;
     /// Cria no Meu Drive um atalho para o item compartilhado.
     fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError>;
+    /// O menu do botão direito para os caminhos; vazio fora do Meu Drive ou sem conta.
+    fn menu(&self, paths: &[&str]) -> Result<Vec<MenuEntry>, ServiceError>;
+    /// Faz a ação do menu nos caminhos; devolve o texto a copiar (o link), ou vazio.
+    fn menu_action(&self, action: &str, paths: &[&str]) -> Result<String, ServiceError>;
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.
     fn logout(&self, mode: &str, dir: &str) -> Result<(), ServiceError>;
     /// Antes de os programas saírem: desmonta, tira o início automático e o lugar nos Locais e,

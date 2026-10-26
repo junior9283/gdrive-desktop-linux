@@ -13,6 +13,7 @@ use gdl_common::config::{
     save_user_preference, set_user_preferences,
 };
 use gdl_common::i18n::I18n;
+use gdl_common::links::DRIVE_TRASH;
 use gdl_common::names::{create_unique, split_ext};
 use gdl_common::paths::Paths;
 use gdl_drive::Network;
@@ -35,13 +36,15 @@ use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 
 use gdl_ipc::{
-    AccountInfo, ActivityItem, NotificationItem, NotificationSetting, OBJECT_PATH, OfflineEntry,
-    OfflineSummary, Pref, SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
+    AccountInfo, ActivityItem, MenuEntry, NotificationItem, NotificationSetting, OBJECT_PATH,
+    OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError, SharedItem, Status,
+    SyncErrorItem,
 };
 
 use crate::dbus::Service;
 use crate::desktop;
 use crate::history::History;
+use crate::menu::{self, Action};
 use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
@@ -177,6 +180,25 @@ impl<'a> DrivePaths<'a> {
         let folder = self.my_drive.join(folder.unwrap_or_default());
         folder.join(&item.local_name).display().to_string()
     }
+}
+
+/// O que o menu do botão direito precisa saber do item.
+fn picked(engine: &Engine, item: &Item) -> Result<menu::Picked, ServiceError> {
+    let is_folder = item.kind == ItemKind::Folder;
+    let offline = match item.pin {
+        PinState::Pinned | PinState::Inherited => menu::Offline::On,
+        PinState::None
+            if is_folder && engine.store().has_pinned_inside(&item.id).map_err(failed)? =>
+        {
+            menu::Offline::Mixed
+        }
+        PinState::None => menu::Offline::Off,
+    };
+    Ok(menu::Picked {
+        is_folder,
+        has_link: web_url(item).is_some(),
+        offline,
+    })
 }
 
 fn web_link(item: &Item) -> Result<String, ServiceError> {
@@ -1168,6 +1190,88 @@ impl Daemon {
             .await
             .map(drop)
             .map_err(|e| engine_error(e, item_id))
+    }
+
+    /// O menu do botão direito para `paths`: vazio se algum não for do Meu Drive (ou sem conta),
+    /// para o gerenciador de arquivos não mostrar o submenu.
+    pub async fn menu(&self, paths: &[String]) -> Vec<MenuEntry> {
+        let Ok(selection) = self.selection(paths).await else {
+            return Vec::new();
+        };
+        let picked: Result<Vec<_>, _> = selection
+            .iter()
+            .map(|(engine, item)| picked(engine, item))
+            .collect();
+        let Ok(picked) = picked else {
+            return Vec::new();
+        };
+        menu::entries(&picked)
+            .into_iter()
+            .map(|(action, state)| MenuEntry {
+                id: action.map_or(menu::SEPARATOR, Action::id).into(),
+                label: action.map_or_else(String::new, |a| self.i18n.tr(a.label_key(), &[])),
+                state: state.into(),
+            })
+            .collect()
+    }
+
+    /// Faz a ação `action` do menu nos `paths`; devolve o link em `copy-link` e vazio nas outras.
+    pub async fn menu_action(
+        &self,
+        action: &str,
+        paths: &[String],
+    ) -> Result<String, ServiceError> {
+        let invalid = || ServiceError::InvalidArgs(action.into());
+        let action = Action::parse(action).ok_or_else(invalid)?;
+        let selection = self.selection(paths).await?;
+        let single = || match selection.as_slice() {
+            [(engine, item)] => Ok((engine, item)),
+            _ => Err(invalid()),
+        };
+        let folder = || {
+            single().and_then(|f| match f.1.kind {
+                ItemKind::Folder => Ok(f),
+                _ => Err(invalid()),
+            })
+        };
+        match action {
+            Action::OpenWeb => self.open(web_link(single()?.1)?),
+            Action::CopyLink => return web_link(single()?.1),
+            Action::Offline | Action::OnlineOnly => {
+                for (engine, item) in &selection {
+                    let pins = engine.pins();
+                    match action {
+                        Action::Offline => pins.pin(&item.id),
+                        _ => pins.unpin(&item.id),
+                    }
+                    .map_err(|e| engine_error(e, &item.id.0))?;
+                }
+            }
+            Action::Refresh => folder()?.0.refresh().await,
+            Action::Trash => self.open(DRIVE_TRASH.into()),
+            Action::NewDocument | Action::NewSpreadsheet | Action::NewPresentation => {
+                let new = action.new_file().ok_or_else(invalid)?;
+                let (engine, parent) = folder()?;
+                let name = self.i18n.tr(new.name_key, &[]);
+                let created = engine
+                    .create_google_file(&parent.id, &name, new.mime)
+                    .await
+                    .map_err(failed)?;
+                self.open(web_link(&created)?);
+            }
+        }
+        Ok(String::new())
+    }
+
+    /// Os itens do Meu Drive em `paths`.
+    async fn selection(&self, paths: &[String]) -> Result<Vec<(Arc<Engine>, Item)>, ServiceError> {
+        let mut selection = Vec::with_capacity(paths.len());
+        for path in paths {
+            let (engine, id) = self.item_at(path).await?;
+            let item = live_item(&engine, &id.0)?;
+            selection.push((engine, item));
+        }
+        Ok(selection)
     }
 
     /// O motor da conta conectada e a pasta do Meu Drive na montagem.

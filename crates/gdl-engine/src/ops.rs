@@ -273,6 +273,20 @@ impl Engine {
         self.applied(remote)
     }
 
+    /// Documento Google vazio (`mime` do Google) dentro de `parent`.
+    pub async fn create_google_file(
+        &self,
+        parent: &ItemId,
+        name: &str,
+        mime: &str,
+    ) -> Result<Item> {
+        let remote = self
+            .client
+            .create_google_file(&parent.0, &to_remote(name), mime)
+            .await?;
+        self.applied(remote)
+    }
+
     /// Data de modificação escolhida pelo app. Com envio pendente, vai junto com o conteúdo;
     /// num item já sincronizado, vai direto ao Drive.
     pub async fn set_modified(&self, id: &ItemId, modified_ms: i64) -> Result<Item> {

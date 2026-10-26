@@ -1023,3 +1023,129 @@ async fn uninstall_purge_keeps_only_the_kept_copies() {
     assert!(!paths.config_dir.exists());
     assert!(!paths.state_dir.exists());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn menu_shows_only_inside_my_drive_with_offline_marks() {
+    let h = Harness::new().await;
+    let folder = h.fake.add_folder(&h.fake.root_id(), "Pasta");
+    h.fake.add_file(&folder, "a.txt", b"a".to_vec());
+    h.logged_in().await;
+    let path = |p: &str| h.drive().join(p).display().to_string();
+    h.proxy.pin(&path("Pasta/a.txt")).await.unwrap();
+
+    let ids = |menu: &[gdl_ipc::MenuEntry]| menu.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
+    let state = |menu: &[gdl_ipc::MenuEntry], id: &str| {
+        menu.iter().find(|e| e.id == id).unwrap().state.clone()
+    };
+    let folder_menu = h.proxy.menu(&[&path("Pasta")]).await.unwrap();
+    assert!(
+        ids(&folder_menu).contains(&"new-document".into()),
+        "{folder_menu:?}"
+    );
+    assert_eq!(state(&folder_menu, "offline"), "mixed");
+    let offline = folder_menu.iter().find(|e| e.id == "offline").unwrap();
+    assert_eq!(offline.label, "Disponível off-line");
+    assert!(
+        folder_menu
+            .iter()
+            .all(|e| (e.id == "-") == e.label.is_empty())
+    );
+
+    let file_menu = h.proxy.menu(&[&path("Pasta/a.txt")]).await.unwrap();
+    assert_eq!(ids(&file_menu)[..2], ["open-web", "copy-link"]);
+    assert_eq!(state(&file_menu, "offline"), "on");
+    assert_eq!(state(&file_menu, "online-only"), "off");
+
+    let outside = h
+        .proxy
+        .menu(&[&path("Pasta"), "/fora/do/drive"])
+        .await
+        .unwrap();
+    assert!(outside.is_empty(), "um item de fora esconde o submenu");
+    assert!(h.proxy.menu(&[]).await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn menu_actions_link_pin_create_refresh_and_trash() {
+    let h = Harness::new().await;
+    let root = h.fake.root_id();
+    let folder = h.fake.add_folder(&root, "Pasta");
+    let file = h.fake.add_file(&folder, "a.txt", b"a".to_vec());
+    h.logged_in().await;
+    let engine = h.daemon.engine().await.unwrap();
+    let pin_of = |id: &str| {
+        let item = engine.store().get(&gdl_store::ItemId(id.into())).unwrap();
+        item.unwrap().pin
+    };
+    let a = h.drive().join("Pasta/a.txt").display().to_string();
+    let pasta = h.drive().join("Pasta").display().to_string();
+    let before = h.opened().len();
+
+    let link = h.proxy.menu_action("copy-link", &[&a]).await.unwrap();
+    assert_eq!(link, format!("https://drive.google.com/file/d/{file}/view"));
+    h.proxy.menu_action("offline", &[&a, &pasta]).await.unwrap();
+    assert_eq!(
+        (pin_of(&file), pin_of(&folder)),
+        (PinState::Pinned, PinState::Pinned)
+    );
+    h.proxy.menu_action("online-only", &[&pasta]).await.unwrap();
+    assert_eq!(pin_of(&folder), PinState::None);
+
+    h.proxy
+        .menu_action("new-spreadsheet", &[&pasta])
+        .await
+        .unwrap();
+    let children = engine
+        .store()
+        .children(&gdl_store::ItemId(folder.clone()))
+        .unwrap();
+    let sheet = children
+        .iter()
+        .find(|i| {
+            i.kind
+                == gdl_store::ItemKind::GoogleDoc {
+                    mime: "application/vnd.google-apps.spreadsheet".into(),
+                }
+        })
+        .expect("a planilha nova aparece na pasta");
+    assert!(
+        sheet.local_name.starts_with("Planilha sem título"),
+        "{}",
+        sheet.local_name
+    );
+
+    h.fake.add_file(&folder, "remoto.txt", b"r".to_vec());
+    h.proxy.menu_action("refresh", &[&pasta]).await.unwrap();
+    let names: Vec<_> = engine
+        .store()
+        .children(&gdl_store::ItemId(folder.clone()))
+        .unwrap()
+        .into_iter()
+        .map(|i| i.local_name)
+        .collect();
+    assert!(names.contains(&"remoto.txt".into()), "{names:?}");
+
+    h.proxy.menu_action("open-web", &[&pasta]).await.unwrap();
+    h.proxy.menu_action("trash", &[]).await.unwrap();
+    wait_until("três aberturas", || h.opened().len() == before + 3).await;
+    let opened = h.opened().split_off(before);
+    assert!(opened.contains(&format!("https://docs.google.com/open?id={}", sheet.id.0)));
+    assert!(opened.contains(&format!("https://drive.google.com/drive/folders/{folder}")));
+    assert!(opened.contains(&gdl_common::links::DRIVE_TRASH.into()));
+
+    for (action, paths) in [
+        ("copy-link", vec![a.as_str(), pasta.as_str()]),
+        ("new-document", vec![a.as_str()]),
+        ("refresh", vec![a.as_str()]),
+        ("apagar-tudo", vec![a.as_str()]),
+    ] {
+        let err = h.proxy.menu_action(action, &paths).await.unwrap_err();
+        assert_eq!(err.short_name(), "InvalidArgs", "{action}: {err}");
+    }
+    let err = h
+        .proxy
+        .menu_action("offline", &["/fora"])
+        .await
+        .unwrap_err();
+    assert_eq!(err.short_name(), "NotFound", "{err}");
+}

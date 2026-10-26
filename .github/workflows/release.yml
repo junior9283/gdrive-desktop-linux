@@ -12,7 +12,26 @@ permissions:
   contents: read
 
 jobs:
+  # O plugin do menu do Dolphin, no Qt/KF6 mais antigo que ele atende (Debian 13): o Qt carrega
+  # plugins de versões anteriores à dele, nunca de mais novas.
+  dolphin:
+    runs-on: ubuntu-latest
+    container: debian:13
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências
+        run: integrations/dolphin/debian-deps.sh
+      - name: Compila e testa
+        run: integrations/dolphin/build.sh dolphin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dolphin
+          path: dolphin/
+
   build:
+    needs: dolphin
     # A glibc mais antiga que o Tauri 2 aceita: os programas rodam do Ubuntu 22.04 e do Debian 12
     # em diante, e nas distribuições mais novas.
     runs-on: ubuntu-22.04
@@ -36,8 +55,12 @@ jobs:
           go-version: stable
       - name: nfpm
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: dolphin
+          path: dolphin
       - name: Instaladores
-        run: scripts/package.sh dist
+        run: scripts/package.sh --dolphin dolphin/gdrive_desktop_linux_menu.so dist
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -55,12 +78,15 @@ jobs:
             install: apt-get update && apt-get install -y ./dist/*.deb
           - image: debian:12
             install: apt-get update && apt-get install -y ./dist/*.deb
+          # Com o KIO, para conferir que o plugin do Dolphin acha as bibliotecas dele.
           - image: fedora:latest
-            install: dnf install -y ./dist/*.rpm
+            install: dnf install -y ./dist/*.rpm kf6-kio-widgets-libs
+            plugin: /usr/lib64/qt6/plugins/kf6/kfileitemaction/gdrive_desktop_linux_menu.so
           - image: opensuse/tumbleweed
             install: zypper --non-interactive install --allow-unsigned-rpm ./dist/*.rpm
           - image: archlinux:latest
-            install: pacman -Syu --noconfirm && pacman -U --noconfirm ./dist/*.pkg.tar.zst
+            install: pacman -Syu --noconfirm kio && pacman -U --noconfirm ./dist/*.pkg.tar.zst
+            plugin: /usr/lib/qt6/plugins/kf6/kfileitemaction/gdrive_desktop_linux_menu.so
           # O .tar.gz não traz as dependências: elas vêm do sistema, como diz o README.
           - image: ubuntu:22.04
             install: >-
@@ -81,6 +107,11 @@ jobs:
           gdrive-desktop-linux --version
           # A janela carrega as bibliotecas dela (sem tela, só confere que nenhuma falta).
           ! ldd "$(command -v gdrive-desktop-linux-ui)" | grep 'not found'
+      - name: O plugin do Dolphin carrega as bibliotecas dele
+        if: matrix.plugin
+        run: |
+          test -f "${{ matrix.plugin }}"
+          ! ldd "${{ matrix.plugin }}" | grep 'not found'
 
   publish:
     needs: install

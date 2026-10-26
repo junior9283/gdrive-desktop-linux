@@ -399,6 +399,11 @@ impl Engine {
         })
     }
 
+    /// Busca agora as mudanças no Drive ("Atualizar pasta"), sem esperar a próxima consulta.
+    pub async fn refresh(&self) {
+        self.poller.poll().await;
+    }
+
     /// Roda os laços do serviço até `shutdown` ser cancelado.
     pub async fn run(&self, shutdown: CancellationToken) {
         tokio::select! {

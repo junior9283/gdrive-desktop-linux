@@ -124,3 +124,17 @@ window-offline = Arquivos off-line
 window-about = Sobre
 window-notification-settings = Preferências de notificação
 window-uninstall = Desinstalar o Google Drive
+
+## Menu "Google Drive" do botão direito nos gerenciadores de arquivos.
+menu-open-web = Abrir no navegador
+menu-copy-link = Copiar link
+menu-offline = Disponível off-line
+menu-online-only = Somente on-line
+menu-new-document = Novo Documento Google
+menu-new-spreadsheet = Nova Planilha Google
+menu-new-presentation = Nova Apresentação Google
+menu-refresh = Atualizar pasta
+menu-trash = Ver itens na lixeira
+new-document-name = Documento sem título
+new-spreadsheet-name = Planilha sem título
+new-presentation-name = Apresentação sem título

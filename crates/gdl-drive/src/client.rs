@@ -543,6 +543,18 @@ impl DriveClient {
         }
     }
 
+    /// Documento, Planilha ou Apresentação Google vazio (`mime` do Google) em `parent`. Só
+    /// com internet (nada a enviar depois: o documento não tem conteúdo local).
+    pub async fn create_google_file(
+        &self,
+        parent: &str,
+        name: &str,
+        mime: &str,
+    ) -> Result<RemoteFile> {
+        self.create(&json!({ "name": name, "mimeType": mime, "parents": [parent] }))
+            .await
+    }
+
     /// Sem ID reservado: o `files.generateIds` não serve para atalhos (só para arquivos comuns e
     /// pastas).
     pub async fn create_shortcut(

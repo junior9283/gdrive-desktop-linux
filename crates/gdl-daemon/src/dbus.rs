@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
-    AccountInfo, ActivityItem, NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary,
-    Pref, SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
+    AccountInfo, ActivityItem, MenuEntry, NotificationItem, NotificationSetting, OfflineEntry,
+    OfflineSummary, Pref, SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -160,6 +160,16 @@ impl Service {
     /// Cria no Meu Drive um atalho para o item compartilhado.
     async fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError> {
         self.daemon.add_shortcut(item_id).await
+    }
+
+    /// O menu "Google Drive" do botão direito para os caminhos; vazio fora do Meu Drive.
+    async fn menu(&self, paths: Vec<String>) -> Vec<MenuEntry> {
+        self.daemon.menu(&paths).await
+    }
+
+    /// Faz a ação do menu; devolve o texto a copiar (o link em `copy-link`), ou vazio.
+    async fn menu_action(&self, action: &str, paths: Vec<String>) -> Result<String, ServiceError> {
+        self.daemon.menu_action(action, &paths).await
     }
 
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.

@@ -1,0 +1,10 @@
+{
+    "KPlugin": {
+        "Description": "Ações do Google Drive para arquivos do Meu Drive",
+        "Description[en]": "Google Drive actions for files in My Drive",
+        "EnabledByDefault": true,
+        "Icon": "io.github.junior9283.GDriveDesktopLinux",
+        "MimeTypes": ["application/octet-stream", "inode/directory"],
+        "Name": "Google Drive"
+    }
+}

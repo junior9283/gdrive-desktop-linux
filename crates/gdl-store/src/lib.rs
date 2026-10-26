@@ -573,6 +573,20 @@ impl Store {
         )
     }
 
+    /// Se há algo fixado dentro de `folder` (a pasta "mista" do menu off-line). Sobe dos itens
+    /// fixados, que são poucos, em vez de descer a pasta, que pode ser o Drive inteiro.
+    pub fn has_pinned_inside(&self, folder: &ItemId) -> Result<bool> {
+        Ok(self.conn().query_row(
+            "WITH RECURSIVE up(id) AS ( \
+                 SELECT parent FROM items WHERE pin = ?2 AND trashed = 0 \
+                 UNION SELECT i.parent FROM items i JOIN up ON i.id = up.id \
+                 WHERE i.parent IS NOT NULL) \
+             SELECT EXISTS (SELECT 1 FROM up WHERE id = ?1)",
+            params![folder.0, PinState::Pinned],
+            |r| r.get(0),
+        )?)
+    }
+
     /// Quantos são os fixados mais altos (`pinned_children(None)`), sem carregá-los.
     pub fn count_top_pinned(&self) -> Result<u32> {
         Ok(self.conn().query_row(
@@ -1587,8 +1601,15 @@ mod tests {
         );
         assert_eq!(store.pinned_bytes().unwrap(), 15);
         assert_eq!(store.count_top_pinned().unwrap(), 2);
+        assert!(store.has_pinned_inside(&id("root")).unwrap());
+        assert!(store.has_pinned_inside(&id("Pasta")).unwrap());
+        assert!(
+            !store.has_pinned_inside(&id("Toda")).unwrap(),
+            "só a herança"
+        );
 
         store.unpin_all().unwrap();
+        assert!(!store.has_pinned_inside(&id("Pasta")).unwrap());
         assert!(store.pinned_children(None).unwrap().is_empty());
         assert_eq!(store.pinned_bytes().unwrap(), 0);
     }

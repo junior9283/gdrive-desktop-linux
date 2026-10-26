@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Adicionado
+- Menu "Google Drive" no botão direito do Dolphin, só nos itens do Meu Drive: abrir no navegador,
+  copiar link, Disponível off-line / Somente on-line (com a marca atual), novo Documento, Planilha
+  ou Apresentação Google na pasta, atualizar a pasta e ver a lixeira. O serviço decide os itens
+  (métodos D-Bus `Menu` e `MenuAction`), e o plugin vai nos pacotes `.deb`, `.rpm` e Arch.
+
 ## [0.4.0] - 2026-10-26
 
 ### Adicionado

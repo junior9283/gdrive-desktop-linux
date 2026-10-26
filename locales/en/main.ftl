@@ -124,3 +124,17 @@ window-offline = Offline files
 window-about = About
 window-notification-settings = Notification preferences
 window-uninstall = Uninstall Google Drive
+
+## The "Google Drive" right-click menu in file managers.
+menu-open-web = Open in browser
+menu-copy-link = Copy link
+menu-offline = Available offline
+menu-online-only = Online only
+menu-new-document = New Google Doc
+menu-new-spreadsheet = New Google Sheet
+menu-new-presentation = New Google Slides
+menu-refresh = Refresh folder
+menu-trash = View items in trash
+new-document-name = Untitled document
+new-spreadsheet-name = Untitled spreadsheet
+new-presentation-name = Untitled presentation

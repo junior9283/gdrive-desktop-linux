@@ -6,6 +6,9 @@ const PROJECT: &str = "https://github.com/junior9283/gdrive-desktop-linux";
 /// O Meu Drive na web.
 pub const DRIVE_WEB: &str = "https://drive.google.com/drive/my-drive";
 
+/// A lixeira do Drive na web.
+pub const DRIVE_TRASH: &str = "https://drive.google.com/drive/trash";
+
 /// O endereço de `name` (`drive-web`, `storage`, `gemini`, `project`, `privacy`, `terms`,
 /// `faq`, `help`, `client-id-guide` ou as páginas do Google Cloud do guia do primeiro uso,
 /// `gcp-*`).

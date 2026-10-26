@@ -1253,7 +1253,13 @@ impl Daemon {
 
     /// Desmonta, esquece os tokens e apaga os dados locais da conta (banco e cache). As cópias
     /// guardadas (Lost and Found e Uploads cancelados) ficam: são a única cópia dessas versões.
-    async fn sign_out(&self, engine: &Engine, email: &str) -> Result<(), ServiceError> {
+    async fn sign_out(&self, engine: &Arc<Engine>, email: &str) -> Result<(), ServiceError> {
+        // Antes de tudo: a memória das miniaturas semeadas está no banco da conta, que é apagado
+        // adiante, e sem ela não dá para saber quais PNGs são nossos.
+        let thumbs = engine.clone();
+        tokio::task::spawn_blocking(move || thumbs.purge_thumbnails())
+            .await
+            .map_err(failed)?;
         self.stop_account().await;
         self.config.tokens.delete(email).await.map_err(failed)?;
         let _ = std::fs::remove_file(self.current_account_file());

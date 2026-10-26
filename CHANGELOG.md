@@ -7,6 +7,16 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.3.0] - 2026-10-26
+
+### Adicionado
+- Miniaturas das imagens vindas do Google, sem baixar os arquivos: o serviço grava as miniaturas
+  no cache do freedesktop (Dolphin e outros gerenciadores que o usam), então abrir uma pasta de
+  fotos não enche o cache de conteúdo.
+- A primeira abertura de cada pasta espera até 1,5 s pelas miniaturas; o resto segue em segundo
+  plano e as aberturas seguintes não esperam.
+- As miniaturas gravadas são apagadas ao sair da conta.
+
 ## [0.2.5] - 2026-10-26
 
 ### Corrigido
@@ -229,7 +239,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.2.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.2.5...v0.3.0
 [0.2.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/junior9283/gdrive-desktop-linux/releases/tag/v0.0.1

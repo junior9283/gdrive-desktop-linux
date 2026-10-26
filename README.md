@@ -41,6 +41,7 @@ especificação em [`docs/`](docs/).
 | **Contas** | Várias contas Google ao mesmo tempo, além de Drives compartilhados e "Compartilhados comigo". |
 | **Bandeja** | Ícone com atividade, notificações, erros, pesquisa e acesso rápido às preferências. |
 | **Gerenciador de arquivos** | Ícones de status (na nuvem, off-line, sincronizando) e menu de botão direito: disponível off-line, compartilhar, copiar link, abrir no navegador. O KDE/Dolphin vem primeiro. |
+| **Miniaturas** | As imagens aparecem com miniatura no Dolphin e em outros gerenciadores de arquivos, usando as miniaturas do próprio Google, sem baixar os arquivos. |
 | **Documentos Google** | Docs, Planilhas e Apresentações aparecem na pasta e abrem no navegador. |
 
 ## Como vai funcionar

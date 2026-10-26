@@ -86,6 +86,45 @@ async fn logout_with_pending_requires_mode() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_removes_seeded_thumbnails() {
+    let h = Harness::new().await;
+    let folder = h.fake.add_folder(&h.fake.root_id(), "Fotos");
+    h.fake
+        .add_file_with_mime(&folder, "praia.jpg", "image/jpeg", vec![1; 10]);
+    h.logged_in().await;
+    let engine = h.daemon.engine().await.unwrap();
+    engine
+        .seed_thumbnails(&gdl_store::ItemId(folder), h.drive().join("Fotos"))
+        .await
+        .unwrap();
+
+    // Os PNGs de três tamanhos, mais um de outro caminho que não é do serviço.
+    let thumbs = h.paths().thumbnails_dir;
+    let pngs = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
+        ["normal", "large", "x-large"]
+            .iter()
+            .filter_map(|s| std::fs::read_dir(dir.join(s)).ok())
+            .flatten()
+            .map(|e| e.unwrap().path())
+            .collect()
+    };
+    let seeded = pngs(&thumbs);
+    assert_eq!(seeded.len(), 3, "{seeded:?}");
+    let other = thumbs.join("normal").join("de-outro-caminho.png");
+    std::fs::write(&other, b"png de outro programa").unwrap();
+
+    h.proxy.logout("discard", "").await.unwrap();
+
+    for png in &seeded {
+        assert!(!png.exists(), "{png:?} ficou depois de sair da conta");
+    }
+    assert!(
+        other.exists(),
+        "apagou uma miniatura que não era do serviço"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn busy_mount_point_falls_back_to_numbered_folder() {
     let h = Harness::new().await;
     let busy = h.home.join("Google Drive");

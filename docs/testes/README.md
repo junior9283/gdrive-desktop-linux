@@ -134,6 +134,9 @@ o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$G
   sinal chega, mas a falha só vale quando o serviço a aplicou.
 - **Instância única e ativação pelo D-Bus:** a janela ativada com `--dbus` só reserva o nome e
   espera o pedido de tela; sem isso, a ativação abriria uma tela sozinha.
+- **`purge_during_seeding_leaves_nothing` é probabilístico:** ele corre o apagamento contra uma
+  semeadura em andamento, então um verde não prova a ausência da corrida; falha intermitente nele
+  é bug real, não azar.
 
 ## Registro de bugs
 
@@ -197,3 +200,8 @@ Roteiro da 0.2 no Plasma (Nobara). **Situação: pendente.**
 7. [ ] Abrir uma segunda bandeja: mostra a janela principal e sai.
 8. [ ] Serviço parado: a bandeja mostra "Iniciar o serviço", e a janela, o aviso.
 9. [ ] Reiniciar a sessão: a bandeja volta sozinha (início automático).
+
+Roteiro da 0.3 no Plasma (Nobara). **Situação: pendente.**
+
+1. [ ] Abrir no Dolphin uma pasta de fotos nunca aberta: as miniaturas aparecem e o cache de
+   conteúdo não cresce.

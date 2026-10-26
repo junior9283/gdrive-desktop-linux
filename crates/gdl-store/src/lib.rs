@@ -3,6 +3,7 @@
 mod schema;
 pub mod types;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -722,14 +723,40 @@ impl Store {
             .optional()?)
     }
 
+    /// Miniaturas semeadas dos filhos de `parent` fora da lixeira (os mesmos de `children`),
+    /// numa consulta só.
+    pub fn thumbs_of_children(&self, parent: &ItemId) -> Result<HashMap<ItemId, ThumbRec>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT t.item_id, t.revision, t.modified_ms, t.uri FROM thumbs t \
+             JOIN items i ON i.id = t.item_id WHERE i.parent = ?1 AND i.trashed = 0",
+        )?;
+        let rows = stmt.query_map([&parent.0], thumb_from_row)?;
+        Ok(rows
+            .map(|r| r.map(|rec| (rec.id.clone(), rec)))
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Grava (ou substitui) a miniatura semeada do item.
     pub fn put_thumb(&self, rec: &ThumbRec) -> Result<()> {
-        self.conn().execute(
-            "INSERT INTO thumbs (item_id, revision, modified_ms, uri) VALUES (?1, ?2, ?3, ?4) \
-             ON CONFLICT(item_id) DO UPDATE SET revision = excluded.revision, \
-             modified_ms = excluded.modified_ms, uri = excluded.uri",
-            params![rec.id.0, rec.revision, rec.modified_ms, rec.uri],
-        )?;
+        self.put_thumbs(std::slice::from_ref(rec))
+    }
+
+    /// Grava (ou substitui) várias miniaturas semeadas numa transação.
+    pub fn put_thumbs(&self, recs: &[ThumbRec]) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        {
+            let mut put = tx.prepare_cached(
+                "INSERT INTO thumbs (item_id, revision, modified_ms, uri) VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(item_id) DO UPDATE SET revision = excluded.revision, \
+                 modified_ms = excluded.modified_ms, uri = excluded.uri",
+            )?;
+            for rec in recs {
+                put.execute(params![rec.id.0, rec.revision, rec.modified_ms, rec.uri])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1149,6 +1176,48 @@ mod tests {
         store.put_thumb(&sem_revisao).unwrap();
         assert_eq!(store.thumb(&id("b")).unwrap(), Some(sem_revisao));
         assert_eq!(store.all_thumbs().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn put_thumbs_writes_all_and_replaces_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store.put_thumbs(&[]).unwrap();
+        assert!(store.all_thumbs().unwrap().is_empty());
+
+        store.put_thumb(&thumb_rec("a", "r1")).unwrap();
+        let recs = [thumb_rec("a", "r2"), thumb_rec("b", "r1")];
+        store.put_thumbs(&recs).unwrap();
+        assert_eq!(store.all_thumbs().unwrap(), recs);
+    }
+
+    #[test]
+    fn thumbs_of_children_reads_only_that_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        let lixo = Item {
+            trashed: true,
+            ..item("c", Some("p"))
+        };
+        store
+            .upsert_items(&[
+                item("p", None),
+                item("a", Some("p")),
+                item("b", Some("p")),
+                lixo,
+                item("x", Some("outra")),
+            ])
+            .unwrap();
+        assert!(store.thumbs_of_children(&id("p")).unwrap().is_empty());
+
+        let recs = ["a", "c", "x", "sem-item"].map(|i| thumb_rec(i, "r1"));
+        store.put_thumbs(&recs).unwrap();
+        let found = store.thumbs_of_children(&id("p")).unwrap();
+        // Só os filhos fora da lixeira, como em `children`; "b" não tem miniatura.
+        assert_eq!(
+            found,
+            std::collections::HashMap::from([(id("a"), thumb_rec("a", "r1"))])
+        );
     }
 
     #[test]

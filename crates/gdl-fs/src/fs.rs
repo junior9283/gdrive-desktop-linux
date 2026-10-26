@@ -474,41 +474,52 @@ impl Inner {
             .collect()
     }
 
-    /// Semeia as miniaturas de uma pasta do Meu Drive e espera até `THUMB_WAIT`; o resto segue
-    /// em segundo plano. Sem rede ou sem vaga entre os que esperam, só dispara. Pastas virtuais,
-    /// da lixeira ou fora do Meu Drive não semeiam.
-    fn wait_thumbnails(&self, node: &Node) {
+    /// A pasta do Meu Drive em `node` e o caminho dela na montagem. Pastas virtuais, da lixeira
+    /// ou fora do Meu Drive ficam de fora.
+    fn my_drive_folder(&self, node: &Node) -> Option<(ItemId, PathBuf)> {
         let Node::Item(inode) = node else {
-            return;
+            return None;
         };
-        let dir = match self.item(*inode) {
-            Ok(dir) => dir,
-            Err(e) => return tracing::debug!(erro = ?e, "pasta sem item; sem miniaturas"),
-        };
+        let dir = self
+            .item(*inode)
+            .inspect_err(|e| tracing::debug!(erro = ?e, "pasta sem item; sem miniaturas"))
+            .ok()?;
         if dir.kind != ItemKind::Folder || dir.trashed {
-            return;
+            return None;
         }
-        let rel = match self.engine.store().path_of(&dir.id) {
-            Ok(Some(rel)) => rel,
-            Ok(None) => return,
-            Err(e) => return tracing::debug!(erro = %e, "caminho da pasta; sem miniaturas"),
-        };
+        let rel = self
+            .engine
+            .store()
+            .path_of(&dir.id)
+            .inspect_err(|e| tracing::debug!(erro = %e, "caminho da pasta; sem miniaturas"))
+            .ok()??;
         let mut path = self.mount_point.join(&self.layout.my_drive);
         if !rel.is_empty() {
             path.push(rel);
         }
-        // A semeadura cria tarefas: precisa do contexto do runtime, não da thread do FUSE.
-        let waiter = match self.engine.is_offline() {
-            true => None,
-            false => self.thumb_waiters.try_acquire().ok(),
+        Some((dir.id, path))
+    }
+
+    /// Semeia as miniaturas de uma pasta do Meu Drive (`my_drive_folder`) e espera até
+    /// `THUMB_WAIT`; o resto segue em segundo plano. Sem rede ou sem vaga entre os que esperam,
+    /// só dispara.
+    fn wait_thumbnails(&self, node: &Node) {
+        let Some((id, path)) = self.my_drive_folder(node) else {
+            return;
         };
+        let waiter = if self.engine.is_offline() {
+            None
+        } else {
+            self.thumb_waiters.try_acquire().ok()
+        };
+        // A semeadura cria tarefas: precisa do contexto do runtime, não da thread do FUSE.
         let Some(_waiter) = waiter else {
             let _rt = self.rt.enter();
-            drop(self.engine.seed_thumbnails(&dir.id, path));
+            drop(self.engine.seed_thumbnails(&id, path));
             return;
         };
         self.rt.block_on(async {
-            let seeding = self.engine.seed_thumbnails(&dir.id, path);
+            let seeding = self.engine.seed_thumbnails(&id, path);
             let _ = tokio::time::timeout(THUMB_WAIT, seeding).await;
         });
     }

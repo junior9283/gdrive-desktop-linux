@@ -298,18 +298,27 @@ impl DriveClient {
     /// Baixa a foto da conta (`About::photo_link`), sem o token de acesso. Só aceita o servidor
     /// de imagens do Google (por HTTPS) ou o mesmo servidor da API (o Drive simulado dos testes).
     pub async fn fetch_photo(&self, link: &str) -> Result<Bytes> {
-        let url: Url = link
-            .parse()
-            .map_err(|_| DriveError::Protocol(format!("endereço de foto inválido: {link}")))?;
-        if !image_host_allowed(&url, &self.base) {
-            let host = url.host_str().unwrap_or_default();
-            return Err(DriveError::Protocol(format!("foto fora do Google: {host}")));
-        }
+        let url = self.checked_image_url(link, "foto")?;
         let resp = self.http.get(url).send().await?;
         if !resp.status().is_success() {
             return Err(error_from(resp).await);
         }
         Ok(resp.bytes().await?)
+    }
+
+    /// `link` como endereço de imagem (`what`: "foto", "miniatura"), recusando quem não seja o
+    /// servidor de imagens do Google nem a origem da API.
+    fn checked_image_url(&self, link: &str, what: &str) -> Result<Url> {
+        let url: Url = link
+            .parse()
+            .map_err(|_| DriveError::Protocol(format!("endereço de {what} inválido: {link}")))?;
+        if !image_host_allowed(&url, &self.base) {
+            let host = url.host_str().unwrap_or_default();
+            return Err(DriveError::Protocol(format!(
+                "{what} fora do Google: {host}"
+            )));
+        }
+        Ok(url)
     }
 
     /// Miniaturas que o Google gerou para os itens de `folder_id` (os sem miniatura ficam de fora).
@@ -338,23 +347,16 @@ impl DriveClient {
     /// Baixa a miniatura de `link` no tamanho `size` (troca o `=s<N>` do fim, ou o acrescenta),
     /// com o token de acesso. Só aceita o servidor de imagens do Google ou o da API.
     pub async fn fetch_thumbnail(&self, link: &str, size: u32) -> Result<Bytes> {
-        let url: Url = link
-            .parse()
-            .map_err(|_| DriveError::Protocol(format!("endereço de miniatura inválido: {link}")))?;
-        if !image_host_allowed(&url, &self.base) {
-            let host = url.host_str().unwrap_or_default();
-            return Err(DriveError::Protocol(format!(
-                "miniatura fora do Google: {host}"
-            )));
-        }
-        let mut sized = url.to_string();
-        if let Some(at) = sized.rfind("=s").filter(|&at| {
-            let digits = &sized[at + 2..];
-            !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
-        }) {
-            sized.truncate(at);
-        }
-        let sized = format!("{sized}=s{size}");
+        let url = self.checked_image_url(link, "miniatura")?;
+        let base = match url.as_str().rsplit_once("=s") {
+            Some((head, digits))
+                if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                head
+            }
+            _ => url.as_str(),
+        };
+        let sized = format!("{base}=s{size}");
         self.call(
             || self.image_http.get(&sized),
             |resp| async move { Ok(resp.bytes().await?) },

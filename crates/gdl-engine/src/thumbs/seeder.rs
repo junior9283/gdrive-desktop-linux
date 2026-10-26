@@ -12,9 +12,7 @@ use tokio::sync::Semaphore;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 
-use super::freedesktop::{
-    ThumbError, ThumbSize, file_for, remove_all, stored_mtime, uri_of, write_all,
-};
+use super::freedesktop::{ThumbSize, file_for, remove_all, stored_mtime, uri_of, write_all};
 use super::mtime_secs;
 
 /// Downloads (com a gravação) de miniatura em paralelo, somando todas as pastas.
@@ -22,27 +20,27 @@ const PARALLEL: usize = 8;
 /// Lado pedido ao Google: o do maior tamanho gravado.
 const FETCH_SIZE: u32 = 512;
 
-/// O item precisa de miniatura: arquivo comum, sem edição local, fora do cache local e sem
-/// semeadura em dia (mesma revisão, mesma data e mesmo caminho).
-pub(crate) fn needs_seed(item: &Item, rec: Option<&ThumbRec>, uri: &str, complete: bool) -> bool {
-    seedable(item)
-        && !complete
-        && rec.is_none_or(|r| {
-            r.revision != item.head_revision || r.modified_ms != item.modified_ms || r.uri != uri
-        })
-}
+/// Erro de uma etapa que mistura arquivo e banco; só vai para o log.
+type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Arquivo comum sem edição local: o que dá para decidir sem consultar o banco.
 fn seedable(item: &Item) -> bool {
     item.kind == ItemKind::File && item.local_state == LocalState::Clean
 }
 
-#[derive(Debug, thiserror::Error)]
-enum SeedError {
-    #[error(transparent)]
-    Thumb(#[from] ThumbError),
-    #[error(transparent)]
-    Store(#[from] StoreError),
+/// Um item `seedable` precisa de miniatura se não tem semeadura em dia (mesma revisão, mesma
+/// data e mesmo caminho) e não está inteiro no cache local. `complete` (que consulta o banco)
+/// só roda quando a memória não basta para decidir.
+fn needs_seed(
+    item: &Item,
+    rec: Option<&ThumbRec>,
+    uri: &str,
+    complete: impl FnOnce() -> Result<bool, StoreError>,
+) -> Result<bool, StoreError> {
+    let up_to_date = rec.is_some_and(|r| {
+        r.revision == item.head_revision && r.modified_ms == item.modified_ms && r.uri == uri
+    });
+    Ok(!up_to_date && !complete()?)
 }
 
 /// Um arquivo a semear: o registro que fica no banco depois de gravado e o tamanho do arquivo.
@@ -157,15 +155,16 @@ impl ThumbSeeder {
         folder_path: PathBuf,
         cancel: &CancellationToken,
     ) {
-        let pending = tokio::task::spawn_blocking({
+        let pending = async {
             let (this, folder, cancel) = (self.clone(), folder.clone(), cancel.clone());
-            move || this.pending(&folder, &folder_path, &cancel)
-        })
-        .await;
-        let pending = match pending {
-            Ok(Ok(jobs)) if jobs.is_empty() => return,
-            Ok(Ok(jobs)) => jobs,
-            Ok(Err(e)) => return tracing::debug!(erro = %e, "falha ao ler a pasta para miniaturas"),
+            let jobs =
+                tokio::task::spawn_blocking(move || this.pending(&folder, &folder_path, &cancel))
+                    .await??;
+            Ok::<_, AnyError>(jobs)
+        };
+        let pending = match pending.await {
+            Ok(jobs) if jobs.is_empty() => return,
+            Ok(jobs) => jobs,
             Err(e) => return tracing::debug!(erro = %e, "falha ao ler a pasta para miniaturas"),
         };
         let mut links: HashMap<String, String> = match self.client.thumbnail_links(&folder.0).await
@@ -212,12 +211,16 @@ impl ThumbSeeder {
         folder_path: &Path,
         cancel: &CancellationToken,
     ) -> Result<Vec<Job>, StoreError> {
+        let mut recs = self.store.thumbs_of_children(folder)?;
         let mut jobs = Vec::new();
+        // Já com os três PNGs em dia: só voltam para a memória, todos de uma vez no fim.
+        let mut current = Vec::new();
         for item in self.store.children(folder)?.into_iter().filter(seedable) {
             let uri = uri_of(&folder_path.join(&item.local_name));
-            let rec = self.store.thumb(&item.id)?;
-            let complete = self.store.is_complete(&item.id, item.size)?;
-            if !needs_seed(&item, rec.as_ref(), &uri, complete) {
+            let rec = recs.remove(&item.id);
+            if !needs_seed(&item, rec.as_ref(), &uri, || {
+                self.store.is_complete(&item.id, item.size)
+            })? {
                 continue;
             }
             // Arquivo renomeado ou movido: os PNGs do caminho antigo sairiam da memória.
@@ -234,16 +237,19 @@ impl ThumbSeeder {
                 size: item.size,
             };
             let mtime = mtime_secs(job.rec.modified_ms);
-            let current = ThumbSize::ALL
+            if ThumbSize::ALL
                 .iter()
-                .all(|&s| stored_mtime(&file_for(&self.dir, s, &job.rec.uri)) == Some(mtime));
-            if !current {
-                jobs.push(job);
-            } else if let Some(result) =
-                self.unless_cancelled(cancel, || self.store.put_thumb(&job.rec))
+                .all(|&s| stored_mtime(&file_for(&self.dir, s, &job.rec.uri)) == Some(mtime))
             {
-                result?;
+                current.push(job.rec);
+                continue;
             }
+            jobs.push(job);
+        }
+        if !current.is_empty()
+            && let Some(result) = self.unless_cancelled(cancel, || self.store.put_thumbs(&current))
+        {
+            result?;
         }
         Ok(jobs)
     }
@@ -275,7 +281,7 @@ impl ThumbSeeder {
                 image,
             )?;
             self.store.put_thumb(rec)?;
-            Ok::<_, SeedError>(())
+            Ok::<_, AnyError>(())
         });
         if let Some(Err(e)) = result {
             remove_all(&self.dir, &rec.uri);
@@ -284,10 +290,8 @@ impl ThumbSeeder {
     }
 
     fn remember(&self, recs: &[ThumbRec], cancel: &CancellationToken) {
-        for rec in recs {
-            if let Some(Err(e)) = self.unless_cancelled(cancel, || self.store.put_thumb(rec)) {
-                tracing::debug!(erro = %e, item = %rec.id.0, "falha ao lembrar o item sem miniatura");
-            }
+        if let Some(Err(e)) = self.unless_cancelled(cancel, || self.store.put_thumbs(recs)) {
+            tracing::debug!(erro = %e, itens = recs.len(), "falha ao lembrar os itens sem miniatura");
         }
     }
 
@@ -398,8 +402,11 @@ mod tests {
     fn needs_seed_rules() {
         let item = file("a.jpg");
         let uri = "file:///m/a.jpg";
-        assert!(needs_seed(&item, None, uri, false));
-        assert!(!needs_seed(&item, None, uri, true), "completo no cache");
+        let needs = |item: &Item, rec: Option<&ThumbRec>, uri: &str, complete: bool| {
+            seedable(item) && needs_seed(item, rec, uri, || Ok(complete)).unwrap()
+        };
+        assert!(needs(&item, None, uri, false));
+        assert!(!needs(&item, None, uri, true), "completo no cache");
 
         for state in [
             LocalState::Dirty,
@@ -411,7 +418,7 @@ mod tests {
                 local_state: state,
                 ..file("a.jpg")
             };
-            assert!(!needs_seed(&item, None, uri, false), "{state:?}");
+            assert!(!needs(&item, None, uri, false), "{state:?}");
         }
         for kind in [
             ItemKind::Folder,
@@ -427,22 +434,31 @@ mod tests {
                 kind: kind.clone(),
                 ..file("a.jpg")
             };
-            assert!(!needs_seed(&item, None, uri, false), "{kind:?}");
+            assert!(!needs(&item, None, uri, false), "{kind:?}");
         }
 
         let rec = rec_of(&item, uri);
-        assert!(!needs_seed(&item, Some(&rec), uri, false), "já em dia");
+        assert!(!needs(&item, Some(&rec), uri, false), "já em dia");
+        // Memória em dia: decide sem consultar o cache local.
+        let decided = needs_seed(&item, Some(&rec), uri, || {
+            panic!("consultou o cache com a memória em dia")
+        });
+        assert!(!decided.unwrap());
         let other_time = ThumbRec {
             modified_ms: item.modified_ms + 1,
             ..rec.clone()
         };
-        assert!(needs_seed(&item, Some(&other_time), uri, false));
+        assert!(needs(&item, Some(&other_time), uri, false));
+        assert!(
+            !needs(&item, Some(&other_time), uri, true),
+            "completo no cache"
+        );
         let other_rev = ThumbRec {
             revision: Some("r0".into()),
             ..rec.clone()
         };
-        assert!(needs_seed(&item, Some(&other_rev), uri, false));
-        assert!(needs_seed(&item, Some(&rec), "file:///m/b.jpg", false));
+        assert!(needs(&item, Some(&other_rev), uri, false));
+        assert!(needs(&item, Some(&rec), "file:///m/b.jpg", false));
     }
 
     fn tiny_png() -> Vec<u8> {

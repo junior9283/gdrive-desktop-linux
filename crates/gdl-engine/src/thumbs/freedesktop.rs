@@ -1,9 +1,8 @@
 //! Formato do cache de miniaturas do freedesktop (`~/.cache/thumbnails/{normal,large,x-large}`).
 
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::BufReader;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
@@ -100,7 +99,9 @@ pub fn stored_mtime(file: &Path) -> Option<i64> {
         .ok()
 }
 
-/// Decodifica a imagem uma vez e grava os três tamanhos (nunca amplia).
+/// Decodifica a imagem uma vez e grava os três tamanhos (nunca amplia). Cada tamanho sai da
+/// imagem original: reduzir em cadeia (512 → 256 → 128) acumula arredondamento e muda as
+/// dimensões (600x400 daria 128x86 em vez de 128x85).
 pub fn write_all(
     thumbs_dir: &Path,
     uri: &str,
@@ -125,7 +126,10 @@ pub fn write_all(
 /// Apaga os três tamanhos; o que não existe é ignorado.
 pub fn remove_all(thumbs_dir: &Path, uri: &str) {
     for size in ThumbSize::ALL {
-        let _ = std::fs::remove_file(file_for(thumbs_dir, size, uri));
+        let file = file_for(thumbs_dir, size, uri);
+        if let Err(e) = gdl_common::fs::remove_file_if_exists(&file) {
+            tracing::debug!(erro = %e, arquivo = %file.display(), "falha ao apagar a miniatura");
+        }
     }
 }
 
@@ -152,30 +156,10 @@ fn encode_png(
     Ok(out)
 }
 
-/// Grava num temporário `0600` do mesmo diretório e troca por `rename`.
+/// Grava na pasta `0700` (criada se faltar) por troca atômica; o temporário já nasce `0600`.
 fn write_atomic(file: &Path, data: &[u8]) -> Result<(), ThumbError> {
-    let dir = file.parent().expect("o PNG sempre tem pasta");
-    gdl_common::paths::create_private_dir(dir)?;
-    let name = file.file_name().expect("o PNG sempre tem nome");
-    let tmp = dir.join(format!(
-        ".{}.tmp-{}",
-        name.to_string_lossy(),
-        std::process::id()
-    ));
-    let result = (|| {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
-        f.write_all(data)?;
-        std::fs::rename(&tmp, file)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    Ok(result?)
+    gdl_common::paths::create_private_dir(file.parent().expect("o PNG sempre tem pasta"))?;
+    Ok(gdl_common::fs::write_atomic(file, data)?)
 }
 
 #[cfg(test)]

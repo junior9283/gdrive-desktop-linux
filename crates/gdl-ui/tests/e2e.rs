@@ -305,6 +305,26 @@ async fn account_menu_stays_inside_window() {
     );
 }
 
+/// Os programas de teste não vêm de uma instalação: a CLI recusa, e a tela mostra o motivo e
+/// devolve os botões (nada é removido).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn uninstall_screen_shows_why_it_could_not_uninstall() {
+    let session = Session::open("uninstall").await;
+    session.click("[data-action=uninstall]").await;
+
+    session
+        .wait_text(
+            ".uninstall-progress",
+            "Não foi possível saber como o app foi instalado",
+        )
+        .await;
+    let disabled = session
+        .eval("return document.querySelector('[data-action=uninstall]').disabled")
+        .await;
+    assert_eq!(disabled, json!(false));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn pause_button_toggles() {

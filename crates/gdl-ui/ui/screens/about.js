@@ -34,6 +34,7 @@ export async function render(root, { api, t }) {
             el('span', {}, `${item.name} ${item.version}`.trim()),
             el('span', { class: 'meta' }, item.license || t('about-license-file')))))),
       el('div', { class: 'actions' },
+        el('button', { class: 'text about-uninstall', onclick: () => api.openScreen('uninstall') }, t('uninstall-open')),
         el('button', { class: 'filled', onclick: () => api.closeWindow() }, t('action-close'))),
     ),
   );

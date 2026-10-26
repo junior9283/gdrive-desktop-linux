@@ -54,3 +54,9 @@
   padding: 4px 0;
   border-bottom: 1px solid var(--md-outline-variant);
 }
+
+/* Desinstalar: um link discreto, na cor de alerta, longe do "Fechar". */
+.about-uninstall {
+  color: var(--md-error);
+  margin-right: auto;
+}

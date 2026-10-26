@@ -360,3 +360,14 @@ offline-clear-confirm = Clear
 offline-cleared = Offline files removed from this computer
 offline-cache-settings = Cache settings
 offline-refresh = Refresh
+
+uninstall-open = Uninstall…
+uninstall-title = Uninstall Google Drive?
+uninstall-body = The programs are removed from this computer and the Drive folder no longer appears. Your files in Google Drive, in the cloud, are not touched.
+uninstall-purge = Also delete the data on this computer
+uninstall-purge-hint = The connected account, the cache, offline files, thumbnails and preferences. Copies kept in Lost and Found stay.
+uninstall-confirm = Uninstall
+uninstall-progress = Uninstalling… If the app came from a package, the system asks for the administrator password.
+uninstall-waiting = Finishing pending uploads before disconnecting…
+uninstall-done = Google Drive uninstalled
+uninstall-done-body = The programs were removed from this computer.

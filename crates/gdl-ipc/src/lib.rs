@@ -327,6 +327,9 @@ pub trait Service {
     fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError>;
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.
     fn logout(&self, mode: &str, dir: &str) -> Result<(), ServiceError>;
+    /// Antes de os programas saírem: desmonta, tira o início automático e o lugar nos Locais e,
+    /// com `purge` (só sem conta conectada), apaga os dados locais; depois encerra o serviço.
+    fn uninstall(&self, purge: bool) -> Result<(), ServiceError>;
     fn preferences(&self) -> Result<Vec<Pref>, ServiceError>;
     /// Grava as preferências (`chave`, valor em JSON) todas ou nenhuma; `true` se alguma só
     /// vale depois de reiniciar.

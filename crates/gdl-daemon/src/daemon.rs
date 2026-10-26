@@ -24,7 +24,7 @@ use gdl_engine::engine::{Engine, Intervals, pending_cache_move};
 use gdl_engine::errors::ErrorSource;
 use gdl_engine::events::{EngineEvent, SyncState};
 use gdl_engine::gdocs::web_url;
-use gdl_engine::kept::KeptFolder;
+use gdl_engine::kept::{Kept, KeptFolder};
 use gdl_fs::DriveFs;
 use gdl_store::{Inode, Item, ItemId, ItemKind, PinState};
 use tokio::sync::{broadcast, watch};
@@ -768,10 +768,7 @@ impl Daemon {
         let engine = Arc::new(engine.with_intervals(config.intervals));
         engine.ensure_indexed().await.map_err(failed)?;
 
-        let preferred = prefs
-            .default_mount_point
-            .clone()
-            .unwrap_or_else(|| config.home.join("Google Drive"));
+        let preferred = self.preferred_mount_point(&prefs);
         let mount_point = mount::choose(&preferred).map_err(failed)?;
         let uid = rustix::process::getuid().as_raw();
         let gid = rustix::process::getgid().as_raw();
@@ -991,6 +988,14 @@ impl Daemon {
         engine.retry(&ItemId(item_id.into())).map_err(failed)?;
         self.emit_status_changed().await;
         Ok(())
+    }
+
+    /// Onde a montagem fica (`DefaultMountPoint`, ou `~/Google Drive`), se estiver livre.
+    fn preferred_mount_point(&self, prefs: &Preferences) -> PathBuf {
+        prefs
+            .default_mount_point
+            .clone()
+            .unwrap_or_else(|| self.config.home.join("Google Drive"))
     }
 
     /// A montagem da conta conectada.
@@ -1267,11 +1272,7 @@ impl Daemon {
         let dirs = engine.local_dirs();
         let keep = engine.kept().dirs();
         tokio::task::spawn_blocking(move || {
-            // Só as pastas com alguma cópia; as vazias vão embora com o resto.
-            let keep: Vec<PathBuf> = keep
-                .into_iter()
-                .filter(|k| std::fs::read_dir(k).is_ok_and(|mut d| d.next().is_some()))
-                .collect();
+            let keep = not_empty(keep);
             for dir in dirs {
                 remove_all_but(&dir, &keep)?;
             }
@@ -1283,6 +1284,63 @@ impl Daemon {
         self.emit_status_changed().await;
         Ok(())
     }
+
+    /// Antes de os programas saírem: desmonta, tira o início automático e o lugar nos Locais e,
+    /// com `purge`, apaga os dados locais do app; depois encerra o serviço. `purge` só vale sem
+    /// conta conectada: a saída da conta é que decide o que fazer com os envios pendentes.
+    pub async fn uninstall(&self, purge: bool) -> Result<(), ServiceError> {
+        let connected = self.with_account(|a| a.mount_point.clone()).await;
+        if purge && connected.is_some() {
+            return Err(ServiceError::Failed(
+                self.i18n.tr("uninstall-signed-in", &[]),
+            ));
+        }
+        let mount_point = connected.unwrap_or_else(|| self.preferred_mount_point(&self.prefs()));
+        self.stop_account().await;
+        let paths = self.config.paths.clone();
+        tokio::task::spawn_blocking(move || {
+            desktop::remove_autostart(&paths.config_home)?;
+            let places = paths.data_home.join("user-places.xbel");
+            desktop::set_sidebar_place(&places, &mount_point, "", false)?;
+            // Desmontada, a pasta fica vazia; com algo dentro, fica.
+            let _ = std::fs::remove_dir(&mount_point);
+            if purge {
+                purge_local_data(&paths)?;
+            }
+            Ok::<_, std::io::Error>(())
+        })
+        .await
+        .map_err(failed)?
+        .map_err(failed)?;
+        self.quit().await;
+        Ok(())
+    }
+}
+
+/// As pastas de `dirs` com alguma coisa dentro.
+fn not_empty(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
+    dirs.into_iter()
+        .filter(|k| std::fs::read_dir(k).is_ok_and(|mut d| d.next().is_some()))
+        .collect()
+}
+
+/// Apaga a configuração, o estado e os dados do app. As cópias guardadas de cada conta (`Lost
+/// and Found` e `Uploads cancelados`) ficam: são a única cópia dessas versões.
+fn purge_local_data(paths: &Paths) -> std::io::Result<()> {
+    let accounts = match std::fs::read_dir(&paths.data_dir) {
+        Ok(entries) => entries.collect::<std::io::Result<Vec<_>>>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    let keep = not_empty(
+        accounts
+            .iter()
+            .flat_map(|account| Kept::in_dir(&account.path()).dirs())
+            .collect(),
+    );
+    remove_all_but(&paths.data_dir, &keep)?;
+    remove_all_but(&paths.config_dir, &[])?;
+    remove_all_but(&paths.state_dir, &[])
 }
 
 /// A foto guardada da conta, ou baixada de `link` e guardada; vazia se não houver ou falhar

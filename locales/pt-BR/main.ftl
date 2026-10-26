@@ -46,6 +46,7 @@ notify-kind-offline = Sem conexão com a internet
 login-rejected = A conta { $email } não é permitida neste computador.
 logout-pending = Há { $count } itens que ainda não estão no Drive (envios pendentes ou cópias no Lost and Found). Escolha terminar os envios, mover os arquivos para uma pasta ou descartá-los; o Lost and Found nunca é apagado.
 not-logged-in = Nenhuma conta conectada.
+uninstall-signed-in = Desconecte a conta antes de apagar os dados deste computador: a saída da conta decide o que fazer com os envios pendentes.
 path-not-in-drive = { $path } não está no Meu Drive.
 
 # CLI provisória
@@ -56,6 +57,12 @@ cli-open-url = Abra este endereço no navegador para entrar na conta:
 cli-login-ok = Conta conectada: { $email }
 cli-login-failed = Não foi possível entrar: { $error }
 cli-service-gone = O serviço encerrou a conexão.
+cli-uninstall-confirm = Desinstalar o Google Drive deste computador? [s/N]
+cli-uninstall-unknown = Não foi possível saber como o app foi instalado (nem por pacote nem pelo install.sh): rode a desinstalação pelo programa instalado.
+cli-uninstall-cancelled = Desinstalação cancelada: a senha de administrador não foi confirmada.
+cli-uninstall-failed = A remoção do pacote falhou ({ $error }).
+cli-uninstall-no-service = Aviso: o serviço não respondeu, então a pasta, o início automático e os dados podem ter ficado. { $error }
+cli-uninstall-done = O Google Drive foi desinstalado.
 cli-no-service = O serviço do Google Drive não está rodando ({ $error }).
 cli-status-account = Conta: { $account }
 cli-status-mount = Pasta: { $path }
@@ -116,3 +123,4 @@ window-errors = Lista de erros
 window-offline = Arquivos off-line
 window-about = Sobre
 window-notification-settings = Preferências de notificação
+window-uninstall = Desinstalar o Google Drive

@@ -46,6 +46,7 @@ notify-kind-offline = No internet connection
 login-rejected = The account { $email } isn't allowed on this computer.
 logout-pending = There are { $count } items not yet in Drive (pending uploads or copies in Lost and Found). Choose to finish the uploads, move the files to a folder, or discard them; Lost and Found is never deleted.
 not-logged-in = No account is connected.
+uninstall-signed-in = Disconnect the account before deleting the data on this computer: signing out decides what happens to pending uploads.
 path-not-in-drive = { $path } isn't in My Drive.
 
 # Provisional CLI
@@ -56,6 +57,12 @@ cli-open-url = Open this address in your browser to sign in:
 cli-login-ok = Account connected: { $email }
 cli-login-failed = Couldn't sign in: { $error }
 cli-service-gone = The service closed the connection.
+cli-uninstall-confirm = Uninstall Google Drive from this computer? [y/N]
+cli-uninstall-unknown = Could not tell how the app was installed (neither by package nor by install.sh): run the uninstall from the installed program.
+cli-uninstall-cancelled = Uninstall canceled: the administrator password was not confirmed.
+cli-uninstall-failed = Removing the package failed ({ $error }).
+cli-uninstall-no-service = Warning: the service did not respond, so the folder, the autostart entry and the data may have been left behind. { $error }
+cli-uninstall-done = Google Drive was uninstalled.
 cli-no-service = The Google Drive service isn't running ({ $error }).
 cli-status-account = Account: { $account }
 cli-status-mount = Folder: { $path }
@@ -116,3 +123,4 @@ window-errors = Error list
 window-offline = Offline files
 window-about = About
 window-notification-settings = Notification preferences
+window-uninstall = Uninstall Google Drive

@@ -30,9 +30,10 @@ function pendingChoices({ api, t }, count) {
   };
 }
 
-export async function disconnect(ctx) {
-  const { api, t } = ctx;
-  const status = await api.call('status');
+// Pergunta como desconectar a conta de `status`: `{ mode, dir }` para o `logout`, ou `null` se o
+// usuário desistiu (também usada pela desinstalação).
+export async function askLogout(ctx, status) {
+  const { t } = ctx;
   const count = status.pending_uploads;
   const warning = el('p', {}, t('disconnect-offline-warning'));
   const choices = count === 0
@@ -46,7 +47,13 @@ export async function disconnect(ctx) {
     danger: true,
     ready: choices.ready,
   });
-  if (!ok) return;
+  return ok ? choices.value() : null;
+}
+
+export async function disconnect(ctx) {
+  const { api, t } = ctx;
+  const choice = await askLogout(ctx, await api.call('status'));
+  if (!choice) return;
   toast(t('disconnect-progress'));
-  attempt(api.call('logout', choices.value()), () => toast(t('disconnect-done')));
+  attempt(api.call('logout', choice), () => toast(t('disconnect-done')));
 }

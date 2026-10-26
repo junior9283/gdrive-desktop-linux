@@ -167,6 +167,11 @@ impl Service {
         self.daemon.logout(mode, dir).await
     }
 
+    /// Prepara a desinstalação e encerra o serviço; `purge` apaga os dados locais (sem conta).
+    async fn uninstall(&self, purge: bool) -> Result<(), ServiceError> {
+        self.daemon.uninstall(purge).await
+    }
+
     fn preferences(&self) -> Result<Vec<Pref>, ServiceError> {
         self.daemon.preferences()
     }

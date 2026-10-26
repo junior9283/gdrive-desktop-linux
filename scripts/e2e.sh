@@ -25,7 +25,7 @@ if [ "${1:-}" != "--inside" ]; then
     echo "e2e pulado: falta o xdotool (pacote xdotool)" >&2
     exit 77
   fi
-  cargo build -q -p gdl-ui -p gdl-tray --bins
+  cargo build -q -p gdl-ui -p gdl-tray -p gdl-cli --bins
   cargo build -q -p gdl-daemon --example e2e-daemon
   cargo test -q -p gdl-ui --test e2e --no-run
   exec env -u DISPLAY -u WAYLAND_DISPLAY \

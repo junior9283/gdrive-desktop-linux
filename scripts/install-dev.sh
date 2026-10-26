@@ -38,8 +38,13 @@ fi
 from=${from:-$repo/target/release}
 
 # install_as <modo> <origem> <destino>: copia como está.
+# O que foi instalado, um caminho por linha: a lista que a desinstalação apaga.
+installed=""
+
 install_as() {
   echo "instala $destdir$3"
+  installed="$installed$3
+"
   $dry || install -Dm"$1" "$2" "$destdir$3"
 }
 
@@ -54,6 +59,8 @@ remove() {
 # instalado, entre aspas.
 put() {
   echo "instala $destdir$2"
+  installed="$installed$2
+"
   $dry && return
   mkdir -p "$(dirname "$destdir$2")"
   sed "s|/usr/bin/\([a-z-]*\)|\"$bin/\1\"|g" "$1" > "$destdir$2.tmp"
@@ -83,7 +90,13 @@ for file in "$repo"/assets/icons/hicolor/scalable/status/*.svg; do
   install_as 644 "$file" "$share/gdrive-desktop-linux/icons/hicolor/scalable/status/$(basename "$file")"
 done
 
+# Os pacotes trazem um marcador do formato no lugar da lista (o gerenciador sabe o que é dele).
+if ! $dry && [ -z "$destdir" ]; then
+  printf '%s' "$installed" > "$share/gdrive-desktop-linux/installed-files"
+fi
+
 if $dry || ! $activate; then exit 0; fi
+# A mesma lista que a desinstalação repete (`refresh` em crates/gdl-cli/src/uninstall.rs).
 update-mime-database "$share/mime" >/dev/null 2>&1 || true
 update-desktop-database "$share/applications" >/dev/null 2>&1 || true
 gtk-update-icon-cache -q -t "$share/icons/hicolor" >/dev/null 2>&1 || true

@@ -15,6 +15,8 @@ use gdl_common::time::rfc3339;
 use gdl_engine::gdocs::{open_url, pointer_doc_id};
 use gdl_ipc::{ServiceError, ServiceProxy};
 
+mod uninstall;
+
 #[derive(Parser)]
 #[command(
     name = "gdrive-desktop-linux",
@@ -62,6 +64,15 @@ enum Command {
     },
     /// Abre um ponteiro (`.gdoc`, `.gsheet`…) no navegador.
     OpenPointer { file: PathBuf },
+    /// Desinstala o app (pede a senha de administrador se ele veio de um pacote).
+    Uninstall {
+        /// Apaga também os dados deste computador (desconecte a conta antes).
+        #[arg(long)]
+        purge: bool,
+        /// Não pergunta antes.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 type Res<T = ()> = Result<T, ServiceError>;
@@ -148,8 +159,63 @@ async fn service(command: Command, i18n: &I18n) -> Res {
             };
             proxy.logout(mode, &dir).await
         }
+        Command::Uninstall { purge, yes } => uninstall(&proxy, purge, yes, i18n).await,
         Command::OpenPointer { .. } => unreachable!("tratado sem o serviço"),
     }
+}
+
+/// Confere, tira os programas e só então pede ao serviço (ainda rodando) que desmonte, limpe e
+/// saia: com a senha de administrador recusada, nada muda.
+async fn uninstall(proxy: &ServiceProxy<'_>, purge: bool, yes: bool, i18n: &I18n) -> Res {
+    use uninstall::Install;
+
+    let install = gdl_common::paths::exe_dir()
+        .and_then(|bin| uninstall::detect(&bin))
+        .ok_or_else(|| failed(i18n.tr("cli-uninstall-unknown", &[])))?;
+    if !yes {
+        let answer = prompt(&i18n.tr("cli-uninstall-confirm", &[]), false)?.to_lowercase();
+        if !["s", "sim", "y", "yes"].contains(&answer.as_str()) {
+            return Ok(());
+        }
+    }
+    // Depois de os programas saírem, o serviço não abre mais: pergunta (e o ativa) antes.
+    if purge && !proxy.status().await?.account.is_empty() {
+        return Err(failed(i18n.tr("uninstall-signed-in", &[])));
+    }
+    match &install {
+        Install::Package(kind) => {
+            let command = uninstall::package_removal(kind)
+                .ok_or_else(|| failed(i18n.tr("cli-uninstall-unknown", &[])))?;
+            let done = std::process::Command::new(command[0])
+                .args(&command[1..])
+                .status()
+                .map_err(failed)?;
+            match done.code() {
+                Some(0) => {}
+                // O pkexec: senha recusada ou janela fechada.
+                Some(126 | 127) => return Err(failed(i18n.tr("cli-uninstall-cancelled", &[]))),
+                _ => {
+                    let error = done.to_string();
+                    return Err(failed(
+                        i18n.tr("cli-uninstall-failed", &[("error", &error)]),
+                    ));
+                }
+            }
+        }
+        Install::User { prefix, manifest } => {
+            uninstall::remove_listed(prefix, manifest).map_err(failed)?;
+            uninstall::refresh(prefix);
+        }
+    }
+    if let Err(e) = proxy.uninstall(purge).await {
+        let error = describe(e, i18n);
+        eprintln!(
+            "{}",
+            i18n.tr("cli-uninstall-no-service", &[("error", &error)])
+        );
+    }
+    println!("{}", i18n.tr("cli-uninstall-done", &[]));
+    Ok(())
 }
 
 async fn login(

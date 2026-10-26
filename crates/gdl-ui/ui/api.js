@@ -52,6 +52,9 @@ export function createApi(tauri) {
     openMount: () => invoke('open_mount'),
     // Uma pasta escolhida no seletor do sistema, ou `null`.
     pickFolder: (title) => invoke('pick_folder', { title }),
+    // Tira o app do computador (a CLI pede a senha de administrador se ele veio de um pacote);
+    // `purge` apaga também os dados locais. Falha com a mensagem da CLI.
+    uninstall: (purge) => invoke('uninstall', { purge }),
   };
   return api;
 }

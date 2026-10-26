@@ -41,6 +41,12 @@ sh "$repo/scripts/install-dev.sh" --prefix /usr --destdir "$work/stage" --from "
     printf '  - src: "%s"\n    dst: "/%s"\n    file_info:\n      mode: %s\n' \
       "$work/stage/$file" "$file" "$mode"
   done
+  # Cada pacote diz o próprio formato: é por ele que a desinstalação escolhe o gerenciador.
+  for packager in deb rpm archlinux; do
+    echo "$packager" > "$work/package-$packager"
+    printf '  - src: "%s"\n    dst: "/usr/share/%s/package"\n    packager: %s\n    file_info:\n      mode: 0644\n' \
+      "$work/package-$packager" "$name" "$packager"
+  done
 } > "$work/nfpm.yaml"
 for packager in deb rpm archlinux; do
   VERSION=$version ${NFPM:-nfpm} package --config "$work/nfpm.yaml" --packager "$packager" \
@@ -55,7 +61,7 @@ cp "$repo/scripts/install-dev.sh" "$dir/scripts/"
 cp -r "$repo/packaging/systemd" "$repo/packaging/dbus" "$repo/packaging/desktop" "$repo/packaging/mime" \
   "$dir/packaging/"
 cp -r "$repo/assets/icons/hicolor" "$dir/assets/icons/"
-cp "$repo/LICENSE" "$repo/README.md" "$repo/packaging/install.sh" "$dir/"
+cp "$repo/LICENSE" "$repo/README.md" "$repo/packaging/install.sh" "$repo/packaging/uninstall.sh" "$dir/"
 tar -C "$work" -czf "$out/$name-$version-x86_64.tar.gz" "$name-$version"
 
 (cd "$out" && sha256sum -- *.deb *.rpm *.pkg.tar.zst *.tar.gz > SHA256SUMS)

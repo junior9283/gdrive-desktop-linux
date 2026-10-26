@@ -948,3 +948,78 @@ async fn null_value_removes_user_preference() {
     assert_eq!(get("BandwidthRxKBPS"), "null");
     assert_eq!(get("UITheme"), "\"light\"", "as outras ficam");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn uninstall_refuses_to_purge_with_account_connected() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+
+    let err = h.proxy.uninstall(true).await.unwrap_err();
+
+    assert!(err.to_string().contains("Failed"), "{err}");
+    assert_eq!(h.proxy.status().await.unwrap().account, h.fake.email());
+    assert!(h.drive().is_dir());
+}
+
+/// Sem apagar os dados: desmonta, tira o início automático e encerra; a conta continua guardada
+/// para uma reinstalação.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn uninstall_unmounts_and_keeps_the_account() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let autostart = h
+        .paths()
+        .config_home
+        .join("autostart")
+        .join(crate::desktop::AUTOSTART_FILE);
+    crate::desktop::set_autostart(
+        &h.paths().config_home,
+        std::path::Path::new("/usr/bin"),
+        true,
+    )
+    .unwrap();
+
+    h.proxy.uninstall(false).await.unwrap();
+
+    assert!(!h.drive().exists(), "a montagem ficou");
+    assert!(!h.home.join("Google Drive").exists(), "a pasta vazia ficou");
+    assert!(!autostart.exists(), "o início automático ficou");
+    assert!(h.tokens.load(&h.fake.email()).await.unwrap().is_some());
+    assert!(h.paths().config_dir.exists() || h.paths().data_dir.exists());
+    let exit = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        h.daemon.exit_requested(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(exit, crate::daemon::Exit::Quit);
+}
+
+/// Apagando os dados: some a configuração, o estado e os dados, menos as cópias guardadas.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn uninstall_purge_keeps_only_the_kept_copies() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.proxy.logout("discard", "").await.unwrap();
+    let paths = h.paths();
+    let account = paths.data_dir.join(h.fake.email());
+    let kept = account.join("lost_and_found").join("edição.txt");
+    std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+    std::fs::write(&kept, b"a unica copia").unwrap();
+    std::fs::create_dir_all(account.join("canceled_uploads")).unwrap();
+    std::fs::write(account.join("metadata.db"), b"").unwrap();
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
+    std::fs::write(paths.config_dir.join("preferences.toml"), b"").unwrap();
+    std::fs::create_dir_all(&paths.state_dir).unwrap();
+
+    h.proxy.uninstall(true).await.unwrap();
+
+    assert_eq!(std::fs::read(&kept).unwrap(), b"a unica copia");
+    assert!(!account.join("metadata.db").exists());
+    assert!(
+        !account.join("canceled_uploads").exists(),
+        "pasta vazia ficou"
+    );
+    assert!(!paths.config_dir.exists());
+    assert!(!paths.state_dir.exists());
+}

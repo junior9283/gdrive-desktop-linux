@@ -7,6 +7,21 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.4.0] - 2026-10-26
+
+### Adicionado
+- Desinstalador em todos os formatos: o item "Desinstalar Google Drive" no menu de aplicativos e o
+  botão "Desinstalar…" no Sobre abrem uma janela que pergunta se apaga também os dados deste
+  computador (com envios pendentes, as mesmas escolhas de "Desconectar conta"); depois desmonta a
+  pasta, tira o início automático e o lugar nos Locais do Dolphin e remove os programas (pacote:
+  com a senha de administrador; `.tar.gz`: só o que a instalação registrou). As cópias do Lost and
+  Found nunca são apagadas.
+- `gdrive-desktop-linux uninstall [--purge] [--yes]` e o `uninstall.sh` no `.tar.gz`.
+
+### Corrigido
+- Desinstalado pelo gerenciador de pacotes, o app deixava no início da sessão uma entrada para um
+  programa que não existia mais: agora ela é ignorada (`TryExec`).
+
 ## [0.3.2] - 2026-10-26
 
 ### Adicionado
@@ -261,7 +276,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.2...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.2.5...v0.3.0

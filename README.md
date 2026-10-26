@@ -136,6 +136,13 @@ ponteiros `.gdoc` e os ícones.
 
 </details>
 
+**Desinstalar:** pelo item **Desinstalar Google Drive** do menu de aplicativos ou pelo botão
+**Desinstalar…** em Mais opções › Sobre. A janela pergunta se apaga também os dados deste
+computador (conta conectada, cache, arquivos off-line, miniaturas e preferências; as cópias do Lost
+and Found ficam) e, se o app veio de um pacote, o sistema pede a senha de administrador. Pela loja
+ou pelo terminal (`apt remove`, `dnf remove`, `pacman -R`) só os programas saem e os dados ficam,
+como é o padrão no Linux; quem instalou pelo `.tar.gz` também pode rodar `./uninstall.sh`.
+
 **2. Abrir:** procure **Google Drive** no menu de aplicativos (ou rode
 `gdrive-desktop-linux-tray`). A bandeja liga o serviço e, sem conta, abre o primeiro uso, que
 guia a criação do seu Client ID parte por parte, com botões que abrem cada página do Google Cloud
@@ -157,6 +164,7 @@ A CLI provisória continua disponível:
 | `lost-and-found` | lista as edições guardadas por conflito |
 | `logout [--finish \| --move <pasta> \| --discard]` | sai da conta, decidindo o que fazer com envios pendentes (o Lost and Found nunca é apagado) |
 | `open-pointer <arquivo>` | abre um `.gdoc`, `.gsheet`… no navegador (usado pelo duplo clique) |
+| `uninstall [--purge] [--yes]` | desinstala o app; `--purge` apaga também os dados deste computador (desconecte a conta antes) |
 
 Limitações conhecidas da 0.2:
 

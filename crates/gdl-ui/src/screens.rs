@@ -20,7 +20,7 @@ const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
     }
 }
 
-pub const SCREENS: [Screen; 8] = [
+pub const SCREENS: [Screen; 9] = [
     screen(HOME, 900.0, 640.0),
     screen("onboarding", 560.0, 640.0),
     screen("preferences", 760.0, 640.0),
@@ -32,6 +32,7 @@ pub const SCREENS: [Screen; 8] = [
     screen("offline", 640.0, 560.0),
     screen("about", 480.0, 420.0),
     screen("notification-settings", 480.0, 520.0),
+    screen("uninstall", 520.0, 480.0),
 ];
 
 impl Screen {

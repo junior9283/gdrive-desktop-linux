@@ -19,10 +19,10 @@ const TRAY_EXEC: &str = "Exec=/usr/bin/gdrive-desktop-linux-tray";
 /// Grava ou apaga `<config_home>/autostart/…desktop`, que abre a bandeja de `bin` (e ela, o
 /// serviço) na sessão. Só grava se mudou.
 pub fn set_autostart(config_home: &Path, bin: &Path, enabled: bool) -> io::Result<()> {
-    let file = config_home.join("autostart").join(AUTOSTART_FILE);
     if !enabled {
-        return remove_file_if_exists(&file);
+        return remove_autostart(config_home);
     }
+    let file = config_home.join("autostart").join(AUTOSTART_FILE);
     let body = autostart_body(bin);
     match std::fs::read_to_string(&file) {
         Ok(current) if current == body => Ok(()),
@@ -30,15 +30,21 @@ pub fn set_autostart(config_home: &Path, bin: &Path, enabled: bool) -> io::Resul
     }
 }
 
+/// Apaga `<config_home>/autostart/…desktop` (a desinstalação; sem ele, nada a fazer).
+pub fn remove_autostart(config_home: &Path) -> io::Result<()> {
+    remove_file_if_exists(&config_home.join("autostart").join(AUTOSTART_FILE))
+}
+
 /// O `.desktop` com a bandeja de `bin`, entre aspas (o Exec separa nos espaços); uma pasta que
 /// nem entre aspas cabe no Exec fica de fora, e a bandeja é procurada no PATH (a mesma lista que
-/// o `scripts/install-dev.sh` recusa).
+/// o `scripts/install-dev.sh` recusa). O `TryExec` faz a sessão ignorar a entrada quando o app
+/// foi desinstalado pelo gerenciador de pacotes (que não alcança a pasta do usuário).
 fn autostart_body(bin: &Path) -> String {
     let bin = bin.to_string_lossy();
     let exec = if bin.contains(['"', '`', '$', '\\', '%']) {
-        "Exec=gdrive-desktop-linux-tray".to_owned()
+        "TryExec=gdrive-desktop-linux-tray\nExec=gdrive-desktop-linux-tray".to_owned()
     } else {
-        format!("Exec=\"{bin}/gdrive-desktop-linux-tray\"")
+        format!("TryExec={bin}/gdrive-desktop-linux-tray\nExec=\"{bin}/gdrive-desktop-linux-tray\"")
     };
     AUTOSTART.replace(TRAY_EXEC, &exec)
 }
@@ -108,6 +114,11 @@ mod tests {
         assert!(body.starts_with("[Desktop Entry]\n"), "{body}");
         assert!(
             body.contains("\nExec=\"/opt/com espaço/bin/gdrive-desktop-linux-tray\"\n"),
+            "{body}"
+        );
+        // Sem o programa (desinstalado pelo gerenciador), a sessão ignora a entrada.
+        assert!(
+            body.contains("\nTryExec=/opt/com espaço/bin/gdrive-desktop-linux-tray\n"),
             "{body}"
         );
 

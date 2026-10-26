@@ -18,6 +18,7 @@ const FILES: &[&str] = &[
     "share/dbus-1/services/io.github.junior9283.GDriveDesktopLinux1.Ui.service",
     "share/applications/io.github.junior9283.GDriveDesktopLinux.desktop",
     "share/applications/io.github.junior9283.GDriveDesktopLinux.OpenPointer.desktop",
+    "share/applications/io.github.junior9283.GDriveDesktopLinux.Uninstall.desktop",
     "share/mime/packages/gdrive-desktop-linux.xml",
     "share/icons/hicolor/48x48/apps/io.github.junior9283.GDriveDesktopLinux.png",
     "share/icons/hicolor/256x256/apps/io.github.junior9283.GDriveDesktopLinux.png",
@@ -139,7 +140,28 @@ fn installs_with_the_paths_of_the_prefix() {
             FILES[4],
             format!("Exec=\"{bin}/gdrive-desktop-linux\" open-pointer %f\n"),
         ),
+        (
+            FILES[5],
+            format!("Exec=\"{bin}/gdrive-desktop-linux-ui\" --open uninstall\n"),
+        ),
     ];
+    // A lista que a desinstalação apaga: tudo o que foi instalado, e só isso.
+    let mut listed: Vec<String> = read(prefix.join("share/gdrive-desktop-linux/installed-files"))
+        .lines()
+        .map(String::from)
+        .collect();
+    listed.sort();
+    let every = PROGRAMS
+        .iter()
+        .map(|p| format!("bin/{p}"))
+        .chain(FILES.iter().map(|f| f.to_string()));
+    for file in every {
+        let path = prefix.join(&file).display().to_string();
+        assert!(listed.contains(&path), "{file} fora da lista");
+    }
+    for path in &listed {
+        assert!(Path::new(path).is_file(), "{path} na lista sem existir");
+    }
     for (file, line) in wanted {
         let body = read(prefix.join(file));
         assert!(body.contains(&line), "{file}: {line}\n{body}");
@@ -175,6 +197,12 @@ fn destdir_stages_files_for_the_prefix() {
         "{unit}"
     );
     assert!(!out.contains("Pronto."), "{out}");
+    // O pacote tem o marcador do formato no lugar da lista.
+    assert!(
+        !stage
+            .join("usr/share/gdrive-desktop-linux/installed-files")
+            .exists()
+    );
 }
 
 /// O ícone do app virou PNG: o SVG de uma instalação anterior sai, senão o tema o prefere.

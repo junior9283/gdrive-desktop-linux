@@ -147,6 +147,28 @@ async fn pick_folder(
     Ok(path.map(|p| p.display().to_string()))
 }
 
+/// Desinstala pela CLI ao lado da janela (que pede a senha de administrador se o app veio de um
+/// pacote); o erro é a mensagem que ela escreveu.
+#[tauri::command]
+async fn uninstall(purge: bool) -> Result<(), String> {
+    let cli = gdl_common::paths::exe_dir()
+        .ok_or("sem a pasta dos programas")?
+        .join("gdrive-desktop-linux");
+    let mut command = std::process::Command::new(cli);
+    command.args(["uninstall", "--yes"]);
+    if purge {
+        command.arg("--purge");
+    }
+    let out = tauri::async_runtime::spawn_blocking(move || command.output())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+}
+
 /// Fica com o nome da janela; `None` se outra janela já estava aberta (e recebeu o pedido).
 async fn start(screen: Option<&Screen>) -> zbus::Result<Option<(Bridge, Requests)>> {
     let conn = Connection::session().await?;
@@ -194,7 +216,8 @@ fn main() -> ExitCode {
             open_screen,
             open_link,
             open_mount,
-            pick_folder
+            pick_folder,
+            uninstall
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

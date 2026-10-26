@@ -204,4 +204,5 @@ Roteiro da 0.2 no Plasma (Nobara). **Situação: pendente.**
 Roteiro da 0.3 no Plasma (Nobara). **Situação: pendente.**
 
 1. [ ] Abrir no Dolphin uma pasta de fotos nunca aberta: as miniaturas aparecem e o cache de
-   conteúdo não cresce.
+   conteúdo não cresce (confira na tabela `ranges` do `metadata.db` da conta, ou no tamanho de
+   `content/`, antes e depois). Sair da conta apaga as miniaturas gravadas.

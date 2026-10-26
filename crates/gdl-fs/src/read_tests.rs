@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use gdl_engine::thumbs::freedesktop::{ThumbSize, file_for, stored_mtime, uri_of};
 use gdl_fake_drive::{FakeDrive, Fault};
 use gdl_store::ItemId;
+use tokio_util::sync::CancellationToken;
 
 use crate::testutil::{MIB, Mounted, mode, names, wait_until, xattr};
 
@@ -293,4 +294,73 @@ async fn trash_and_mount_root_do_not_seed_thumbnails() {
     timed_names(trash.join("Velhas")).await;
     timed_names(m.mnt.join(".shortcut-targets-by-id")).await;
     assert_eq!(m.fake.requests("/thumb"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn many_slow_folders_do_not_hold_all_fuse_threads_for_thumbnails() {
+    let fake = FakeDrive::start().await;
+    let root = fake.root_id();
+    for n in 0..6 {
+        let folder = fake.add_folder(&root, &format!("Fotos {n}"));
+        fake.add_file_with_mime(&folder, "foto.jpg", "image/jpeg", vec![n; 300]);
+    }
+    fake.add_file(&root, "outro.txt", b"texto".to_vec());
+    let m = Mounted::new(fake).await;
+    m.fake.inject(Fault::DelayThumbs(Duration::from_secs(5)));
+
+    let listings: Vec<_> = (0..6)
+        .map(|n| tokio::spawn(timed_names(m.drive().join(format!("Fotos {n}")))))
+        .collect();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let other = m.drive().join("outro.txt");
+    let took = tokio::task::spawn_blocking(move || {
+        let start = Instant::now();
+        std::fs::metadata(&other).unwrap();
+        start.elapsed()
+    })
+    .await
+    .unwrap();
+    assert!(took < Duration::from_millis(200), "stat demorou {took:?}");
+
+    let mut times = vec![];
+    for listing in listings {
+        let (names, took) = listing.await.unwrap();
+        assert_eq!(names, ["foto.jpg"]);
+        times.push(took);
+    }
+    times.sort();
+    // Só `MAX_THUMB_WAITERS` (4) esperam o prazo; as outras listam na hora.
+    assert!(
+        times[..2].iter().all(|t| *t < Duration::from_millis(700)),
+        "tempos: {times:?}"
+    );
+    assert!(
+        times[2..].iter().all(|t| *t >= Duration::from_millis(1400)),
+        "tempos: {times:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn offline_engine_does_not_wait_for_thumbnails() {
+    let m = photos().await;
+    // O motor percebe a falta de rede pela consulta de mudanças e para de consultar.
+    m.fake.inject(Fault::Offline);
+    let stop = CancellationToken::new();
+    let run = tokio::spawn({
+        let (engine, stop) = (m.engine.clone(), stop.clone());
+        async move { engine.run(stop).await }
+    });
+    let engine = m.engine.clone();
+    tokio::task::spawn_blocking(move || wait_until("motor sem rede", || engine.is_offline()))
+        .await
+        .unwrap();
+    stop.cancel();
+    run.await.unwrap();
+    // A rede volta só para as miniaturas, lentas; o motor ainda se acha sem rede.
+    m.fake.clear_faults();
+    m.fake.inject(Fault::DelayThumbs(Duration::from_secs(5)));
+
+    let (listed, took) = timed_names(m.drive().join("Fotos de Março #1")).await;
+    assert_eq!(listed, ["foto (1).jpg"]);
+    assert!(took < Duration::from_millis(700), "demorou {took:?}");
 }

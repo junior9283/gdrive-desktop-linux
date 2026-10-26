@@ -376,6 +376,11 @@ impl Engine {
         }
     }
 
+    /// A última consulta de mudanças não alcançou o Drive.
+    pub fn is_offline(&self) -> bool {
+        self.poller.is_offline()
+    }
+
     pub fn summary(&self) -> Result<SyncSummary> {
         let queue = self.store.queue_stats()?;
         let downloads = self.store.count_incomplete_pinned()?;

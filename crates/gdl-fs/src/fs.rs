@@ -38,6 +38,11 @@ const QUOTA_TTL: Duration = Duration::from_secs(60);
 const UNLIMITED: u64 = 1 << 50;
 /// Quanto o `opendir` espera a semeadura das miniaturas; o resto segue em segundo plano.
 pub const THUMB_WAIT: Duration = Duration::from_millis(1500);
+/// Quantos `opendir` podem esperar miniaturas ao mesmo tempo; os demais listam na hora, para
+/// sobrar thread do FUSE às outras operações.
+const MAX_THUMB_WAITERS: usize = 4;
+/// Threads do FUSE: fixas, porque ficam paradas em E/S (e na espera das miniaturas), não na CPU.
+const FUSE_THREADS: usize = 8;
 
 /// A montagem do Drive. Clonar dá outro acesso ao mesmo estado.
 #[derive(Clone)]
@@ -61,6 +66,8 @@ pub(crate) struct Inner {
     /// Itens abertos para escrita, pelo inode (o ID muda quando o temporário sobe).
     pub(crate) writers: Mutex<HashMap<Inode, Writer>>,
     pub(crate) kio: KioTrash,
+    /// Vagas para `opendir` esperar miniaturas (`MAX_THUMB_WAITERS`).
+    thumb_waiters: tokio::sync::Semaphore,
     /// Quantas listagens de pasta foram montadas (para os testes contarem consultas).
     listings: AtomicUsize,
     quota: Mutex<Quota>,
@@ -157,6 +164,7 @@ impl DriveFs {
             files: Mutex::default(),
             writers: Mutex::default(),
             listings: AtomicUsize::new(0),
+            thumb_waiters: tokio::sync::Semaphore::new(MAX_THUMB_WAITERS),
             quota: Mutex::default(),
             engine,
         }))
@@ -467,25 +475,38 @@ impl Inner {
     }
 
     /// Semeia as miniaturas de uma pasta do Meu Drive e espera até `THUMB_WAIT`; o resto segue
-    /// em segundo plano. Pastas virtuais, da lixeira ou fora do Meu Drive não semeiam.
+    /// em segundo plano. Sem rede ou sem vaga entre os que esperam, só dispara. Pastas virtuais,
+    /// da lixeira ou fora do Meu Drive não semeiam.
     fn wait_thumbnails(&self, node: &Node) {
         let Node::Item(inode) = node else {
             return;
         };
-        let Ok(dir) = self.item(*inode) else {
-            return;
+        let dir = match self.item(*inode) {
+            Ok(dir) => dir,
+            Err(e) => return tracing::debug!(erro = ?e, "pasta sem item; sem miniaturas"),
         };
         if dir.kind != ItemKind::Folder || dir.trashed {
             return;
         }
-        let Ok(Some(rel)) = self.engine.store().path_of(&dir.id) else {
-            return;
+        let rel = match self.engine.store().path_of(&dir.id) {
+            Ok(Some(rel)) => rel,
+            Ok(None) => return,
+            Err(e) => return tracing::debug!(erro = %e, "caminho da pasta; sem miniaturas"),
         };
         let mut path = self.mount_point.join(&self.layout.my_drive);
         if !rel.is_empty() {
             path.push(rel);
         }
         // A semeadura cria tarefas: precisa do contexto do runtime, não da thread do FUSE.
+        let waiter = match self.engine.is_offline() {
+            true => None,
+            false => self.thumb_waiters.try_acquire().ok(),
+        };
+        let Some(_waiter) = waiter else {
+            let _rt = self.rt.enter();
+            drop(self.engine.seed_thumbnails(&dir.id, path));
+            return;
+        };
         self.rt.block_on(async {
             let seeding = self.engine.seed_thumbnails(&dir.id, path);
             let _ = tokio::time::timeout(THUMB_WAIT, seeding).await;
@@ -915,7 +936,6 @@ fn reply_xattr(reply: ReplyXattr, value: &[u8], size: u32) {
 
 /// Monta `fs` em `at`. Desmonta quando a sessão devolvida é descartada.
 pub fn mount(fs: DriveFs, at: &Path) -> std::io::Result<BackgroundSession> {
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
     let mut config = Config::default();
     config.mount_options = vec![
         MountOption::FSName("gdrive-desktop-linux".into()),
@@ -925,6 +945,6 @@ pub fn mount(fs: DriveFs, at: &Path) -> std::io::Result<BackgroundSession> {
         MountOption::NoSuid,
         MountOption::NoDev,
     ];
-    config.n_threads = Some(threads);
+    config.n_threads = Some(FUSE_THREADS);
     fuser::spawn_mount(fs, at, &config)
 }

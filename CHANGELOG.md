@@ -18,6 +18,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   controle de versão e IDEs (`find`, `rsync`, `git`, `code` etc.) percorrem as pastas sem semear
   miniaturas, como já faziam os indexadores; a pasta de fotos continua com as miniaturas na
   primeira abertura pelo gerenciador de arquivos.
+- Desempenho: o download sequencial (cópia, player de vídeo) ia em pedidos de 8 MiB, um de cada
+  vez e só usáveis depois de chegarem inteiros (~1,2 MB/s). Agora cada bloco de 1 MiB fica
+  disponível assim que chega, a leitura antecipada cresce de 8 até 64 MiB enquanto a leitura
+  segue sequencial (um arquivo de 64 MiB passou de 16 para até 7 pedidos) e a próxima janela é
+  pedida enquanto a anterior ainda chega. Saltos continuam baixando só os blocos lidos, e cada
+  download usa ~1 MiB de memória em vez de 8 MiB.
 
 ### Corrigido
 - Compilado sem todas as dependências já baixadas (CI com cache novo), o Sobre saía sem a lista

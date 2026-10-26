@@ -79,6 +79,32 @@ pub struct DriveClient {
     bandwidth: Arc<Bandwidth>,
 }
 
+/// Corpo de um download em curso (`DriveClient::download_stream`).
+pub struct Download {
+    resp: reqwest::Response,
+    bandwidth: Arc<Bandwidth>,
+}
+
+impl Download {
+    /// O próximo pedaço do corpo; `None` no fim.
+    pub async fn chunk(&mut self) -> Result<Option<Bytes>> {
+        let piece = self.resp.chunk().await?;
+        if let Some(piece) = &piece {
+            self.bandwidth.rx.take(piece.len()).await;
+        }
+        Ok(piece)
+    }
+
+    /// O corpo inteiro.
+    pub async fn bytes(mut self) -> Result<Bytes> {
+        let mut body = BytesMut::new();
+        while let Some(piece) = self.chunk().await? {
+            body.extend_from_slice(&piece);
+        }
+        Ok(body.freeze())
+    }
+}
+
 /// Converte a resposta de erro da API no `DriveError` correspondente.
 async fn error_from(resp: reqwest::Response) -> DriveError {
     let status = resp.status().as_u16();
@@ -180,21 +206,6 @@ impl DriveClient {
             },
         );
         request.body(reqwest::Body::wrap_stream(stream))
-    }
-
-    /// O corpo da resposta, lido pelo balde de download.
-    async fn download_body(&self, mut resp: reqwest::Response) -> Result<Bytes> {
-        if !self.bandwidth.rx.is_limited() {
-            return Ok(resp.bytes().await?);
-        }
-        // O tamanho declarado só como palpite, com teto: um cabeçalho errado não reserva demais.
-        let len = resp.content_length().unwrap_or_default() as usize;
-        let mut body = BytesMut::with_capacity(len.min(CHUNK));
-        while let Some(piece) = resp.chunk().await? {
-            self.bandwidth.rx.take(piece.len()).await;
-            body.extend_from_slice(&piece);
-        }
-        Ok(body.freeze())
     }
 
     /// Troca o recuo (nos testes, para não esperar segundos).
@@ -465,32 +476,37 @@ impl DriveClient {
             .await
     }
 
-    /// Bytes `[start, end_excl)` do conteúdo.
-    pub async fn download_range(&self, id: &str, start: u64, end_excl: u64) -> Result<Bytes> {
-        if start >= end_excl {
-            return Ok(Bytes::new());
-        }
+    /// Abre o download de `[start, end_excl)` do conteúdo; o corpo chega aos pedaços, pelo
+    /// balde de download. Só a abertura é repetida com recuo: quem lê decide o que fazer com
+    /// um corpo que parou no meio.
+    pub async fn download_stream(&self, id: &str, start: u64, end_excl: u64) -> Result<Download> {
+        debug_assert!(start < end_excl, "intervalo vazio");
         let url = self.file_api(id);
         let range = format!("bytes={start}-{}", end_excl - 1);
-        self.call(
-            || {
-                self.http
-                    .get(url.clone())
-                    .query(&[("alt", "media")])
-                    .header(RANGE, &range)
-            },
-            |resp| async move {
-                // O Drive sempre atende intervalos; um 200 seria o arquivo inteiro na memória.
-                if resp.status() != StatusCode::PARTIAL_CONTENT {
-                    return Err(DriveError::Protocol(format!(
-                        "download por intervalo respondeu {}",
-                        resp.status()
-                    )));
-                }
-                self.download_body(resp).await
-            },
-        )
-        .await
+        let resp = self
+            .call(
+                || {
+                    self.http
+                        .get(url.clone())
+                        .query(&[("alt", "media")])
+                        .header(RANGE, &range)
+                },
+                |resp| async move {
+                    // O Drive sempre atende intervalos; um 200 seria o arquivo inteiro.
+                    if resp.status() != StatusCode::PARTIAL_CONTENT {
+                        return Err(DriveError::Protocol(format!(
+                            "download por intervalo respondeu {}",
+                            resp.status()
+                        )));
+                    }
+                    Ok(resp)
+                },
+            )
+            .await?;
+        Ok(Download {
+            resp,
+            bandwidth: self.bandwidth.clone(),
+        })
     }
 
     /// Cria um item só de metadados (pasta ou atalho).
@@ -1021,7 +1037,7 @@ mod tests {
         }
         spawnable_call!(about());
         spawnable_call!(list_all(|_| Ok::<_, DriveError>(())));
-        spawnable_call!(download_range("x", 0, 1));
+        spawnable_call!(download_stream("x", 0, 1));
         spawnable_call!(changes("1"));
         spawnable_call!(set_trashed("x", true));
         spawnable_call!(create_folder("p", "n", None));
@@ -1285,11 +1301,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_range_sends_range_header() {
+    async fn download_stream_sends_range_header() {
         let fake = FakeDrive::start().await;
         let data: Vec<u8> = (0..1000u32).map(|n| n as u8).collect();
         let id = fake.add_file(&fake.root_id(), "a.bin", data.clone());
-        let got = client(&fake).download_range(&id, 100, 200).await.unwrap();
+        let got = client(&fake)
+            .download_stream(&id, 100, 200)
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
         assert_eq!(got.as_ref(), &data[100..200]);
         assert_eq!(fake.downloaded_bytes(), 100);
     }
@@ -1305,7 +1327,13 @@ mod tests {
         bandwidth.rx.set_rate(Some(1_000_000));
         let c = client(&fake).with_bandwidth(bandwidth.clone());
 
-        let got = c.download_range(&id, 0, 300_000).await.unwrap();
+        let got = c
+            .download_stream(&id, 0, 300_000)
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
 
         assert_eq!(got.as_ref(), &data[..]);
         assert_eq!(bandwidth.rx.taken(), 300_000);

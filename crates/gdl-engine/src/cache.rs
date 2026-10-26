@@ -4,25 +4,28 @@ use std::collections::HashMap;
 use std::io::SeekFrom;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use gdl_common::paths::create_private_dir;
 use gdl_common::time::now_ms;
 use gdl_drive::client::{DriveClient, DriveError};
-use gdl_store::{ItemId, LocalState, Store, StoreError};
+use gdl_store::{Item, ItemId, LocalState, Store, StoreError};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::broadcast;
+use tokio::sync::{Notify, broadcast, futures::OwnedNotified};
 
 use crate::events::EngineEvent;
 
 /// Unidade de download e de controle do cache.
 pub const BLOCK: u64 = 1024 * 1024;
-/// Leitura antecipada depois de uma leitura sequencial.
-pub const READ_AHEAD: u64 = 8 * 1024 * 1024;
-/// Maior pedido de download; trechos maiores vão em partes, e cada parte segura a trava do item.
-const MAX_REQUEST: u64 = 8 * 1024 * 1024;
+/// Primeira janela de leitura antecipada; dobra a cada janela enquanto a leitura segue sequencial.
+const READ_AHEAD: u64 = 8 * 1024 * 1024;
+/// Maior janela de leitura antecipada.
+const MAX_READ_AHEAD: u64 = 64 * 1024 * 1024;
+/// Maior pedido de download: quem espera um bloco no meio de um pedido não espera mais que isto.
+const MAX_REQUEST: u64 = 16 * 1024 * 1024;
 /// O último acesso de um item é gravado no banco no máximo uma vez neste intervalo.
 const TOUCH_EVERY_MS: i64 = 60_000;
 
@@ -101,14 +104,51 @@ struct Inner {
 /// Estado em memória de um item lido; sai do mapa quando o item sai do cache.
 #[derive(Default)]
 struct ItemState {
-    /// Evita que dois leitores baixem o mesmo bloco ao mesmo tempo, e o despejo de um item em uso.
+    /// Segurada a cada bloco gravado: quem passa a editar o item, ou o despeja, espera a gravação.
     lock: Arc<tokio::sync::Mutex<()>>,
+    /// Trechos sendo baixados agora; quem precisa de um deles espera em `landed`.
+    fetching: Vec<(u64, u64)>,
+    /// Avisa a cada bloco que chega e a cada download que termina.
+    landed: Arc<Notify>,
     /// Fim da última leitura, para reconhecer leitura sequencial.
     last_end: Option<u64>,
-    /// Até onde a leitura antecipada já foi pedida.
+    /// Até onde a leitura antecipada já foi pedida, e o tamanho da próxima janela.
     ahead_until: u64,
+    window: u64,
     /// Último acesso gravado no banco.
     touched_ms: i64,
+}
+
+/// O que falta de um trecho, para quem pede (`BlockCache::claim`).
+enum Claim {
+    /// Já está todo no cache.
+    Done,
+    /// O que falta já está sendo baixado: espera o próximo bloco chegar e olha de novo.
+    Wait(Pin<Box<OwnedNotified>>),
+    /// Este trecho ficou com quem pediu.
+    Fetch(Fetching),
+}
+
+/// Trecho reservado para um download; ao sair (fim, erro ou cancelamento), libera a reserva e
+/// acorda quem espera.
+struct Fetching {
+    cache: BlockCache,
+    id: ItemId,
+    start: u64,
+    end: u64,
+    landed: Arc<Notify>,
+}
+
+impl Drop for Fetching {
+    fn drop(&mut self) {
+        // O item pode ter saído do cache e voltado com outro estado: a reserva era do velho.
+        if let Some(state) = self.cache.items().get_mut(&self.id)
+            && Arc::ptr_eq(&state.landed, &self.landed)
+        {
+            state.fetching.retain(|&r| r != (self.start, self.end));
+        }
+        self.landed.notify_waiters();
+    }
 }
 
 /// Arquivo que já não existe conta como sucesso ao apagar ou renomear.
@@ -239,9 +279,14 @@ impl BlockCache {
             let state = items.entry(id.clone()).or_default();
             let follows = state.last_end.replace(end) == Some(offset);
             let sequential = sequential.unwrap_or(follows);
-            // Pede a próxima janela quando a anterior está na metade.
-            let prefetch = (sequential && end + READ_AHEAD / 2 > state.ahead_until).then(|| {
-                state.ahead_until = size.min(end + READ_AHEAD);
+            if !sequential {
+                state.window = READ_AHEAD;
+            }
+            // Pede a próxima janela, maior, quando a anterior está na metade.
+            let window = state.window.max(READ_AHEAD);
+            let prefetch = (sequential && end + window / 2 > state.ahead_until).then(|| {
+                state.ahead_until = size.min(end + window);
+                state.window = (window * 2).min(MAX_READ_AHEAD);
                 state.ahead_until
             });
             let touch = now - state.touched_ms >= TOUCH_EVERY_MS;
@@ -279,58 +324,134 @@ impl BlockCache {
         self.ensure_range(id, 0, size, size).await
     }
 
-    /// Garante no cache os blocos que cobrem `[start, end)` de um item de `size` bytes.
+    /// Garante no cache os blocos que cobrem `[start, end)` de um item de `size` bytes: baixa o
+    /// que ninguém está baixando e espera o resto chegar.
     async fn ensure_range(&self, id: &ItemId, start: u64, end: u64, size: u64) -> Result<()> {
         let (start, end) = (align_down(start), end.next_multiple_of(BLOCK).min(size));
-        let gaps = self.0.store.ranges_missing(id, start, end)?;
-        if !gaps.is_empty() {
-            self.check_disk(id).await?;
-        }
-        for (gap_start, gap_end) in gaps {
-            let mut at = gap_start;
-            while at < gap_end {
-                let piece_end = gap_end.min(at + MAX_REQUEST);
-                self.fetch(id, at, piece_end).await?;
-                at = piece_end;
+        loop {
+            let item = self.0.store.get(id)?.ok_or(CacheError::NotFound)?;
+            // Com edição local, o arquivo é dela e nada da nuvem entra nele.
+            if item.local_state != LocalState::Clean {
+                return Ok(());
             }
+            match self.claim(id, start, end)? {
+                Claim::Done => return Ok(()),
+                Claim::Wait(landed) => landed.await,
+                Claim::Fetch(fetching) => {
+                    self.check_disk(id).await?;
+                    self.fetch(&item, &fetching).await?;
+                }
+            }
+        }
+    }
+
+    /// Reserva o primeiro trecho de `[start, end)` que falta e que ninguém está baixando (até
+    /// `MAX_REQUEST`); sem nenhum, devolve a espera pelo próximo bloco que chegar.
+    fn claim(&self, id: &ItemId, start: u64, end: u64) -> Result<Claim> {
+        // O banco é consultado com o mapa travado: um download que termina no meio não escapa.
+        let mut items = self.items();
+        let gaps = self.0.store.ranges_missing(id, start, end)?;
+        if gaps.is_empty() {
+            return Ok(Claim::Done);
+        }
+        let state = items.entry(id.clone()).or_default();
+        for (mut at, gap_end) in gaps {
+            while at < gap_end {
+                if let Some(&(_, busy_end)) =
+                    state.fetching.iter().find(|&&(s, e)| s <= at && at < e)
+                {
+                    at = busy_end;
+                    continue;
+                }
+                let next_busy = state
+                    .fetching
+                    .iter()
+                    .map(|&(s, _)| s)
+                    .filter(|&s| s > at)
+                    .min();
+                let to = gap_end
+                    .min(at + MAX_REQUEST)
+                    .min(next_busy.unwrap_or(u64::MAX));
+                state.fetching.push((at, to));
+                return Ok(Claim::Fetch(Fetching {
+                    cache: self.clone(),
+                    id: id.clone(),
+                    start: at,
+                    end: to,
+                    landed: state.landed.clone(),
+                }));
+            }
+        }
+        // Inscrito antes de soltar o mapa: um bloco que chega logo depois não se perde.
+        let mut landed = Box::pin(state.landed.clone().notified_owned());
+        landed.as_mut().enable();
+        Ok(Claim::Wait(landed))
+    }
+
+    /// Baixa o trecho reservado num pedido só, gravando cada bloco assim que chega; se a conexão
+    /// cai depois de algum progresso, continua de onde parou.
+    async fn fetch(&self, item: &Item, fetching: &Fetching) -> Result<()> {
+        let mut at = fetching.start;
+        loop {
+            let before = at;
+            match self.stream(item, fetching, &mut at).await {
+                Err(e) if at == before => return Err(e),
+                Err(e) => tracing::debug!(erro = %e, "download interrompido; segue de onde parou"),
+                Ok(()) => return Ok(()),
+            }
+        }
+    }
+
+    /// Um pedido de `[at, fim do trecho)`, avançando `at` a cada bloco gravado. Termina sem
+    /// erro também quando o item muda no meio: o resto não é gravado.
+    async fn stream(&self, item: &Item, fetching: &Fetching, at: &mut u64) -> Result<()> {
+        let mut body = self
+            .0
+            .client
+            .download_stream(&item.id.0, *at, fetching.end)
+            .await?;
+        let mut block = BytesMut::new();
+        while *at < fetching.end {
+            let len = BLOCK.min(fetching.end - *at) as usize;
+            while block.len() < len {
+                let piece = body.chunk().await?.ok_or_else(|| {
+                    DriveError::Protocol("o download terminou antes do fim do trecho".into())
+                })?;
+                block.extend_from_slice(&piece);
+            }
+            if !self.land(item, *at, &block.split_to(len)).await? {
+                return Ok(());
+            }
+            *at += len as u64;
+            fetching.landed.notify_waiters();
         }
         Ok(())
     }
 
-    /// Baixa `[start, end)` e grava no arquivo esparso, se ninguém tiver baixado antes.
-    async fn fetch(&self, id: &ItemId, start: u64, end: u64) -> Result<()> {
+    /// Grava um bloco baixado e o marca no cache. Devolve `false`, sem gravar nada, se o item
+    /// passou a ser editado aqui ou ganhou revisão nova durante o download.
+    async fn land(&self, item: &Item, at: u64, bytes: &[u8]) -> Result<bool> {
+        let id = &item.id;
+        let same =
+            |c: &Item| c.head_revision == item.head_revision && c.local_state == LocalState::Clean;
+        // Quem passa a editar o item segura esta trava (`locked`): a edição não é sobrescrita.
         let lock = self.item_lock(id);
         let _guard = lock.lock().await;
-        // Quem passa a editar o item segura esta trava (`locked`): com edição local, o arquivo
-        // é dela e nada da nuvem entra nele.
-        let item = self.0.store.get(id)?.ok_or(CacheError::NotFound)?;
-        if item.local_state != LocalState::Clean {
-            return Ok(());
+        if !self.0.store.get(id)?.is_some_and(|c| same(&c)) {
+            return Ok(false);
         }
-        // Outro leitor pode ter baixado enquanto esperávamos a trava.
-        for (gap_start, gap_end) in self.0.store.ranges_missing(id, start, end)? {
-            let bytes = self
-                .0
-                .client
-                .download_range(&id.0, gap_start, gap_end)
-                .await?;
-            let mut file = tokio::fs::File::from_std(self.open_local(id, false)?);
-            file.seek(SeekFrom::Start(gap_start)).await?;
-            file.write_all(&bytes).await?;
-            file.flush().await?;
-            // Uma revisão nova que chegou durante o download descartou o cache: o trecho
-            // baixado é da velha e não conta.
-            self.0.store.modify(|batch| -> gdl_store::Result<()> {
-                let current = batch.get(id)?;
-                if current.is_some_and(|c| {
-                    c.head_revision == item.head_revision && c.local_state == LocalState::Clean
-                }) {
-                    batch.ranges_add(id, gap_start, gap_start + bytes.len() as u64)?;
-                }
-                Ok(())
-            })?;
-        }
-        Ok(())
+        let mut file = tokio::fs::File::from_std(self.open_local(id, false)?);
+        file.seek(SeekFrom::Start(at)).await?;
+        file.write_all(bytes).await?;
+        file.flush().await?;
+        // A troca de revisão (pelas mudanças da nuvem) não passa pela trava: confere de novo.
+        Ok(self.0.store.modify(|batch| -> gdl_store::Result<bool> {
+            let same = batch.get(id)?.is_some_and(|c| same(&c));
+            if same {
+                batch.ranges_add(id, at, at + bytes.len() as u64)?;
+            }
+            Ok(same)
+        })?)
     }
 
     /// Roda `f` com a trava do item: nenhum download grava no conteúdo local enquanto isso.
@@ -408,6 +529,9 @@ impl BlockCache {
         let Ok(_guard) = lock.try_lock() else {
             return Ok(false);
         };
+        if self.items().get(id).is_some_and(|s| !s.fetching.is_empty()) {
+            return Ok(false);
+        }
         self.drop_content(id).await?;
         Ok(true)
     }
@@ -582,6 +706,90 @@ mod tests {
             s.env.fake.downloaded_bytes() <= 10 * MIB as u64,
             "não baixa o arquivo todo"
         );
+    }
+
+    /// Pedidos de conteúdo (`alt=media`) feitos ao Drive simulado.
+    fn media_requests(s: &Setup, id: &ItemId) -> u64 {
+        s.env
+            .fake
+            .requests(&format!("/drive/v3/files/{}?alt=media", id.0))
+    }
+
+    /// Lê o arquivo inteiro em pedaços de 128 KiB, como o FUSE numa cópia.
+    async fn read_sequentially(s: &Setup, id: &ItemId, len: usize) -> Vec<u8> {
+        let mut got = Vec::with_capacity(len);
+        while got.len() < len {
+            let piece = s
+                .cache
+                .read_hinted(id, got.len() as u64, 128 * 1024, Some(!got.is_empty()))
+                .await
+                .unwrap();
+            got.extend_from_slice(&piece);
+        }
+        got
+    }
+
+    /// Desempenho: a leitura sequencial pedia 8 MiB de cada vez, um pedido depois do outro
+    /// (~1,2 MB/s contra ~2,5 MB/s do rclone). As janelas crescem enquanto a leitura segue.
+    #[tokio::test]
+    async fn sequential_read_uses_growing_windows() {
+        let (s, ids) = setup(&[("filme.mp4", 64 * MIB)], None).await;
+
+        let got = read_sequentially(&s, &ids[0], 64 * MIB).await;
+
+        assert!(got == data(64 * MIB), "conteúdo diferente do da nuvem");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            s.env.fake.downloaded_bytes(),
+            64 * MIB as u64,
+            "nada baixado duas vezes"
+        );
+        let requests = media_requests(&s, &ids[0]);
+        assert!(requests <= 7, "{requests} pedidos para 64 MiB");
+    }
+
+    /// Saltos (um player de vídeo procurando a cena) baixam só os blocos lidos, como antes.
+    #[tokio::test]
+    async fn random_reads_download_only_the_blocks_read() {
+        let (s, ids) = setup(&[("video.mkv", 64 * MIB)], None).await;
+        let all = data(64 * MIB);
+        for n in [50, 3, 24, 11, 62, 1, 40, 30] {
+            let at = n * MIB + 4096;
+            let got = s
+                .cache
+                .read_hinted(&ids[0], at as u64, 128 * 1024, Some(false))
+                .await
+                .unwrap();
+            assert!(got.as_ref() == &all[at..at + 128 * 1024]);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(s.env.fake.downloaded_bytes(), 8 * MIB as u64);
+        assert_eq!(media_requests(&s, &ids[0]), 8);
+    }
+
+    /// O bloco que alguém espera fica pronto assim que chega, sem esperar o resto do pedido:
+    /// antes, o pedido inteiro ficava na memória e só então ia para o cache.
+    #[tokio::test]
+    async fn a_block_is_readable_as_soon_as_it_arrives() {
+        let (s, ids) = setup(&[("grande.bin", 32 * MIB)], None).await;
+        let id = ids[0].clone();
+        s.env
+            .fake
+            .inject(Fault::StallConnectionAfterBytes(3 * MIB as u64));
+        let cache = s.cache.clone();
+        let full = tokio::spawn({
+            let id = id.clone();
+            async move { cache.ensure_full(&id).await }
+        });
+        wait_until("o download empacar", || s.env.fake.byte_limit_reached()).await;
+
+        let got = tokio::time::timeout(Duration::from_secs(5), s.cache.read(&id, MIB as u64, 10))
+            .await
+            .expect("o bloco já chegou e a leitura esperou o pedido inteiro")
+            .unwrap();
+
+        assert_eq!(got.as_ref(), &data(MIB + 10)[MIB..]);
+        full.abort();
     }
 
     #[tokio::test]

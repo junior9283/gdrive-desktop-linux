@@ -1122,7 +1122,9 @@ mod tests {
     async fn fetch_thumbnail_does_not_follow_redirects() {
         let fake = FakeDrive::start().await;
         let foto = fake.add_file_with_mime(&fake.root_id(), "f.png", "image/png", vec![1; 10]);
-        fake.redirect_thumbs_to("https://evil.example/");
+        // Destino dentro do próprio simulador: se o cliente seguisse, a chamada daria certo.
+        let photo = fake.base_url().join("/photo.png").unwrap();
+        fake.redirect_thumbs_to(photo.as_str());
         let link = fake
             .base_url()
             .join(&format!("/thumb/{foto}=s220"))
@@ -1130,6 +1132,7 @@ mod tests {
         let result = client(&fake).fetch_thumbnail(link.as_str(), 512).await;
         assert!(result.is_err());
         assert_eq!(fake.requests("/thumb"), 1);
+        assert_eq!(fake.requests("/photo.png"), 0);
     }
 
     #[test]

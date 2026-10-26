@@ -1,7 +1,7 @@
 # Termos de uso
 
 O gdrive-desktop-linux é software livre, distribuído sob a
-[GNU General Public License, versão 3](../LICENSE). Você pode usar, estudar, modificar e
+[GNU General Public License, versão 3](https://github.com/junior9283/gdrive-desktop-linux/blob/main/LICENSE). Você pode usar, estudar, modificar e
 redistribuir o app nos termos dessa licença.
 
 - O app é um cliente **não oficial** do Google Drive. Ele não tem ligação com o Google nem é

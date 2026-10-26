@@ -18,6 +18,17 @@ Só com as APIs do Google Drive e do login do Google, usando o Client ID que **v
 projeto do Google Cloud (veja o [guia do Client ID](guia-client-id.md)). O projeto não tem
 servidores próprios e não recebe nenhum dado seu.
 
+## Para que o app usa os dados do Google
+
+O app pede três permissões no login: o Google Drive (`drive`), para listar, abrir, enviar e
+organizar os seus arquivos, e `openid` e `email`, para saber qual conta está conectada. Ele usa esses
+dados só para mostrar e sincronizar o seu Drive no seu computador. Não os vende, não os usa para
+publicidade e não os entrega a ninguém.
+
+O uso e a transferência das informações recebidas das APIs do Google seguem a
+[Política de dados do usuário dos serviços de API do Google](https://developers.google.com/terms/api-services-user-data-policy),
+incluindo os requisitos de uso limitado.
+
 ## O que o app não faz
 
 - Não envia estatísticas de uso nem telemetria.

@@ -1,0 +1,11 @@
+# Site do GitHub Pages (https://junior9283.github.io/gdrive-desktop-linux/): a página inicial, a
+# Política de Privacidade e os termos que a tela de consentimento do Google exige, mais a ajuda.
+# As notas internas do projeto ficam de fora.
+title: gdrive-desktop-linux
+description: Cliente não oficial do Google Drive para Linux
+theme: jekyll-theme-primer
+lang: pt-BR
+exclude:
+  - superpowers
+  - testes
+  - resumo-sessao-*.md

@@ -14,8 +14,39 @@ use gdl_engine::engine::Intervals;
 use gdl_ipc::{BUS_NAME, OBJECT_PATH};
 use tokio::signal::unix::{SignalKind, signal};
 
+const HELP: &str = "\
+Uso: gdrive-desktop-linuxd [opção]
+
+Serviço do usuário do gdrive-desktop-linux: monta a conta e atende a janela, a bandeja e os
+gerenciadores de arquivos pelo D-Bus. Normalmente é iniciado pelo systemd ou pelo próprio D-Bus;
+se já estiver rodando, outra cópia sai sem fazer nada.
+
+Opções:
+  -h, --help     mostra esta ajuda e sai
+  -V, --version  mostra a versão e sai
+";
+
+fn main() -> ExitCode {
+    // Antes de tudo: as opções só respondem, sem tocar no barramento nem na conta.
+    match std::env::args().nth(1).as_deref() {
+        None => serve(),
+        Some("-V" | "--version") => {
+            println!("gdrive-desktop-linuxd {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Some("-h" | "--help") => {
+            print!("{HELP}");
+            ExitCode::SUCCESS
+        }
+        Some(other) => {
+            eprintln!("gdrive-desktop-linuxd: opção desconhecida: {other}\n\n{HELP}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 #[tokio::main]
-async fn main() -> ExitCode {
+async fn serve() -> ExitCode {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
@@ -48,9 +79,15 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
     let daemon = Daemon::new(config)?;
     let conn = zbus::connection::Builder::session()?
         .serve_at(OBJECT_PATH, Service::new(daemon.clone()))?
-        .name(BUS_NAME)?
         .build()
         .await?;
+    // Antes de montar qualquer coisa: com outra instância rodando, esta sai e deixa tudo como está.
+    // O padrão do zbus (`Builder::name`) toma o nome de quem já o tem: a segunda instância
+    // derrubava a primeira e montava "~/Google Drive (1)".
+    if !gdl_ipc::claim_name(&conn, BUS_NAME).await? {
+        tracing::info!("o serviço já está rodando nesta sessão; nada a fazer");
+        return Ok(Exit::Quit);
+    }
     daemon.attach(conn.clone()).await?;
     // A conexão limitada vem do NetworkManager, no barramento do sistema.
     match zbus::Connection::system().await {

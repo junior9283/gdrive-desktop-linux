@@ -31,6 +31,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   com uma consulta por segundo.
 
 ### Corrigido
+- `gdrive-desktop-linuxd --version` (ou o serviço iniciado de novo) subia uma segunda instância
+  que tomava o nome no D-Bus, montava "~/Google Drive (1)" e reiniciava a primeira. Agora
+  `--version` e `--help` só respondem, e uma segunda instância percebe a primeira e sai sem
+  tocar em nada.
 - Compilado sem todas as dependências já baixadas (CI com cache novo), o Sobre saía sem a lista
   de softwares de terceiros: a lista agora baixa o que falta, sempre com o `Cargo.lock` como está.
 

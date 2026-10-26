@@ -68,9 +68,12 @@ async fn main() -> Result<(), Error> {
     })?;
     let conn = zbus::connection::Builder::session()?
         .serve_at(OBJECT_PATH, Service::new(daemon.clone()))?
-        .name(BUS_NAME)?
         .build()
         .await?;
+    // Sem tomar o nome de um serviço que já esteja rodando nesta sessão.
+    if !gdl_ipc::claim_name(&conn, BUS_NAME).await? {
+        return Err("o serviço já está rodando nesta sessão".into());
+    }
     daemon.attach(conn.clone()).await?;
 
     // O login pelo próprio D-Bus, com este programa no papel do navegador.

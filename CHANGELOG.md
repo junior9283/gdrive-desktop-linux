@@ -7,6 +7,16 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.2.2] - 2026-10-26
+
+### Mudado
+- Ícone novo do app (menu de aplicativos, janela, tela Sobre e README), em PNG nos tamanhos do
+  tema; `scripts/update-app-icon.py` gera todos a partir de `assets/icons/app-icon-source.png`.
+  A instalação remove o ícone SVG antigo.
+
+### Corrigido
+- O selo de versão do README tinha ficado em 0.2.0.
+
 ## [0.2.1] - 2026-10-26
 
 ### Adicionado

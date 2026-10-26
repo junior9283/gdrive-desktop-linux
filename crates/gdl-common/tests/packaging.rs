@@ -19,7 +19,8 @@ const FILES: &[&str] = &[
     "share/applications/io.github.junior9283.GDriveDesktopLinux.desktop",
     "share/applications/io.github.junior9283.GDriveDesktopLinux.OpenPointer.desktop",
     "share/mime/packages/gdrive-desktop-linux.xml",
-    "share/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLinux.svg",
+    "share/icons/hicolor/48x48/apps/io.github.junior9283.GDriveDesktopLinux.png",
+    "share/icons/hicolor/256x256/apps/io.github.junior9283.GDriveDesktopLinux.png",
     "share/gdrive-desktop-linux/icons/hicolor/scalable/status/gdl-synced.svg",
     "share/gdrive-desktop-linux/icons/hicolor/scalable/status/gdl-syncing-4.svg",
 ];
@@ -45,6 +46,16 @@ fn install(args: &[&str]) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8(out.stdout).unwrap()
+}
+
+/// Programas de mentira em `<dir>/programas`, para o `--from`.
+fn fake_bins(dir: &Path) -> PathBuf {
+    let bins = dir.join("programas");
+    std::fs::create_dir_all(&bins).unwrap();
+    for program in PROGRAMS {
+        std::fs::write(bins.join(program), "#!/bin/sh\n").unwrap();
+    }
+    bins
 }
 
 fn read(path: PathBuf) -> String {
@@ -75,11 +86,7 @@ fn dry_run_lists_every_file_and_writes_nothing() {
 #[test]
 fn installs_with_the_paths_of_the_prefix() {
     let dir = tempfile::tempdir().unwrap();
-    let (bins, prefix) = (dir.path().join("programas"), dir.path().join("com espaço"));
-    std::fs::create_dir_all(&bins).unwrap();
-    for program in PROGRAMS {
-        std::fs::write(bins.join(program), "#!/bin/sh\n").unwrap();
-    }
+    let (bins, prefix) = (fake_bins(dir.path()), dir.path().join("com espaço"));
 
     install(&[
         "--prefix",
@@ -125,6 +132,27 @@ fn installs_with_the_paths_of_the_prefix() {
         let body = read(prefix.join(file));
         assert!(body.contains(&line), "{file}: {line}\n{body}");
     }
+}
+
+/// O ícone do app virou PNG: o SVG de uma instalação anterior sai, senão o tema o prefere.
+#[test]
+fn removes_the_old_scalable_app_icon() {
+    let dir = tempfile::tempdir().unwrap();
+    let (bins, prefix) = (fake_bins(dir.path()), dir.path().join("pfx"));
+    let old = prefix
+        .join("share/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLinux.svg");
+    std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+    std::fs::write(&old, "<svg/>").unwrap();
+
+    let args = [
+        "--prefix",
+        prefix.to_str().unwrap(),
+        "--from",
+        bins.to_str().unwrap(),
+    ];
+    install(&[args.as_slice(), &["--no-activate"]].concat());
+
+    assert!(!old.exists());
 }
 
 #[test]

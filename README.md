@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="assets/icons/hicolor/128x128/apps/io.github.junior9283.GDriveDesktopLinux.png" alt="Ícone do gdrive-desktop-linux" width="128">
+</p>
+
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.2.0-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.2.2-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-interface%20(pr%C3%A9via)-orange)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)

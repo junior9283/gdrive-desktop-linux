@@ -41,6 +41,13 @@ install_as() {
   $dry || install -Dm"$1" "$2" "$3"
 }
 
+# remove <arquivo>: tira um arquivo de uma instalação anterior, se houver.
+remove() {
+  [ -e "$1" ] || return 0
+  echo "remove $1"
+  $dry || rm -f "$1"
+}
+
 # put <origem> <destino>: copia um arquivo com Exec, trocando /usr/bin/<programa> pelo programa
 # instalado, entre aspas.
 put() {
@@ -63,8 +70,12 @@ for file in "$repo"/packaging/desktop/*.desktop; do
   put "$file" "$share/applications/$(basename "$file")"
 done
 install_as 644 "$repo/packaging/mime/gdrive-desktop-linux.xml" "$share/mime/packages/gdrive-desktop-linux.xml"
-install_as 644 "$repo/assets/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLinux.svg" \
-  "$share/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLinux.svg"
+# O ícone do app, nos tamanhos do tema (gerados por scripts/update-app-icon.py). O SVG de uma
+# instalação anterior sai: o tema o preferiria aos PNG.
+for file in "$repo"/assets/icons/hicolor/*/apps/*.png; do
+  install_as 644 "$file" "$share/icons/hicolor/${file#"$repo/assets/icons/hicolor/"}"
+done
+remove "$share/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLinux.svg"
 # Os ícones da bandeja, no tema próprio que ela procura ao lado dos programas.
 for file in "$repo"/assets/icons/hicolor/scalable/status/*.svg; do
   install_as 644 "$file" "$share/gdrive-desktop-linux/icons/hicolor/scalable/status/$(basename "$file")"

@@ -19,7 +19,7 @@ export async function render(root, { api, t }) {
     el(
       'main',
       { class: 'about' },
-      el('img', { class: 'about-logo', src: 'icons/app.svg', alt: '' }),
+      el('img', { class: 'about-logo', src: 'icons/app.png', alt: '' }),
       el('h1', {}, t('about-name')),
       el('p', { class: 'about-version' }, t('about-version', { version })),
       el('p', { class: 'about-license' }, t('about-license')),

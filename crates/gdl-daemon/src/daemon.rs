@@ -775,7 +775,13 @@ impl Daemon {
         let mount_point = mount::choose(&preferred).map_err(failed)?;
         let uid = rustix::process::getuid().as_raw();
         let gid = rustix::process::getgid().as_raw();
-        let fs = DriveFs::new(engine.clone(), I18n::new(&config.lang), uid, gid);
+        let fs = DriveFs::new(
+            engine.clone(),
+            I18n::new(&config.lang),
+            uid,
+            gid,
+            mount_point.clone(),
+        );
         let session = gdl_fs::mount(fs, &mount_point).map_err(failed)?;
         gdl_common::paths::create_private_dir(&config.paths.data_dir)
             .and_then(|()| std::fs::write(self.current_account_file(), &email))

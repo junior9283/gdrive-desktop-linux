@@ -1,11 +1,14 @@
 //! Testes da navegação e da leitura com uma montagem FUSE real sobre o Drive simulado.
 
-use std::path::PathBuf;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
+use gdl_engine::thumbs::freedesktop::{ThumbSize, file_for, stored_mtime, uri_of};
 use gdl_fake_drive::{FakeDrive, Fault};
 use gdl_store::ItemId;
 
-use crate::testutil::{MIB, Mounted, mode, names, xattr};
+use crate::testutil::{MIB, Mounted, mode, names, wait_until, xattr};
 
 // As operações de arquivo bloqueiam a thread; o runtime com várias threads mantém o Drive
 // simulado e o motor respondendo enquanto isso.
@@ -187,4 +190,107 @@ async fn ten_thousand_items_readdir_queries_the_store_once() {
     // Desempenho pela contagem de consultas, não pelo relógio: a listagem inteira, em muitas
     // chamadas de readdir do kernel, sai de uma consulta só ao banco.
     assert_eq!(m.fs.listings() - before, 1);
+}
+
+/// A miniatura `normal` de `path` (caminho na montagem), se já foi gravada.
+fn thumb_of(m: &Mounted, path: &Path) -> PathBuf {
+    file_for(&m.thumbs, ThumbSize::Normal, &uri_of(path))
+}
+
+/// Lista `dir` numa thread de bloqueio e devolve os nomes e quanto demorou.
+async fn timed_names(dir: PathBuf) -> (Vec<String>, Duration) {
+    tokio::task::spawn_blocking(move || {
+        let start = Instant::now();
+        let names = names(&dir);
+        (names, start.elapsed())
+    })
+    .await
+    .unwrap()
+}
+
+/// Meu Drive com `foto (1).jpg` em `Fotos de Março #1`, `raiz.png` na raiz e `outro.txt`.
+async fn photos() -> Mounted {
+    let fake = FakeDrive::start().await;
+    let root = fake.root_id();
+    let folder = fake.add_folder(&root, "Fotos de Março #1");
+    fake.add_file_with_mime(&folder, "foto (1).jpg", "image/jpeg", vec![7; 1000]);
+    fake.add_file_with_mime(&root, "raiz.png", "image/png", vec![8; 500]);
+    fake.add_file(&root, "outro.txt", b"texto".to_vec());
+    Mounted::new(fake).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn opening_folder_seeds_thumbnails_with_mount_uri_and_mtime() {
+    let m = photos().await;
+    let folder = m.drive().join("Fotos de Março #1");
+
+    let (listed, _) = timed_names(folder.clone()).await;
+    assert_eq!(listed, ["foto (1).jpg"]);
+    // A listagem esperou a semeadura: a miniatura já está lá, com a data que a montagem mostra.
+    let photo = folder.join("foto (1).jpg");
+    let png = thumb_of(&m, &photo);
+    assert!(png.exists(), "sem miniatura em {}", png.display());
+    let mtime = std::fs::metadata(&photo).unwrap().mtime();
+    assert_eq!(stored_mtime(&png), Some(mtime));
+
+    // A raiz do Meu Drive também semeia.
+    timed_names(m.drive()).await;
+    let root_png = thumb_of(&m, &m.drive().join("raiz.png"));
+    assert!(root_png.exists(), "sem miniatura em {}", root_png.display());
+    assert_eq!(m.fake.downloaded_bytes(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_thumbnails_do_not_hold_listing_past_deadline() {
+    let m = photos().await;
+    m.fake.inject(Fault::DelayThumbs(Duration::from_secs(5)));
+    let folder = m.drive().join("Fotos de Março #1");
+
+    let (listed, took) = timed_names(folder.clone()).await;
+    assert_eq!(listed, ["foto (1).jpg"]);
+    // Esperou o prazo, e não mais que ele.
+    assert!(took >= Duration::from_millis(1400), "demorou só {took:?}");
+    assert!(took < Duration::from_millis(2500), "demorou {took:?}");
+    // A semeadura seguiu em segundo plano.
+    let png = thumb_of(&m, &folder.join("foto (1).jpg"));
+    wait_until("miniatura em segundo plano", || png.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn other_fuse_ops_are_not_blocked_while_seeding_thumbnails() {
+    let m = photos().await;
+    m.fake.inject(Fault::DelayThumbs(Duration::from_secs(5)));
+    let listing = tokio::spawn(timed_names(m.drive().join("Fotos de Março #1")));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let other = m.drive().join("outro.txt");
+    let took = tokio::task::spawn_blocking(move || {
+        let start = Instant::now();
+        std::fs::metadata(&other).unwrap();
+        start.elapsed()
+    })
+    .await
+    .unwrap();
+    assert!(!listing.is_finished(), "a listagem não esperou a semeadura");
+    assert!(took < Duration::from_millis(200), "stat demorou {took:?}");
+    listing.await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn trash_and_mount_root_do_not_seed_thumbnails() {
+    let fake = FakeDrive::start().await;
+    let root = fake.root_id();
+    fake.add_file_with_mime(&root, "raiz.png", "image/png", vec![8; 500]);
+    let gone = fake.add_folder(&root, "Velhas");
+    fake.add_file_with_mime(&gone, "antiga.jpg", "image/jpeg", vec![9; 500]);
+    let m = Mounted::new(fake).await;
+    m.fake.trash_remote(&gone);
+    m.poll_changes().await;
+
+    let trash = m.mnt.join(".Lixeira do Drive");
+    timed_names(m.mnt.clone()).await;
+    assert_eq!(timed_names(trash.clone()).await.0, ["Velhas"]);
+    timed_names(trash.join("Velhas")).await;
+    timed_names(m.mnt.join(".shortcut-targets-by-id")).await;
+    assert_eq!(m.fake.requests("/thumb"), 0);
 }

@@ -37,6 +37,8 @@ pub enum Fault {
     StallConnectionAfterBytes(u64),
     /// Toda conexão cai até `clear_faults`.
     Offline,
+    /// As miniaturas (`/thumb`) demoram este tempo para responder, até `clear_faults`.
+    DelayThumbs(std::time::Duration),
 }
 
 pub struct FakeDrive {
@@ -243,6 +245,7 @@ impl FakeDrive {
             Fault::StallConnectionAfterBytes(n) => self.limit_bytes(n, true),
             Fault::LoseCreateResponses { times } => self.shared.state().lose_responses = times,
             Fault::Offline => self.shared.offline.store(true, Ordering::SeqCst),
+            Fault::DelayThumbs(delay) => self.shared.state().thumb_delay = Some(delay),
         }
     }
 
@@ -251,6 +254,7 @@ impl FakeDrive {
             let mut state = self.shared.state();
             state.fault = None;
             state.lose_responses = 0;
+            state.thumb_delay = None;
         }
         self.shared.drop_budget.store(-1, Ordering::SeqCst);
         self.shared.stall.store(false, Ordering::SeqCst);

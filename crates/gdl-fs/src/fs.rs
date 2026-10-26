@@ -36,6 +36,8 @@ const BLOCK_SIZE: u32 = 4096;
 const QUOTA_TTL: Duration = Duration::from_secs(60);
 /// Armazenamento ilimitado aparece como 1 PiB.
 const UNLIMITED: u64 = 1 << 50;
+/// Quanto o `opendir` espera a semeadura das miniaturas; o resto segue em segundo plano.
+pub const THUMB_WAIT: Duration = Duration::from_millis(1500);
 
 /// A montagem do Drive. Clonar dá outro acesso ao mesmo estado.
 #[derive(Clone)]
@@ -44,6 +46,8 @@ pub struct DriveFs(Arc<Inner>);
 pub(crate) struct Inner {
     pub(crate) engine: Arc<Engine>,
     layout: Layout,
+    /// Onde a montagem está, para o caminho (e a URI) das miniaturas.
+    mount_point: PathBuf,
     inodes: Inodes,
     uid: u32,
     gid: u32,
@@ -132,9 +136,16 @@ pub(crate) type Res<T> = std::result::Result<T, Errno>;
 
 impl DriveFs {
     /// Precisa ser criado dentro do runtime do tokio onde o motor roda.
-    pub fn new(engine: Arc<Engine>, i18n: I18n, uid: u32, gid: u32) -> DriveFs {
+    pub fn new(
+        engine: Arc<Engine>,
+        i18n: I18n,
+        uid: u32,
+        gid: u32,
+        mount_point: PathBuf,
+    ) -> DriveFs {
         DriveFs(Arc::new(Inner {
             layout: Layout::new(&i18n),
+            mount_point,
             inodes: Inodes::default(),
             kio: KioTrash::new(uid, engine.data_dir()),
             uid,
@@ -453,6 +464,32 @@ impl Inner {
                 })
             })
             .collect()
+    }
+
+    /// Semeia as miniaturas de uma pasta do Meu Drive e espera até `THUMB_WAIT`; o resto segue
+    /// em segundo plano. Pastas virtuais, da lixeira ou fora do Meu Drive não semeiam.
+    fn wait_thumbnails(&self, node: &Node) {
+        let Node::Item(inode) = node else {
+            return;
+        };
+        let Ok(dir) = self.item(*inode) else {
+            return;
+        };
+        if dir.kind != ItemKind::Folder || dir.trashed {
+            return;
+        }
+        let Ok(Some(rel)) = self.engine.store().path_of(&dir.id) else {
+            return;
+        };
+        let mut path = self.mount_point.join(&self.layout.my_drive);
+        if !rel.is_empty() {
+            path.push(rel);
+        }
+        // A semeadura cria tarefas: precisa do contexto do runtime, não da thread do FUSE.
+        self.rt.block_on(async {
+            let seeding = self.engine.seed_thumbnails(&dir.id, path);
+            let _ = tokio::time::timeout(THUMB_WAIT, seeding).await;
+        });
     }
 
     pub(crate) fn handle(&self) -> u64 {
@@ -786,7 +823,11 @@ impl Filesystem for DriveFs {
     }
 
     fn opendir(&self, _req: &Request, ino: INodeNo, _flags: OpenFlags, reply: ReplyOpen) {
-        match self.0.node(ino).and_then(|n| self.0.list(&n)) {
+        let listed = self.0.node(ino).and_then(|n| {
+            self.0.wait_thumbnails(&n);
+            self.0.list(&n)
+        });
+        match listed {
             Ok(entries) => {
                 let fh = self.0.handle();
                 lock(&self.0.dirs).insert(fh, Arc::new(entries));

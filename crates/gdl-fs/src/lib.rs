@@ -6,7 +6,7 @@ mod layout;
 mod trash;
 mod write;
 
-pub use fs::{DriveFs, mount};
+pub use fs::{DriveFs, THUMB_WAIT, mount};
 
 #[cfg(test)]
 mod read_tests;

@@ -592,6 +592,10 @@ async fn photo() -> Response {
 async fn thumb(State(shared): Shr, Path(spec): Path<String>) -> Response {
     static PNG: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
     let id = spec.split_once('=').map_or(spec.as_str(), |(id, _)| id);
+    let delay = shared.state().thumb_delay;
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await;
+    }
     if let Some(to) = shared.state().thumb_redirect.clone() {
         return (StatusCode::FOUND, [(header::LOCATION, to)]).into_response();
     }

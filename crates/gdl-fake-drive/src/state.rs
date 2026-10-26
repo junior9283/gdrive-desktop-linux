@@ -136,6 +136,8 @@ pub(crate) struct State {
     origin: Url,
     /// Destino do 302 que a rota de miniaturas devolve, quando definido.
     pub(crate) thumb_redirect: Option<String>,
+    /// Atraso antes de responder cada miniatura (`Fault::DelayThumbs`).
+    pub(crate) thumb_delay: Option<std::time::Duration>,
     pub(crate) files: BTreeMap<String, FileRec>,
     pub(crate) root_id: String,
     pub(crate) email: String,
@@ -173,6 +175,7 @@ impl State {
         let mut state = State {
             origin,
             thumb_redirect: None,
+            thumb_delay: None,
             files: BTreeMap::new(),
             root_id: String::new(),
             email: "teste@example.com".into(),

@@ -47,6 +47,8 @@ pub(crate) struct Mounted {
     pub engine: Arc<Engine>,
     pub fs: DriveFs,
     pub mnt: PathBuf,
+    /// O cache de miniaturas do freedesktop deste teste (`Paths::thumbnails_dir`).
+    pub thumbs: PathBuf,
     _session: fuser::BackgroundSession,
     shutdown: CancellationToken,
     _dir: tempfile::TempDir,
@@ -73,13 +75,14 @@ impl Mounted {
         let engine = Arc::new(engine);
         let mnt = dir.path().join("montagem");
         std::fs::create_dir(&mnt).unwrap();
-        let fs = DriveFs::new(engine.clone(), I18n::new(lang), uid(), gid());
+        let fs = DriveFs::new(engine.clone(), I18n::new(lang), uid(), gid(), mnt.clone());
         let session = mount(fs.clone(), &mnt).unwrap();
         Mounted {
             fake,
             engine,
             fs,
             mnt,
+            thumbs: paths.thumbnails_dir.clone(),
             _session: session,
             shutdown: CancellationToken::new(),
             _dir: dir,

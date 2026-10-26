@@ -302,21 +302,19 @@ async fn account_menu_stays_inside_window() {
         .wait_text(".menu .account-card", "Pessoa de Teste")
         .await;
 
-    let [left, right, width] = until("o menu reposicionado", async || {
+    // O cartão pode alargar de novo depois da primeira medida: vale a posição depois do
+    // reposicionamento, e sem ele o menu fica para fora até o tempo acabar.
+    until("o menu dentro da janela", async || {
         let rect = session
             .eval(
                 "const r = document.querySelector('.menu').getBoundingClientRect(); \
                  return [r.left, r.right, window.innerWidth]",
             )
             .await;
-        serde_json::from_value::<[f64; 3]>(rect).ok()
+        let [left, right, width] = serde_json::from_value::<[f64; 3]>(rect).ok()?;
+        (left >= 0.0 && right <= width).then_some(())
     })
     .await;
-
-    assert!(
-        left >= 0.0 && right <= width,
-        "menu em {left}..{right}, janela {width}"
-    );
 }
 
 /// Os programas de teste não vêm de uma instalação: a CLI recusa, e a tela mostra o motivo e

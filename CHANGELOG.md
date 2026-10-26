@@ -7,6 +7,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Corrigido
+- Compilado sem todas as dependências já baixadas (CI com cache novo), o Sobre saía sem a lista
+  de softwares de terceiros: a lista agora baixa o que falta, sempre com o `Cargo.lock` como está.
+
 ## [0.5.0] - 2026-10-26
 
 ### Adicionado

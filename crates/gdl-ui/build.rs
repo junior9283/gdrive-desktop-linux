@@ -30,8 +30,14 @@ fn main() {
     std::fs::write(out, list.to_string()).expect("gravar third-party.json");
 }
 
-/// O `cargo metadata` do workspace, só com o que vale para a plataforma do build.
+/// O `cargo metadata` do workspace, só com o que vale para a plataforma do build. Ele lê os
+/// manifestos de todas as dependências, até das que este build não baixou: sem rede primeiro e,
+/// faltando alguma, baixando (sempre com o `Cargo.lock` como está).
 fn metadata(workspace: &std::path::Path) -> Result<serde_json::Value, String> {
+    metadata_with(workspace, &["--offline"]).or_else(|_| metadata_with(workspace, &[]))
+}
+
+fn metadata_with(workspace: &std::path::Path, extra: &[&str]) -> Result<serde_json::Value, String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let target = std::env::var("TARGET").map_err(|e| e.to_string())?;
     let output = Command::new(cargo)
@@ -40,10 +46,10 @@ fn metadata(workspace: &std::path::Path) -> Result<serde_json::Value, String> {
             "--format-version",
             "1",
             "--locked",
-            "--offline",
             "--filter-platform",
             &target,
         ])
+        .args(extra)
         .arg("--manifest-path")
         .arg(workspace.join("Cargo.toml"))
         .output()

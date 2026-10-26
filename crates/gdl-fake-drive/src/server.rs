@@ -32,6 +32,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
         .route("/upload/drive/v3/files/{id}", patch(upload_update))
         .route("/upload/drive/v3/files", post(upload_create))
         .route("/oauth2/v3/userinfo", get(userinfo))
+        .route("/thumb/{spec}", get(thumb))
         .route_layer(middleware::from_fn_with_state(
             shared.clone(),
             require_token,
@@ -584,6 +585,24 @@ async fn photo() -> Response {
         0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     ];
     ([(axum::http::header::CONTENT_TYPE, "image/png")], PNG).into_response()
+}
+
+/// Miniatura de um arquivo (`<id>=s<N>`): um PNG 600×400, gerado uma vez. O pedido fica em
+/// `request_log`, de onde os testes conferem o tamanho pedido.
+async fn thumb(State(shared): Shr, Path(spec): Path<String>) -> Response {
+    static PNG: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    let id = spec.split_once('=').map_or(spec.as_str(), |(id, _)| id);
+    if !shared.state().files.contains_key(id) {
+        return not_found(id);
+    }
+    let png = PNG.get_or_init(|| {
+        let img = image::RgbaImage::from_pixel(600, 400, image::Rgba([200, 60, 60, 255]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png)
+            .expect("PNG em memória");
+        out.into_inner()
+    });
+    ([(header::CONTENT_TYPE, "image/png")], png.clone()).into_response()
 }
 
 async fn userinfo(State(shared): Shr) -> Json<Value> {

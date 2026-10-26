@@ -122,6 +122,15 @@ fn received_bytes(resp: &reqwest::Response) -> u64 {
         .map_or(0, |last| last + 1)
 }
 
+/// Quem pode servir imagens (foto da conta, miniaturas): o servidor de imagens do Google, por
+/// HTTPS, ou a mesma origem da API (o Drive simulado dos testes).
+fn image_host_allowed(url: &Url, api_base: &Url) -> bool {
+    let host = url.host_str().unwrap_or_default();
+    let google = url.scheme() == "https"
+        && (host.ends_with(".googleusercontent.com") || host.ends_with(".google.com"));
+    google || url.origin() == api_base.origin()
+}
+
 impl DriveClient {
     pub fn new(base: Url, upload_base: Url, tokens: Arc<dyn AccessTokenProvider>) -> DriveClient {
         let http = crate::http_builder()
@@ -284,9 +293,8 @@ impl DriveClient {
         let url: Url = link
             .parse()
             .map_err(|_| DriveError::Protocol(format!("endereço de foto inválido: {link}")))?;
-        let host = url.host_str().unwrap_or_default();
-        let google = url.scheme() == "https" && host.ends_with(".googleusercontent.com");
-        if !google && url.origin() != self.base.origin() {
+        if !image_host_allowed(&url, &self.base) {
+            let host = url.host_str().unwrap_or_default();
             return Err(DriveError::Protocol(format!("foto fora do Google: {host}")));
         }
         let resp = self.http.get(url).send().await?;
@@ -294,6 +302,56 @@ impl DriveClient {
             return Err(error_from(resp).await);
         }
         Ok(resp.bytes().await?)
+    }
+
+    /// Miniaturas que o Google gerou para os itens de `folder_id` (os sem miniatura ficam de fora).
+    pub async fn thumbnail_links(&self, folder_id: &str) -> Result<Vec<ThumbLink>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Item {
+            id: String,
+            thumbnail_link: Option<String>,
+        }
+        let q = format!("'{folder_id}' in parents and trashed = false");
+        let mut links = Vec::new();
+        self.list(&q, "id,thumbnailLink", 1000, |items: Vec<Item>| {
+            links.extend(items.into_iter().filter_map(|i| {
+                Some(ThumbLink {
+                    id: i.id,
+                    link: i.thumbnail_link?,
+                })
+            }));
+            Ok::<_, DriveError>(true)
+        })
+        .await?;
+        Ok(links)
+    }
+
+    /// Baixa a miniatura de `link` no tamanho `size` (troca o `=s<N>` do fim, ou o acrescenta),
+    /// com o token de acesso. Só aceita o servidor de imagens do Google ou o da API.
+    pub async fn fetch_thumbnail(&self, link: &str, size: u32) -> Result<Bytes> {
+        let url: Url = link
+            .parse()
+            .map_err(|_| DriveError::Protocol(format!("endereço de miniatura inválido: {link}")))?;
+        if !image_host_allowed(&url, &self.base) {
+            let host = url.host_str().unwrap_or_default();
+            return Err(DriveError::Protocol(format!(
+                "miniatura fora do Google: {host}"
+            )));
+        }
+        let mut sized = url.to_string();
+        if let Some(at) = sized.rfind("=s").filter(|&at| {
+            let digits = &sized[at + 2..];
+            !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+        }) {
+            sized.truncate(at);
+        }
+        let sized = format!("{sized}=s{size}");
+        self.call(
+            || self.http.get(&sized),
+            |resp| async move { Ok(resp.bytes().await?) },
+        )
+        .await
     }
 
     /// Todos os itens fora da lixeira, entregues página a página (1000 por página). Para na
@@ -976,6 +1034,99 @@ mod tests {
                 matches!(c.fetch_photo(link).await, Err(DriveError::Protocol(_))),
                 "{link}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn thumbnail_links_lists_only_files_with_thumbnail() {
+        let fake = FakeDrive::start().await;
+        let dir = fake.add_folder(&fake.root_id(), "pasta");
+        let foto = fake.add_file_with_mime(&dir, "foto.jpg", "image/jpeg", vec![1; 10]);
+        fake.add_file_with_mime(&dir, "nota.txt", "text/plain", b"oi".to_vec());
+        fake.add_folder(&dir, "sub");
+        let links = client(&fake).thumbnail_links(&dir).await.unwrap();
+        let link = fake
+            .base_url()
+            .join(&format!("/thumb/{foto}=s220"))
+            .unwrap()
+            .to_string();
+        assert_eq!(links, vec![ThumbLink { id: foto, link }]);
+    }
+
+    #[tokio::test]
+    async fn fetch_thumbnail_asks_requested_size() {
+        let fake = FakeDrive::start().await;
+        let foto = fake.add_file_with_mime(&fake.root_id(), "f.png", "image/png", vec![1; 10]);
+        let c = client(&fake);
+        let links = c.thumbnail_links(&fake.root_id()).await.unwrap();
+        let bytes = c.fetch_thumbnail(&links[0].link, 512).await.unwrap();
+        assert!(bytes.starts_with(b"\x89PNG"));
+        assert_eq!(fake.requests(&format!("/thumb/{foto}=s512")), 1);
+        assert_eq!(fake.requests("/thumb"), 1);
+    }
+
+    #[tokio::test]
+    async fn fetch_thumbnail_without_size_suffix_appends_it() {
+        let fake = FakeDrive::start().await;
+        let foto = fake.add_file_with_mime(&fake.root_id(), "f.png", "image/png", vec![1; 10]);
+        let link = fake.base_url().join(&format!("/thumb/{foto}")).unwrap();
+        client(&fake)
+            .fetch_thumbnail(link.as_str(), 256)
+            .await
+            .unwrap();
+        assert_eq!(fake.requests(&format!("/thumb/{foto}=s256")), 1);
+    }
+
+    #[tokio::test]
+    async fn fetch_thumbnail_sends_the_token() {
+        let fake = FakeDrive::start().await;
+        let foto = fake.add_file_with_mime(&fake.root_id(), "f.png", "image/png", vec![1; 10]);
+        let link = fake
+            .base_url()
+            .join(&format!("/thumb/{foto}=s220"))
+            .unwrap();
+        let c = client_with_token(&fake, "token-invalido");
+        // O primeiro 401 renova o token (o simulado aceita o de teste): prova que o token vai junto.
+        c.fetch_thumbnail(link.as_str(), 512).await.unwrap();
+        assert_eq!(fake.requests("/thumb"), 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_thumbnail_refuses_foreign_host() {
+        let fake = FakeDrive::start().await;
+        let c = client(&fake);
+        for link in [
+            "https://exemplo.com/x=s220",
+            "http://lh3.googleusercontent.com/x",
+            "file:///etc/passwd",
+        ] {
+            assert!(
+                matches!(
+                    c.fetch_thumbnail(link, 512).await,
+                    Err(DriveError::Protocol(_))
+                ),
+                "{link}"
+            );
+        }
+    }
+
+    #[test]
+    fn image_host_rule() {
+        let api: Url = "http://127.0.0.1:9/drive/v3/".parse().unwrap();
+        for ok in [
+            "https://lh3.googleusercontent.com/a=s220",
+            "https://drive.google.com/a",
+            "http://127.0.0.1:9/thumb/x=s220",
+        ] {
+            assert!(image_host_allowed(&ok.parse().unwrap(), &api), "{ok}");
+        }
+        for bad in [
+            "https://googleusercontent.com.evil.com/",
+            "https://evil.com/?a=.google.com",
+            "http://lh3.googleusercontent.com/",
+            "http://127.0.0.1:10/thumb/x",
+        ] {
+            assert!(!image_host_allowed(&bad.parse().unwrap(), &api), "{bad}");
         }
     }
 

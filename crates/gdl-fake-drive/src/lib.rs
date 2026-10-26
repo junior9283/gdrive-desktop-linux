@@ -117,6 +117,17 @@ impl FakeDrive {
             .add(parent, name, "application/octet-stream", bytes, None)
     }
 
+    /// Como `add_file`, mas com o tipo `mime` (as imagens ganham `thumbnailLink`).
+    pub fn add_file_with_mime(
+        &self,
+        parent: &str,
+        name: &str,
+        mime: &str,
+        bytes: Vec<u8>,
+    ) -> String {
+        self.shared.state().add(parent, name, mime, bytes, None)
+    }
+
     pub fn add_gdoc(&self, parent: &str, name: &str, mime: &str) -> String {
         self.shared.state().add(parent, name, mime, vec![], None)
     }

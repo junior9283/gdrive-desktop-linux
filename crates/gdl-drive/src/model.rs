@@ -30,6 +30,14 @@ pub struct RemoteFile {
     pub web_view_link: Option<String>,
 }
 
+/// Endereço da miniatura que o Google gera para um arquivo.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ThumbLink {
+    pub id: String,
+    #[serde(rename = "thumbnailLink")]
+    pub link: String,
+}
+
 /// Item de "Compartilhados comigo", com quem compartilhou e quando.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(from = "RawShared")]

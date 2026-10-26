@@ -54,7 +54,7 @@ pub(crate) struct Shared {
 impl Shared {
     pub(crate) fn new(origin: Url) -> Shared {
         Shared {
-            state: Mutex::new(State::new()),
+            state: Mutex::new(State::new(origin.clone())),
             origin,
             offline: AtomicBool::new(false),
             drop_budget: AtomicI64::new(-1),
@@ -132,6 +132,8 @@ pub(crate) struct Session {
 pub(crate) type SessionRef = Arc<tokio::sync::Mutex<Session>>;
 
 pub(crate) struct State {
+    /// Origem do servidor, para montar os endereços absolutos (miniaturas).
+    origin: Url,
     pub(crate) files: BTreeMap<String, FileRec>,
     pub(crate) root_id: String,
     pub(crate) email: String,
@@ -165,8 +167,9 @@ pub(crate) enum IdRefused {
 }
 
 impl State {
-    fn new() -> State {
+    fn new(origin: Url) -> State {
         let mut state = State {
+            origin,
             files: BTreeMap::new(),
             root_id: String::new(),
             email: "teste@example.com".into(),
@@ -364,6 +367,10 @@ impl State {
             v["size"] = f.content.len().to_string().into();
             v["md5Checksum"] = f.md5.clone().into();
             v["headRevisionId"] = f.head_revision.clone().into();
+        }
+        if f.mime.starts_with("image/") && !f.content.is_empty() {
+            let link = self.origin.join(&format!("thumb/{}=s220", f.id));
+            v["thumbnailLink"] = link.expect("caminho relativo válido").to_string().into();
         }
         if let Some((owner, shared_ms)) = &f.shared {
             v["sharedWithMeTime"] = rfc3339(*shared_ms).into();

@@ -41,6 +41,9 @@ pub enum Fault {
     DelayThumbs(std::time::Duration),
     /// As miniaturas (`/thumb`) respondem o erro `code` da API, até `clear_faults`.
     ThumbStatus(u16),
+    /// As miniaturas (`/thumb`) mandam o começo da imagem e a conexão cai no meio do corpo,
+    /// até `clear_faults`.
+    CutThumbBody,
 }
 
 pub struct FakeDrive {
@@ -249,6 +252,7 @@ impl FakeDrive {
             Fault::Offline => self.shared.offline.store(true, Ordering::SeqCst),
             Fault::DelayThumbs(delay) => self.shared.state().thumb_delay = Some(delay),
             Fault::ThumbStatus(code) => self.shared.state().thumb_status = Some(code),
+            Fault::CutThumbBody => self.shared.state().thumb_cut = true,
         }
     }
 
@@ -259,6 +263,7 @@ impl FakeDrive {
             state.lose_responses = 0;
             state.thumb_delay = None;
             state.thumb_status = None;
+            state.thumb_cut = false;
         }
         self.shared.drop_budget.store(-1, Ordering::SeqCst);
         self.shared.stall.store(false, Ordering::SeqCst);

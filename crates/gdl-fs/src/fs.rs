@@ -57,9 +57,30 @@ fn is_indexer(comm: &str) -> bool {
     INDEXERS.iter().any(|name| comm.starts_with(name))
 }
 
-/// O processo `pid` é um indexador? Sem `/proc` legível (processo que já saiu), não.
+/// Quem pediu (`pid` do FUSE) é um indexador? Sem `/proc` legível (processo que já saiu), não.
 fn opened_by_indexer(pid: u32) -> bool {
-    std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|comm| is_indexer(&comm))
+    opened_by_indexer_in(Path::new("/proc"), pid)
+}
+
+/// Nome (`comm`) do processo da thread `tid`, lido de `proc_root` (o `/proc`). O `comm` da
+/// própria thread é o nome dela ("Thread (pooled)" no Baloo); o do processo vem do `Tgid`.
+fn process_name(proc_root: &Path, tid: u32) -> Option<String> {
+    let status = std::fs::read_to_string(proc_root.join(tid.to_string()).join("status")).ok()?;
+    let tgid: u32 = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Tgid:"))?
+        .trim()
+        .parse()
+        .ok()?;
+    std::fs::read_to_string(proc_root.join(tgid.to_string()).join("comm")).ok()
+}
+
+/// O FUSE informa o ID da thread que chamou, não o do processo: decide pelo nome do processo e,
+/// de quebra, pelo da thread. Erro de leitura é "não": a abertura segue normal.
+fn opened_by_indexer_in(proc_root: &Path, tid: u32) -> bool {
+    let thread = std::fs::read_to_string(proc_root.join(tid.to_string()).join("comm"));
+    thread.is_ok_and(|comm| is_indexer(&comm))
+        || process_name(proc_root, tid).is_some_and(|comm| is_indexer(&comm))
 }
 
 /// Threads do FUSE: fixas, porque ficam paradas em E/S (e na espera das miniaturas), não na CPU.
@@ -986,7 +1007,88 @@ pub fn mount(fs: DriveFs, at: &Path) -> std::io::Result<BackgroundSession> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_indexer;
+    use std::path::Path;
+
+    use super::{is_indexer, opened_by_indexer_in, process_name};
+
+    /// `/proc` falso: a thread `tid` (com o nome `thread`) do processo `tgid` (com o nome `name`).
+    fn fake_proc(root: &Path, tid: u32, thread: &str, tgid: u32, name: &str) {
+        let task = root.join(tid.to_string());
+        std::fs::create_dir_all(&task).unwrap();
+        std::fs::write(task.join("comm"), format!("{thread}\n")).unwrap();
+        let status = format!(
+            "Name:\t{thread}\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t{tgid}\nNgid:\t0\nPid:\t{tid}\n"
+        );
+        std::fs::write(task.join("status"), status).unwrap();
+        let process = root.join(tgid.to_string());
+        std::fs::create_dir_all(&process).unwrap();
+        std::fs::write(process.join("comm"), format!("{name}\n")).unwrap();
+    }
+
+    /// Bug: o FUSE informa o ID da thread que chamou, e o `comm` dela é o nome da thread
+    /// ("Thread (pooled)" no Baloo, "pool-tracker-mi" no Tracker): o indexador passava.
+    #[test]
+    fn indexer_is_recognized_by_the_process_of_the_thread() {
+        let proc_root = tempfile::tempdir().unwrap();
+        fake_proc(
+            proc_root.path(),
+            4321,
+            "Thread (pooled)",
+            4000,
+            "baloo_file",
+        );
+        fake_proc(
+            proc_root.path(),
+            5321,
+            "pool-tracker-mi",
+            5000,
+            "tracker-miner-f",
+        );
+        fake_proc(proc_root.path(), 6321, "pool-dolphin", 6000, "dolphin");
+        assert_eq!(
+            process_name(proc_root.path(), 4321)
+                .as_deref()
+                .map(str::trim),
+            Some("baloo_file")
+        );
+        assert!(opened_by_indexer_in(proc_root.path(), 4321));
+        assert!(opened_by_indexer_in(proc_root.path(), 5321));
+        assert!(!opened_by_indexer_in(proc_root.path(), 6321));
+    }
+
+    /// Sem `/proc` legível, ou com `status` sem `Tgid`, não é indexador (segue normal).
+    #[test]
+    fn unreadable_proc_is_not_an_indexer() {
+        let proc_root = tempfile::tempdir().unwrap();
+        assert!(!opened_by_indexer_in(proc_root.path(), 1));
+        assert_eq!(process_name(proc_root.path(), 1), None);
+        let task = proc_root.path().join("7");
+        std::fs::create_dir_all(&task).unwrap();
+        std::fs::write(task.join("comm"), "Thread (pooled)\n").unwrap();
+        std::fs::write(task.join("status"), "Name:\tThread (pooled)\n").unwrap();
+        assert_eq!(process_name(proc_root.path(), 7), None);
+        assert!(!opened_by_indexer_in(proc_root.path(), 7));
+    }
+
+    /// No `/proc` de verdade: pelo ID de uma thread com nome próprio sai o nome do processo.
+    #[test]
+    fn real_thread_id_gives_the_process_name() {
+        let expected = std::fs::read_to_string("/proc/self/comm").unwrap();
+        let (name, thread) = std::thread::Builder::new()
+            .name("Thread (pooled)".into())
+            .spawn(|| {
+                // `/proc/thread-self` aponta para `<tgid>/task/<tid>`.
+                let link = std::fs::read_link("/proc/thread-self").unwrap();
+                let tid: u32 = link.file_name().unwrap().to_str().unwrap().parse().unwrap();
+                let thread = std::fs::read_to_string(format!("/proc/{tid}/comm")).unwrap();
+                (process_name(Path::new("/proc"), tid), thread)
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(thread.trim(), "Thread (pooled)");
+        assert_eq!(name.as_deref(), Some(expected.as_str()));
+    }
 
     #[test]
     fn indexers_are_recognized_by_comm() {

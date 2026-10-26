@@ -135,16 +135,24 @@ Tomadas depois da leitura de um revisor; o usuário pode mudar qualquer uma.
 
 ## Ajustes da revisão final
 
-- **Falhas permanentes viram memória:** imagem que não decodifica, link recusado
-  (`DriveError::Protocol`) e HTTP 3xx/403/404 ao baixar gravam a memória sem PNG (como o item
-  sem miniatura); uma versão nova do arquivo tenta de novo. Rede, 5xx, 429 e cancelamento ficam
-  sem memória.
+- **Falhas permanentes viram memória:** ao baixar, HTTP 3xx (redirecionamento não é seguido),
+  403 que não é de taxa nem de cota, 404/410, imagem ilegível (não decodifica) e link recusado
+  (fora do Google; `DriveError::RefusedLink`) gravam a memória sem PNG (como o item sem
+  miniatura); uma versão nova do arquivo tenta de novo.
+- **Falhas passageiras ficam sem memória** (a próxima abertura tenta de novo): sem rede, queda
+  ou timeout no meio do corpo da imagem (o reqwest chama de erro de decodificação; vira
+  `DriveError::Offline`), 5xx, 429, 403 de taxa (`userRateLimitExceeded`/`rateLimitExceeded`)
+  ou de cota (`storageQuotaExceeded`/`quotaExceeded`, `dailyLimitExceeded`,
+  `downloadQuotaExceeded`) e cancelamento.
 - **Adotar PNGs existentes** (`Thumb::MTime` e `Thumb::Size` iguais aos do arquivo) só quando não
   há memória do item; com memória de outra revisão, baixa de novo.
 - **Versão do Google à frente do banco:** a listagem traz o `modifiedTime`; se ele difere do
   banco (o feed de mudanças ainda não chegou), o item é pulado sem memória.
 - **Indexadores não semeiam:** `opendir` de `baloo_file`, `tracker-miner`, `localsearch`,
-  `updatedb`, `plocate` ou `mlocate` (pelo `/proc/<pid>/comm`) só lista.
+  `updatedb`, `plocate` ou `mlocate` só lista. O FUSE informa o ID da *thread* que chamou (cujo
+  `comm` é o nome da thread, como "Thread (pooled)" no Baloo): o nome vem do processo, pelo
+  `Tgid:` de `/proc/<tid>/status` e `/proc/<tgid>/comm` (o `comm` da thread também conta).
+  Qualquer erro de leitura conta como "não é indexador".
 - **Reabrir durante a semeadura não espera de novo:** só quem a iniciou espera o prazo.
 - **Parar o motor** cancela as semeaduras em curso, sem apagar nada.
 - **Log sem o `thumbnailLink`:** as mensagens mostram no máximo o host ou o ID do arquivo.

@@ -46,11 +46,12 @@ fn needs_seed(
 }
 
 /// Falha de download que não passa esperando (link que não é de imagem do Google, item sumido,
-/// sem permissão, redirecionamento): o Google responderia igual na próxima abertura.
+/// sem permissão, redirecionamento): o Google responderia igual na próxima abertura. Rede (até
+/// a queda no meio da imagem), erro do servidor e limite de taxa ou de cota são passageiros.
 fn permanent(e: &DriveError) -> bool {
     matches!(
         e,
-        DriveError::Protocol(_)
+        DriveError::RefusedLink(_)
             | DriveError::NotFound
             | DriveError::PermissionDenied
             | DriveError::Http(300..=399)
@@ -710,12 +711,12 @@ mod tests {
         assert!(s.engine.store.all_thumbs().unwrap().is_empty());
     }
 
-    /// Falha que não passa esperando (redirecionamento, 403, 404): lembrada sem PNG, como o item
+    /// Falha que não passa esperando (redirecionamento, 403, 404, 410): lembrada sem PNG, como o item
     /// sem miniatura; a próxima abertura não chama a API. Antes, nada ficava na memória e cada
     /// abertura da pasta repetia a listagem e os downloads condenados.
     #[tokio::test]
     async fn permanent_thumbnail_errors_are_remembered() {
-        for fault in ["redirecionamento", "403", "404"] {
+        for fault in ["redirecionamento", "403", "404", "410"] {
             let (s, [a, b, _]) = setup().await;
             match fault {
                 "redirecionamento" => s.fake.redirect_thumbs_to("http://exemplo.invalid/x"),
@@ -757,6 +758,24 @@ mod tests {
             assert_eq!(s.fake.requests("/thumb"), thumbs + 2, "{code}");
             assert_eq!(s.pngs(), 6, "{code}");
         }
+    }
+
+    /// Bug: a conexão que caía no meio do corpo virava `Protocol` (o reqwest chama de erro de
+    /// decodificação) e a miniatura ficava lembrada como inexistente até o arquivo mudar.
+    #[tokio::test]
+    async fn thumbnail_body_cut_is_not_remembered() {
+        let (s, [a, b, _]) = setup().await;
+        s.fake.inject(Fault::CutThumbBody);
+        s.seed().await;
+        assert_eq!(s.pngs(), 0);
+        for id in [&a, &b] {
+            assert!(s.engine.store.thumb(&ItemId(id.clone())).unwrap().is_none());
+        }
+        let thumbs = s.fake.requests("/thumb");
+        s.fake.clear_faults();
+        s.seed().await;
+        assert_eq!(s.fake.requests("/thumb"), thumbs + 2);
+        assert_eq!(s.pngs(), 6);
     }
 
     /// Imagem que não decodifica: o Google mandaria a mesma de novo; lembrada sem PNG.

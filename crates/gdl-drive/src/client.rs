@@ -312,10 +312,10 @@ impl DriveClient {
     fn checked_image_url(&self, link: &str, what: &str) -> Result<Url> {
         let url: Url = link
             .parse()
-            .map_err(|_| DriveError::Protocol(format!("endereço de {what} inválido")))?;
+            .map_err(|_| DriveError::RefusedLink(format!("endereço de {what} inválido")))?;
         if !image_host_allowed(&url, &self.base) {
             let host = url.host_str().unwrap_or_default();
-            return Err(DriveError::Protocol(format!(
+            return Err(DriveError::RefusedLink(format!(
                 "{what} fora do Google: {host}"
             )));
         }
@@ -367,7 +367,9 @@ impl DriveClient {
         let sized = format!("{base}=s{size}");
         self.call(
             || self.image_http.get(&sized),
-            |resp| async move { Ok(resp.bytes().await?) },
+            // Falha ao ler o corpo é queda ou timeout da rede no meio da imagem; o reqwest a
+            // chama de erro de decodificação, que viraria `Protocol` (falha permanente).
+            |resp| async move { resp.bytes().await.map_err(|_| DriveError::Offline) },
         )
         .await
     }
@@ -1049,7 +1051,7 @@ mod tests {
             "file:///etc/passwd",
         ] {
             assert!(
-                matches!(c.fetch_photo(link).await, Err(DriveError::Protocol(_))),
+                matches!(c.fetch_photo(link).await, Err(DriveError::RefusedLink(_))),
                 "{link}"
             );
         }
@@ -1121,6 +1123,21 @@ mod tests {
         assert_eq!(fake.requests("/thumb"), 2);
     }
 
+    /// Queda no meio do corpo é rede, não resposta ilegível: o reqwest a entrega como erro de
+    /// decodificação, e a miniatura ficava marcada como inexistente até o arquivo mudar.
+    #[tokio::test]
+    async fn fetch_thumbnail_body_cut_is_offline() {
+        let fake = FakeDrive::start().await;
+        let foto = fake.add_file_with_mime(&fake.root_id(), "f.png", "image/png", vec![1; 10]);
+        let link = fake
+            .base_url()
+            .join(&format!("/thumb/{foto}=s220"))
+            .unwrap();
+        fake.inject(Fault::CutThumbBody);
+        let result = client(&fake).fetch_thumbnail(link.as_str(), 512).await;
+        assert!(matches!(result, Err(DriveError::Offline)), "{result:?}");
+    }
+
     #[tokio::test]
     async fn fetch_thumbnail_refuses_foreign_host() {
         let fake = FakeDrive::start().await;
@@ -1133,7 +1150,7 @@ mod tests {
             assert!(
                 matches!(
                     c.fetch_thumbnail(link, 512).await,
-                    Err(DriveError::Protocol(_))
+                    Err(DriveError::RefusedLink(_))
                 ),
                 "{link}"
             );
@@ -1149,7 +1166,7 @@ mod tests {
             "https://lh3.googleusercontent.com:99999/caminho-secreto=s220",
             "https://exemplo.com/caminho-secreto=s220",
         ] {
-            let Err(DriveError::Protocol(msg)) = c.fetch_thumbnail(link, 512).await else {
+            let Err(DriveError::RefusedLink(msg)) = c.fetch_thumbnail(link, 512).await else {
                 panic!("{link} deveria ser recusado");
             };
             assert!(!msg.contains("caminho-secreto"), "{msg}");

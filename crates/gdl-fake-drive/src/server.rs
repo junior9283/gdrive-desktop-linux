@@ -612,6 +612,21 @@ async fn thumb(State(shared): Shr, Path(spec): Path<String>) -> Response {
             .expect("PNG em memória");
         out.into_inner()
     });
+    if shared.state().thumb_cut {
+        // Metade do PNG e um erro no fluxo: o servidor derruba a conexão no meio do corpo. A
+        // pausa deixa o cabeçalho e a metade saírem antes (erro imediato descartaria a resposta).
+        let half = Bytes::copy_from_slice(&png[..png.len() / 2]);
+        let cut = async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            Err(std::io::Error::other(
+                "conexão derrubada no meio da miniatura",
+            ))
+        };
+        let parts =
+            futures_util::stream::once(async { Ok(half) }).chain(futures_util::stream::once(cut));
+        let body = Body::from_stream(parts);
+        return ([(header::CONTENT_TYPE, "image/png")], body).into_response();
+    }
     ([(header::CONTENT_TYPE, "image/png")], png.clone()).into_response()
 }
 

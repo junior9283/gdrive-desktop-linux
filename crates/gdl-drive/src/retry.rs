@@ -33,6 +33,9 @@ pub enum DriveError {
     Http(u16),
     #[error("resposta inesperada do Google Drive: {0}")]
     Protocol(String),
+    /// Link de imagem (foto da conta, miniatura) que não é do Google: nem chega a ser pedido.
+    #[error("link de imagem recusado: {0}")]
+    RefusedLink(String),
     #[error("erro ao ler o arquivo local: {0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]

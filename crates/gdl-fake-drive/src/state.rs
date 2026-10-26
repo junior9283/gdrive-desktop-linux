@@ -140,6 +140,8 @@ pub(crate) struct State {
     pub(crate) thumb_delay: Option<std::time::Duration>,
     /// Erro de cada miniatura (`Fault::ThumbStatus`).
     pub(crate) thumb_status: Option<u16>,
+    /// Corpo de cada miniatura cortado no meio (`Fault::CutThumbBody`).
+    pub(crate) thumb_cut: bool,
     pub(crate) files: BTreeMap<String, FileRec>,
     pub(crate) root_id: String,
     pub(crate) email: String,
@@ -179,6 +181,7 @@ impl State {
             thumb_redirect: None,
             thumb_delay: None,
             thumb_status: None,
+            thumb_cut: false,
             files: BTreeMap::new(),
             root_id: String::new(),
             email: "teste@example.com".into(),

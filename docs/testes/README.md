@@ -168,6 +168,7 @@ o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$G
 | Pesquisa sem rede travava por um minuto | a pesquisa da API seguia o recuo do cliente | prazo de 2,5 s para a API (`SEARCH_API_WAIT`) | `search_does_not_wait_long_for_a_stuck_network` | chamada interativa precisa de prazo próprio; teste de prazo com limite fixo, não derivado da constante |
 | "Problemas comuns" do guia mostrava `[object HTMLElement]` | `el()` achata os filhos só um nível; `map` devolvia pares `[dt, dd]` dentro de outra lista | `flatMap` | e2e `onboarding_logs_in_with_client_id` conta os `.troubles dt` | teste de unidade do modelo não vê o DOM: confira a tela (captura no Xvfb) |
 | e2e do primeiro uso falhava 1 em 4 ("sem o link de login") | o clique em "Gerar link" chegava antes do link, com o botão desabilitado | o teste espera o botão habilitar | `onboarding_logs_in_with_client_id` (30 de 30) | clique em elemento desabilitado não dá erro: espere o estado |
+| Janela recém-instalada: "o serviço não está respondendo" | o barramento da sessão (dbus-broker) só lê as pastas de ativação ao iniciar; a do serviço era nova | `install-dev.sh` chama `ReloadConfig` no barramento da sessão | `activation_reloads_systemd_and_the_session_bus` | instalar ativação D-Bus sem root exige reler a configuração do barramento, como o `daemon-reload` do systemd |
 
 ## Teste manual com conta real
 

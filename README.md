@@ -4,7 +4,7 @@
 
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.2.2-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.2.3-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-interface%20(pr%C3%A9via)-orange)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)

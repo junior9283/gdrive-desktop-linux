@@ -7,6 +7,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.2.3] - 2026-10-26
+
+### Corrigido
+- Depois da instalação, a janela dizia que o serviço não estava respondendo até a próxima sessão:
+  o barramento da sessão não conhecia a ativação recém-instalada. `install-dev.sh` agora pede ao
+  D-Bus que releia a configuração.
+
 ## [0.2.2] - 2026-10-26
 
 ### Mudado

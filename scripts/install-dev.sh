@@ -6,8 +6,8 @@
 #   scripts/install-dev.sh [--prefix DIR] [--from DIR] [--dry-run] [--no-activate]
 #
 # --from usa os programas já compilados em DIR (sem ele, compila com `cargo build --release`);
-# --dry-run só lista o que instalaria; --no-activate não avisa o systemd nem atualiza os bancos
-# de tipos e de aplicativos.
+# --dry-run só lista o que instalaria; --no-activate não avisa o systemd nem o D-Bus nem atualiza
+# os bancos de tipos e de aplicativos.
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 prefix="$HOME/.local" from="" dry=false activate=true
@@ -86,4 +86,7 @@ update-mime-database "$share/mime" >/dev/null 2>&1 || true
 update-desktop-database "$share/applications" >/dev/null 2>&1 || true
 gtk-update-icon-cache -q -t "$share/icons/hicolor" >/dev/null 2>&1 || true
 systemctl --user daemon-reload || true
+# Sem isto, o barramento da sessão só conhece a ativação nova na próxima sessão.
+busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig >/dev/null ||
+  echo "aviso: o D-Bus não releu a configuração; se a janela disser que o serviço não responde, saia e entre de novo na sessão" >&2
 echo "Pronto. Abra \"Google Drive\" no menu de aplicativos (ou rode $bin/gdrive-desktop-linux-tray)."

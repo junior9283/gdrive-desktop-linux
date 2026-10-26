@@ -30,16 +30,28 @@ fn repo() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new("sh")
+    run_with(args, None)
+}
+
+/// Roda o `install-dev.sh` com `args` e, se dado, outro `PATH`.
+fn run_with(args: &[&str], path: Option<&str>) -> Output {
+    let mut command = Command::new("sh");
+    command
         .arg(repo().join("scripts/install-dev.sh"))
-        .args(args)
-        .output()
-        .unwrap()
+        .args(args);
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    command.output().unwrap()
 }
 
 /// Roda o `install-dev.sh` com `args` e devolve o que ele escreveu.
 fn install(args: &[&str]) -> String {
-    let out = run(args);
+    succeeded(run(args))
+}
+
+/// Confere que a instalação deu certo e devolve o que ela escreveu.
+fn succeeded(out: Output) -> String {
     assert!(
         out.status.success(),
         "{}",
@@ -153,6 +165,44 @@ fn removes_the_old_scalable_app_icon() {
     install(&[args.as_slice(), &["--no-activate"]].concat());
 
     assert!(!old.exists());
+}
+
+/// Sem reler a configuração, o barramento da sessão não conhece a ativação recém-instalada e a
+/// janela fica em "o serviço não está respondendo" até a próxima sessão.
+#[test]
+fn activation_reloads_systemd_and_the_session_bus() {
+    let dir = tempfile::tempdir().unwrap();
+    let (bins, prefix) = (fake_bins(dir.path()), dir.path().join("pfx"));
+    // systemctl e busctl de mentira, que anotam a chamada em vez de mexer na sessão de verdade.
+    let fakes = dir.path().join("comandos");
+    let log = dir.path().join("chamadas");
+    std::fs::create_dir_all(&fakes).unwrap();
+    for command in ["systemctl", "busctl"] {
+        let path = fakes.join(command);
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\necho {command} \"$@\" >> '{}'\n", log.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!("{}:{}", fakes.display(), std::env::var("PATH").unwrap());
+
+    succeeded(run_with(
+        &[
+            "--prefix",
+            prefix.to_str().unwrap(),
+            "--from",
+            bins.to_str().unwrap(),
+        ],
+        Some(&path),
+    ));
+
+    assert_eq!(
+        read(log),
+        "systemctl --user daemon-reload\n\
+         busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig\n"
+    );
 }
 
 #[test]

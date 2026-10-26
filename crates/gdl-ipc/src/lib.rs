@@ -45,6 +45,17 @@ pub async fn claim_name(conn: &zbus::Connection, name: &str) -> zbus::Result<boo
     }
 }
 
+/// Logo depois de instalar o pacote, o barramento da sessão (o dbus-broker só lê as pastas de
+/// ativação ao iniciar) ainda não sabe abrir o serviço: pede que ele releia a configuração.
+pub async fn ensure_activatable(conn: &zbus::Connection) -> zbus::Result<()> {
+    let bus = zbus::fdo::DBusProxy::new(conn).await?;
+    let names = bus.list_activatable_names().await?;
+    if !names.iter().any(|name| name.as_str() == BUS_NAME) {
+        bus.reload_config().await?;
+    }
+    Ok(())
+}
+
 /// Os avisos de que o nome do serviço ficou sem dono (o serviço saiu ou caiu), vindos do barramento.
 pub async fn service_lost(
     conn: &zbus::Connection,

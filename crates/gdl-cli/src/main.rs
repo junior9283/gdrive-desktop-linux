@@ -116,6 +116,8 @@ fn absolute(path: &Path) -> Res<String> {
 
 async fn service(command: Command, i18n: &I18n) -> Res {
     let conn = zbus::Connection::session().await?;
+    // Uma falha aqui aparece no pedido ao serviço, com a mensagem de sempre.
+    let _ = gdl_ipc::ensure_activatable(&conn).await;
     let proxy = ServiceProxy::new(&conn).await?;
     match command {
         Command::Login {

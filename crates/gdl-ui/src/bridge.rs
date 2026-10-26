@@ -82,6 +82,8 @@ fn wrong(key: &str) -> UiError {
 
 impl Bridge {
     pub async fn new(conn: &Connection) -> zbus::Result<Bridge> {
+        // Sem a releitura, a janela mostra "o serviço não está respondendo" (o aviso já cobre a falha).
+        let _ = gdl_ipc::ensure_activatable(conn).await;
         Ok(Bridge {
             service: ServiceProxy::new(conn).await?,
             up: AtomicBool::new(true),

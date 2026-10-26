@@ -264,6 +264,9 @@ async fn run() -> Result<(), Error> {
     .assume_sni_available(true)
     .spawn()
     .await?;
+    if let Err(e) = gdl_ipc::ensure_activatable(&conn).await {
+        tracing::warn!(erro = %e, "o barramento não releu a configuração");
+    }
     let service = ServiceProxy::new(&conn).await?;
     let mut changes = service.receive_status_changed().await?;
     let mut quitting = service.receive_quitting().await?;

@@ -81,7 +81,7 @@ especificação em [`docs/`](docs/).
 A especificação completa está em
 [`docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md`](docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md).
 
-## Como experimentar a 0.2
+## Como instalar
 
 A 0.2 traz a interface: ícone na bandeja, janela principal, primeiro uso com login, preferências,
 pesquisa rápida, lista de erros e arquivos off-line. É uma prévia para testes; mantenha cópia do
@@ -95,7 +95,22 @@ que for importante.
 |---|---|---|
 | ![Pesquisa rápida com dois resultados](docs/imagens/pesquisa.png) | ![Uso do disco e itens off-line](docs/imagens/arquivos-off-line.png) | ![Aba Google Drive das preferências](docs/imagens/preferencias.png) |
 
-**1. Dependências** (Rust 1.99 ou mais novo, FUSE 3 e as bibliotecas da janela):
+**1. Instalar.** Baixe da [página de releases](https://github.com/junior9283/gdrive-desktop-linux/releases/latest)
+o arquivo da sua distribuição (64 bits, x86_64):
+
+| Distribuição | Arquivo | Como instalar |
+|---|---|---|
+| Ubuntu 22.04+, Debian 12+, Mint, Pop!_OS | `.deb` | `sudo apt install ./gdrive-desktop-linux_*.deb` |
+| Fedora, Nobara, openSUSE | `.rpm` | `sudo dnf install ./gdrive-desktop-linux-*.rpm` (openSUSE: `sudo zypper install --allow-unsigned-rpm ./…rpm`) |
+| Arch, Manjaro, EndeavourOS, CachyOS | `.pkg.tar.zst` | `sudo pacman -U ./gdrive-desktop-linux-*.pkg.tar.zst` |
+| Qualquer outra | `.tar.gz` | instale o FUSE 3 e o WebKitGTK 4.1 da distribuição; depois `tar -xzf gdrive-desktop-linux-*.tar.gz` e `./gdrive-desktop-linux-*/install.sh` (instala em `~/.local`, sem root) |
+
+O `SHA256SUMS` do release confere os arquivos baixados (`sha256sum -c --ignore-missing SHA256SUMS`).
+
+<details>
+<summary>Ou compilar o código</summary>
+
+Dependências (Rust 1.99 ou mais novo, FUSE 3 e as bibliotecas da janela):
 
 ```bash
 # Fedora/Nobara
@@ -104,7 +119,7 @@ sudo dnf install fuse3 webkit2gtk4.1-devel libsoup3-devel librsvg2-devel dbus-de
 sudo apt install fuse3 libwebkit2gtk-4.1-dev librsvg2-dev libdbus-1-dev build-essential
 ```
 
-**2. Compilar e instalar** para o seu usuário, sem root (em `~/.local`):
+Compilar e instalar para o seu usuário, sem root (em `~/.local`):
 
 ```bash
 scripts/install-dev.sh                 # compila em release e instala
@@ -116,7 +131,12 @@ Ele instala os quatro programas (serviço, CLI, bandeja e janela), o serviço do
 a ativação do serviço e da janela pelo D-Bus, o atalho no menu de aplicativos, a abertura dos
 ponteiros `.gdoc` e os ícones.
 
-**3. Abrir:** procure **Google Drive** no menu de aplicativos (ou rode
+`scripts/package.sh dist` gera os mesmos instaladores do release (precisa do
+[nfpm](https://nfpm.goreleaser.com)).
+
+</details>
+
+**2. Abrir:** procure **Google Drive** no menu de aplicativos (ou rode
 `gdrive-desktop-linux-tray`). A bandeja liga o serviço e, sem conta, abre o primeiro uso, que
 guia a criação do seu Client ID parte por parte, com botões que abrem cada página do Google Cloud
 e copiam os valores (o mesmo passo a passo do [guia](docs/guia-client-id.md)). Depois, cole o

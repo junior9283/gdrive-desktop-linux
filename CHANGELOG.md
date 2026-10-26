@@ -7,6 +7,20 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.3.2] - 2026-10-26
+
+### Adicionado
+- Instaladores em cada release do GitHub: `.deb` (Ubuntu 22.04+, Debian 12+, Mint), `.rpm`
+  (Fedora, openSUSE), `.pkg.tar.zst` (Arch, Manjaro) e um `.tar.gz` para qualquer distribuição,
+  com `SHA256SUMS`. Uma tag de versão gera, testa a instalação de cada um na sua distribuição e
+  publica o release.
+- `scripts/package.sh` gera os mesmos instaladores localmente; `install-dev.sh --destdir`.
+
+### Corrigido
+- Logo depois de instalar, a janela dizia que o serviço não respondia até sair e entrar de novo na
+  sessão (o barramento só lê os serviços novos ao iniciar): a bandeja, a janela e a CLI pedem que
+  ele releia a configuração quando não conhecem o serviço.
+
 ## [0.3.1] - 2026-10-26
 
 ### Corrigido
@@ -247,7 +261,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.1...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.2.5...v0.3.0
 [0.2.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.1.0...v0.2.0

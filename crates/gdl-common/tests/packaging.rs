@@ -146,6 +146,37 @@ fn installs_with_the_paths_of_the_prefix() {
     }
 }
 
+/// Os pacotes: tudo em `<destdir>/usr`, apontando para `/usr`, sem avisar o systemd nem o D-Bus
+/// (o "Pronto." só sai depois de avisá-los).
+#[test]
+fn destdir_stages_files_for_the_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let (bins, stage) = (fake_bins(dir.path()), dir.path().join("stage"));
+
+    let out = install(&[
+        "--prefix",
+        "/usr",
+        "--destdir",
+        stage.to_str().unwrap(),
+        "--from",
+        bins.to_str().unwrap(),
+    ]);
+
+    for file in PROGRAMS
+        .iter()
+        .map(|p| format!("bin/{p}"))
+        .chain(FILES.iter().map(|f| f.to_string()))
+    {
+        assert!(stage.join("usr").join(&file).is_file(), "{file}");
+    }
+    let unit = read(stage.join("usr").join(FILES[0]));
+    assert!(
+        unit.contains("ExecStart=\"/usr/bin/gdrive-desktop-linuxd\"\n"),
+        "{unit}"
+    );
+    assert!(!out.contains("Pronto."), "{out}");
+}
+
 /// O ícone do app virou PNG: o SVG de uma instalação anterior sai, senão o tema o prefere.
 #[test]
 fn removes_the_old_scalable_app_icon() {

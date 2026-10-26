@@ -3,17 +3,19 @@
 # usuário (systemd), a ativação do serviço e da janela pelo D-Bus, o .desktop (menu e ponteiros
 # dos Documentos Google), os tipos dos ponteiros e os ícones.
 #
-#   scripts/install-dev.sh [--prefix DIR] [--from DIR] [--dry-run] [--no-activate]
+#   scripts/install-dev.sh [--prefix DIR] [--destdir DIR] [--from DIR] [--dry-run] [--no-activate]
 #
 # --from usa os programas já compilados em DIR (sem ele, compila com `cargo build --release`);
 # --dry-run só lista o que instalaria; --no-activate não avisa o systemd nem o D-Bus nem atualiza
-# os bancos de tipos e de aplicativos.
+# os bancos de tipos e de aplicativos; --destdir grava em DIR/<prefixo> os arquivos que vão funcionar
+# em <prefixo> (para montar os pacotes; implica --no-activate).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
-prefix="$HOME/.local" from="" dry=false activate=true
+prefix="$HOME/.local" destdir="" from="" dry=false activate=true
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=$2; shift 2 ;;
+    --destdir) destdir=$2; activate=false; shift 2 ;;
     --from) from=$2; shift 2 ;;
     --dry-run) dry=true; shift ;;
     --no-activate) activate=false; shift ;;
@@ -37,26 +39,26 @@ from=${from:-$repo/target/release}
 
 # install_as <modo> <origem> <destino>: copia como está.
 install_as() {
-  echo "instala $3"
-  $dry || install -Dm"$1" "$2" "$3"
+  echo "instala $destdir$3"
+  $dry || install -Dm"$1" "$2" "$destdir$3"
 }
 
 # remove <arquivo>: tira um arquivo de uma instalação anterior, se houver.
 remove() {
-  [ -e "$1" ] || return 0
-  echo "remove $1"
-  $dry || rm -f "$1"
+  [ -e "$destdir$1" ] || return 0
+  echo "remove $destdir$1"
+  $dry || rm -f "$destdir$1"
 }
 
 # put <origem> <destino>: copia um arquivo com Exec, trocando /usr/bin/<programa> pelo programa
 # instalado, entre aspas.
 put() {
-  echo "instala $2"
+  echo "instala $destdir$2"
   $dry && return
-  mkdir -p "$(dirname "$2")"
-  sed "s|/usr/bin/\([a-z-]*\)|\"$bin/\1\"|g" "$1" > "$2.tmp"
-  chmod 644 "$2.tmp"
-  mv "$2.tmp" "$2"
+  mkdir -p "$(dirname "$destdir$2")"
+  sed "s|/usr/bin/\([a-z-]*\)|\"$bin/\1\"|g" "$1" > "$destdir$2.tmp"
+  chmod 644 "$destdir$2.tmp"
+  mv "$destdir$2.tmp" "$destdir$2"
 }
 
 for program in $programs; do

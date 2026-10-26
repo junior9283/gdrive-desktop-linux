@@ -1,0 +1,105 @@
+name: Release
+
+# Uma tag vX.Y.Z gera os instaladores, testa cada um na sua distribuição e publica o release com as
+# notas do CHANGELOG. Rodado à mão (workflow_dispatch), só gera e testa, sem publicar.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Só leitura; o job que publica pede a escrita para si.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # A glibc mais antiga que o Tauri 2 aceita: os programas rodam do Ubuntu 22.04 e do Debian 12
+    # em diante, e nas distribuições mais novas.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      # Antes de compilar: uma tag errada falha em segundos.
+      - name: A tag é a versão do Cargo.toml
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          test "v$version" = "$GITHUB_REF_NAME"
+      - name: Dependências do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev
+      # De terceiros: fixada no commit, já que o que ela gera vai para o release.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+      - name: Instaladores
+        run: scripts/package.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # Cada pacote instalado do zero, com as dependências vindas da própria distribuição.
+  install:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:22.04
+            install: apt-get update && apt-get install -y ./dist/*.deb
+          - image: debian:12
+            install: apt-get update && apt-get install -y ./dist/*.deb
+          - image: fedora:latest
+            install: dnf install -y ./dist/*.rpm
+          - image: opensuse/tumbleweed
+            install: zypper --non-interactive install --allow-unsigned-rpm ./dist/*.rpm
+          - image: archlinux:latest
+            install: pacman -Syu --noconfirm && pacman -U --noconfirm ./dist/*.pkg.tar.zst
+          # O .tar.gz não traz as dependências: elas vêm do sistema, como diz o README.
+          - image: ubuntu:22.04
+            install: >-
+              apt-get update && apt-get install -y fuse3 libwebkit2gtk-4.1-0 &&
+              tar -xzf dist/*.tar.gz && sh gdrive-desktop-linux-*/install.sh --prefix /usr/local --no-activate
+    container: ${{ matrix.image }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Instala
+        run: ${{ matrix.install }}
+      - name: Os programas abrem
+        run: |
+          gdrive-desktop-linux --version
+          # A janela carrega as bibliotecas dela (sem tela, só confere que nenhuma falta).
+          ! ldd "$(command -v gdrive-desktop-linux-ui)" | grep 'not found'
+
+  publish:
+    needs: install
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          # As notas: a seção da versão no CHANGELOG, sem o título.
+          awk -v head="## [$version]" 'index($0, head) == 1 { on = 1; next } /^## \[/ { on = 0 } on' \
+            CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md

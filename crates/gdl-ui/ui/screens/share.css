@@ -1,0 +1,73 @@
+/* Compartilhar: adicionar pessoas, quem tem acesso (rola), o acesso geral e as ações. */
+
+.share {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100vh;
+  padding: 24px;
+}
+
+/* Só a lista de pessoas encolhe (e rola) quando falta altura. */
+.share > * {
+  flex-shrink: 0;
+}
+
+.share h1 {
+  margin: 0;
+}
+
+.share h2 {
+  font: var(--md-title-small);
+  margin: 4px 0 0;
+}
+
+.share .add,
+.share .general > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.share .row {
+  display: flex;
+  gap: 8px;
+}
+
+.share .emails,
+.share textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+.share .send {
+  align-self: flex-end;
+}
+
+.share .people {
+  flex-shrink: 1;
+  overflow: auto;
+  min-height: 64px;
+}
+
+.share .copy-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.share .general {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.share .general p {
+  margin: 0;
+}
+
+.share .actions {
+  margin-top: auto;
+  justify-content: space-between;
+}

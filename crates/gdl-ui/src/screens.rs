@@ -34,7 +34,7 @@ pub const SCREENS: [Screen; 11] = [
     screen("notification-settings", 480.0, 520.0),
     screen("uninstall", 520.0, 480.0),
     // As duas abrem com o id do item (`share:<id>`).
-    screen("share", 520.0, 580.0),
+    screen("share", 520.0, 640.0),
     screen("versions", 560.0, 480.0),
 ];
 

@@ -40,3 +40,8 @@ export function formatDuration(seconds, locale) {
     Math.round(seconds / size),
   );
 }
+
+// Data e hora de quando algo mudou: `27 de out. de 2026, 14:05`. `timeZone` só nos testes.
+export function formatDate(ms, locale, timeZone) {
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone }).format(ms);
+}

@@ -702,6 +702,62 @@ async fn offline_screen_removes_offline_access() {
     assert!(!after.contains("notas.txt"), "{after}");
 }
 
+/// O id do item `name` do Drive de teste (pela pesquisa do serviço).
+async fn item_id(name: &str) -> String {
+    let found = service().await.search(name).await.unwrap();
+    found
+        .into_iter()
+        .find(|r| r.name == name)
+        .unwrap_or_else(|| panic!("{name} não está no Drive de teste"))
+        .id
+}
+
+/// Escolhe `value` no `<select>` de `css`, como o usuário.
+async fn choose(session: &Session, css: &str, value: &str) {
+    session
+        .eval(&format!(
+            "const s = document.querySelector({css:?}); s.value = {value:?}; \
+             s.dispatchEvent(new Event('change'));"
+        ))
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn share_screen_adds_people_and_opens_the_link() {
+    let id = item_id("relatório.pdf").await;
+    let session = Session::open(&format!("share:{id}")).await;
+    session.wait_text(".people", "Proprietário").await;
+
+    session.fill(".emails", "ana@example.com").await;
+    session.click(".send").await;
+    session.wait_text(".people", "ana@example.com").await;
+    let typed = session
+        .eval("return document.querySelector('.emails').value")
+        .await;
+    choose(&session, ".general-kind", "anyone").await;
+    let general = session.wait_text(".general", "internet").await;
+
+    assert_eq!(typed, "", "o campo fica livre depois de enviar");
+    assert!(general.contains("Qualquer pessoa"), "{general}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn versions_screen_lists_and_keeps_a_version() {
+    let id = item_id("notas.txt").await;
+    let session = Session::open(&format!("versions:{id}")).await;
+    session.wait_text(".version-list", "Atual").await;
+
+    session.click(".version-list li:last-child .row-menu").await;
+    session.click(".menu [data-action='keep']").await;
+    let list = session
+        .wait_text(".version-list", "Mantida para sempre")
+        .await;
+
+    assert_eq!(list.matches("Atual").count(), 1, "{list}");
+}
+
 /// A bandeja do `scripts/e2e.sh`, encerrada no fim do teste.
 struct TrayProcess(std::process::Child);
 
@@ -809,6 +865,25 @@ async fn screenshots_for_the_readme() {
         ("uninstall", ".uninstall", "", "desinstalar"),
     ] {
         let session = Session::open(screen).await;
+        session.wait_text(css, wanted).await;
+        save(&session, name).await;
+    }
+    let (report, notes) = (item_id("relatório.pdf").await, item_id("notas.txt").await);
+    for (screen, css, wanted, name) in [
+        (
+            format!("share:{report}"),
+            ".people",
+            "Proprietário",
+            "compartilhar",
+        ),
+        (
+            format!("versions:{notes}"),
+            ".version-list",
+            "Atual",
+            "versoes",
+        ),
+    ] {
+        let session = Session::open(&screen).await;
         session.wait_text(css, wanted).await;
         save(&session, name).await;
     }

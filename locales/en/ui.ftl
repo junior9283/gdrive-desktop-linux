@@ -371,3 +371,53 @@ uninstall-progress = Uninstalling… If the app came from a package, the system 
 uninstall-waiting = Finishing pending uploads before disconnecting…
 uninstall-done = Google Drive uninstalled
 uninstall-done-body = The programs were removed from this computer.
+
+share-missing = Open this window from the Google Drive menu in your file manager.
+share-title = Share "{ $name }"
+share-cannot = You can only see who has access: changing sharing needs edit permission.
+share-add = Add people
+share-add-placeholder = Add people by email
+share-role = Role
+share-role-of = Role of { $name }
+share-role-reader = Viewer
+share-role-commenter = Commenter
+share-role-writer = Editor
+share-role-owner = Owner
+share-role-remove = Remove access
+share-notify = Notify people by email
+share-message = Message (optional)
+share-send = Send
+share-invalid = Check these emails: { $emails }
+share-added = { $count ->
+    [one] Access given to 1 person
+   *[other] Access given to { $count } people
+}
+share-removed = Access removed
+share-people = People with access
+share-general = General access
+share-general-role = Role of anyone with the link
+share-general-restricted = Restricted
+share-general-restricted-text = Only people with access can open with the link.
+share-general-domain = { $domain }
+share-general-domain-text = Anyone at { $domain } with the link can open it.
+share-general-anyone = Anyone with the link
+share-general-anyone-text = Anyone on the internet with the link can open it.
+share-copy-link = Copy link
+share-done = Done
+
+versions-missing = Open this window from the Google Drive menu in your file manager.
+versions-title = Versions of "{ $name }"
+versions-text = Older versions may be deleted after 30 days or 100 versions, except the ones kept forever.
+versions-current = Current
+versions-kept = Kept forever
+versions-actions = Version actions
+versions-download = Download
+versions-downloaded = Saved to { $path }
+versions-restore = Restore
+versions-restore-title = Restore this version?
+versions-restore-body = The file goes back to its content from { $date }. The current version stays in the list.
+versions-restored = Version restored; it uploads as a new version
+versions-keep = Keep forever
+versions-unkeep = Don't keep forever
+versions-kept-done = This version will be kept forever
+versions-unkept-done = This version may be deleted over time

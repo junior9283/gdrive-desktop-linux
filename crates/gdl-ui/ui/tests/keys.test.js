@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseFtl } from '../i18n.js';
 import { CATEGORIES } from '../screens/errors/model.js';
 import { GUIDE, TROUBLES, stepsFor } from '../screens/onboarding/model.js';
+import { ROLES, generalKinds } from '../screens/share/model.js';
 
 const ui = fileURLToPath(new URL('..', import.meta.url));
 const locale = (lang) =>
@@ -40,6 +41,9 @@ test('toda chave usada nas telas existe nos dois idiomas', () => {
   for (const id of TROUBLES) used.add(`onboarding-trouble-${id}`).add(`onboarding-trouble-${id}-fix`);
   for (const category of CATEGORIES) used.add(`error-category-${category}`).add(`error-category-${category}-text`);
   for (const part of ['offline', 'cache', 'free']) used.add(`offline-usage-${part}`);
+  for (const role of [...ROLES, 'owner', 'remove']) used.add(`share-role-${role}`);
+  for (const kind of generalKinds('x')) used.add(`share-general-${kind}`).add(`share-general-${kind}-text`);
+  for (const action of ['download', 'restore', 'keep', 'unkeep']) used.add(`versions-${action}`);
   for (const block of ['stream', 'sync', 'offline']) {
     used.add(`onboarding-intro-${block}-title`).add(`onboarding-intro-${block}-text`);
   }

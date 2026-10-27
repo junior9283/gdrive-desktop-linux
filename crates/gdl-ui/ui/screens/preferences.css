@@ -78,18 +78,7 @@
 .pref input[type='text'],
 .pref input[type='number'],
 .pref select {
-  font: var(--md-body-large);
-  padding: 8px 12px;
   min-width: 240px;
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-shape-small);
-  background: var(--md-surface);
-  color: var(--md-on-surface);
-}
-
-.pref input:disabled,
-.pref select:disabled {
-  opacity: 0.6;
 }
 
 .path {

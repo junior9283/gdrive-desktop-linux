@@ -1,0 +1,22 @@
+/* Gerenciar versões: a lista (que rola) e o botão de fechar. */
+
+.versions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100vh;
+  padding: 24px;
+}
+
+.versions h1,
+.versions > p {
+  margin: 0;
+}
+
+.version-list {
+  overflow: auto;
+}
+
+.versions .actions {
+  margin-top: auto;
+}

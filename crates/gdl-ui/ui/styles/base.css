@@ -176,6 +176,34 @@ button.filled:disabled {
   margin-top: 6px;
 }
 
+/* Campos de texto e listas de escolha. */
+input[type='text'],
+input[type='number'],
+textarea,
+select {
+  font: var(--md-body-large);
+  padding: 8px 12px;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-shape-small);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+}
+
+input:disabled,
+select:disabled {
+  opacity: 0.6;
+}
+
+/* Selo de estado ao lado de um nome ("Atual"). */
+.chip {
+  margin-left: 8px;
+  padding: 0 8px;
+  border-radius: var(--md-shape-full);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  font: var(--md-label-medium);
+}
+
 /* Texto secundário. */
 .meta,
 .empty {

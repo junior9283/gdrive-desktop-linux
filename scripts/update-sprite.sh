@@ -2,7 +2,7 @@
 # Refaz crates/gdl-ui/ui/icons/sprite.svg com só os Material Symbols (Apache-2.0) que as telas
 # usam. Para um ícone novo, acrescente o nome em SYMBOLS e rode de novo.
 set -eu
-SYMBOLS="cloud_off more_vert chevron_left chevron_right close search folder description table_chart slideshow list_alt draw drive_file_move picture_as_pdf image movie audio_file folder_zip draft offline_pin"
+SYMBOLS="cloud_off more_vert chevron_left chevron_right close search folder description table_chart slideshow list_alt draw drive_file_move picture_as_pdf image movie audio_file folder_zip draft offline_pin lock public domain link"
 BASE=https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web
 OUT="$(dirname "$0")/../crates/gdl-ui/ui/icons/sprite.svg"
 {

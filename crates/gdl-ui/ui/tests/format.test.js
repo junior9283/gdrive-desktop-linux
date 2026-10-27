@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatSize, formatAgo, formatDuration } from '../format.js';
+import { formatSize, formatAgo, formatDate, formatDuration } from '../format.js';
 
 test('tamanhos em base 1024 com uma casa', () => {
   assert.equal(formatSize(1536, 'pt-BR'), '1,5 KB');
@@ -31,4 +31,12 @@ test('tempo restante', () => {
   assert.equal(formatDuration(5 * 60, 'pt-BR'), '5 minutos');
   assert.equal(formatDuration(90 * 60, 'en'), '2 hours');
   assert.equal(formatDuration(1, 'en'), '1 second');
+});
+
+test('data e hora no idioma da janela', () => {
+  const ms = Date.UTC(2026, 9, 27, 14, 5);
+  const text = formatDate(ms, 'pt-BR', 'UTC');
+  assert.match(text, /27/);
+  assert.match(text, /2026/);
+  assert.match(text, /14:05/);
 });

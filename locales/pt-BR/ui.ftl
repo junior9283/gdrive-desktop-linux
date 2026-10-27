@@ -371,3 +371,53 @@ uninstall-progress = Desinstalando… Se o app veio de um pacote, o sistema pede
 uninstall-waiting = Terminando os envios pendentes antes de desconectar…
 uninstall-done = Google Drive desinstalado
 uninstall-done-body = Os programas foram removidos deste computador.
+
+share-missing = Abra esta janela pelo menu do Google Drive no gerenciador de arquivos.
+share-title = Compartilhar "{ $name }"
+share-cannot = Você só pode ver quem tem acesso: mudar o compartilhamento pede permissão de edição.
+share-add = Adicionar pessoas
+share-add-placeholder = Adicionar pessoas por e-mail
+share-role = Papel
+share-role-of = Papel de { $name }
+share-role-reader = Leitor
+share-role-commenter = Comentarista
+share-role-writer = Editor
+share-role-owner = Proprietário
+share-role-remove = Remover acesso
+share-notify = Avisar as pessoas por e-mail
+share-message = Mensagem (opcional)
+share-send = Enviar
+share-invalid = Confira estes e-mails: { $emails }
+share-added = { $count ->
+    [one] Acesso dado a 1 pessoa
+   *[other] Acesso dado a { $count } pessoas
+}
+share-removed = Acesso removido
+share-people = Pessoas com acesso
+share-general = Acesso geral
+share-general-role = Papel de quem tem o link
+share-general-restricted = Restrito
+share-general-restricted-text = Só as pessoas com acesso podem abrir com o link.
+share-general-domain = { $domain }
+share-general-domain-text = Qualquer pessoa de { $domain } com o link pode abrir.
+share-general-anyone = Qualquer pessoa com o link
+share-general-anyone-text = Qualquer pessoa na internet com o link pode abrir.
+share-copy-link = Copiar link
+share-done = Concluído
+
+versions-missing = Abra esta janela pelo menu do Google Drive no gerenciador de arquivos.
+versions-title = Versões de "{ $name }"
+versions-text = As versões antigas podem ser apagadas depois de 30 dias ou de 100 versões, salvo as marcadas para manter para sempre.
+versions-current = Atual
+versions-kept = Mantida para sempre
+versions-actions = Ações da versão
+versions-download = Baixar
+versions-downloaded = Salva em { $path }
+versions-restore = Restaurar
+versions-restore-title = Restaurar esta versão?
+versions-restore-body = O arquivo volta a ter o conteúdo de { $date }. A versão atual continua na lista.
+versions-restored = Versão restaurada; ela sobe como versão nova
+versions-keep = Manter para sempre
+versions-unkeep = Não manter para sempre
+versions-kept-done = A versão será mantida para sempre
+versions-unkept-done = A versão pode ser apagada com o tempo

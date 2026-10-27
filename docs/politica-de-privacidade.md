@@ -8,7 +8,7 @@ não tem ligação com o Google nem é aprovado por ele.
 - **Metadados dos arquivos** (nomes, pastas, tamanhos, datas e revisões) num banco local, para
   mostrar a pasta do Drive sem consultar a internet a cada acesso.
 - **O conteúdo que você abriu ou marcou como off-line**, no cache, até ele ser liberado.
-- **O token de acesso da conta**, no Secret Service do seu ambiente (o "chaveiro" do KDE ou do
+- **O token de acesso de cada conta conectada** (até 4), no Secret Service do seu ambiente (o "chaveiro" do KDE ou do
   GNOME), nunca em arquivo de texto.
 - **Preferências e registros** do app, nas pastas de configuração e de estado do seu usuário.
 
@@ -21,7 +21,7 @@ servidores próprios e não recebe nenhum dado seu.
 ## Para que o app usa os dados do Google
 
 O app pede três permissões no login: o Google Drive (`drive`), para listar, abrir, enviar e
-organizar os seus arquivos (e, quando você pede, compartilhá-los ou ver as versões guardadas), e `openid` e `email`, para saber qual conta está conectada. Ele usa esses
+organizar os seus arquivos (e, quando você pede, compartilhá-los, ver as versões guardadas, criar atalhos ou criar um Drive compartilhado), e `openid` e `email`, para saber qual conta está conectada. Ele usa esses
 dados só para mostrar e sincronizar o seu Drive no seu computador. Não os vende, não os usa para
 publicidade e não os entrega a ninguém.
 

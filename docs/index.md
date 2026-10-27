@@ -10,8 +10,9 @@ title: gdrive-desktop-linux
 
 Cliente **não oficial** do Google Drive para Linux, de código aberto (GPL-3.0), escrito em Rust.
 Ele mostra o seu Drive como uma pasta no computador, em que os arquivos ficam na nuvem até você
-abrir, com ícone na bandeja, pesquisa, arquivos disponíveis off-line, sincronização automática e,
-no gerenciador de arquivos, emblemas de estado, compartilhamento e versões pelo botão direito.
+abrir, com ícone na bandeja, pesquisa, arquivos disponíveis off-line, sincronização automática,
+até 4 contas ao mesmo tempo, Drives compartilhados e, no gerenciador de arquivos, emblemas de
+estado, compartilhamento, versões e atalhos pelo botão direito.
 
 O app roda inteiro no seu computador e conversa só com as APIs do Google, usando um Client ID que
 você mesmo cria no seu projeto do Google Cloud. O projeto não tem servidores e não recebe nenhum

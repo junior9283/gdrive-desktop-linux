@@ -5,7 +5,22 @@
 1. Crie o seu Client ID seguindo o [guia do Client ID](guia-client-id.md).
 2. Clique no ícone do Google Drive na bandeja e escolha **Fazer login**.
 3. Depois do login, a pasta `~/Google Drive` aparece com o `Meu Drive` dentro, e também no painel
-   "Locais" do Dolphin.
+   "Locais" do Dolphin. Os Drives compartilhados ficam em `~/Google Drive/Drives compartilhados`.
+
+## Várias contas
+
+Pelo menu da conta (a foto no alto da janela), **Adicionar outra conta** entra com mais uma conta
+Google, até 4. Cada conta ganha a própria pasta, `~/Google Drive (<e-mail>)`, e todas sincronizam
+ao mesmo tempo. Clicar numa conta da lista troca a conta mostrada na janela. Quando o acesso de uma
+conta expira, ela aparece com **Entrar de novo**; as outras continuam sincronizando. Em **Mais
+opções** há **Desconectar todas as contas**.
+
+## Drives compartilhados
+
+Em **Preferências › Google Drive › Gerenciar drives compartilhados** (ou pelo botão direito na
+pasta "Drives compartilhados"), escolha quais drives aparecem na pasta e crie um novo. Mover um
+arquivo para um Drive compartilhado muda quem pode vê-lo; mover uma pasta do Meu Drive para um
+drive não é possível pelo app e precisa ser feito no Drive pela web.
 
 ## A janela principal
 
@@ -15,7 +30,8 @@
 - **Atividade de sincronização:** o que subiu, desceu ou foi para a lixeira, com o menu de cada
   linha (abrir, copiar link, cancelar um envio).
 - **Notificações:** o histórico dos avisos.
-- **Mais opções:** arquivos off-line, lista de erros, preferências e sair.
+- **Mais opções:** arquivos off-line, lista de erros, preferências, desconectar todas as contas e
+  sair.
 
 ## Arquivos off-line
 
@@ -28,7 +44,8 @@ off-line, e `gdrive-desktop-linux unpin <caminho>` para voltar a deixá-lo só n
 Nos arquivos e pastas do Drive, o gerenciador de arquivos ganha o submenu **Google Drive**: abrir no
 navegador, copiar o link (o aviso diz quem pode abrir), disponível off-line ou só on-line,
 **Compartilhar** (pessoas, papéis e acesso geral), **Gerenciar versões** (baixar, restaurar ou
-manter para sempre) e, nos arquivos do Office, abrir no Documentos, Planilhas ou Apresentações. No
+manter para sempre), **Adicionar atalho ao Drive** (escolhendo a pasta) e, nos arquivos do Office,
+abrir no Documentos, Planilhas ou Apresentações. No
 Dolphin, cada arquivo mostra também um emblema: na nuvem, off-line, sincronizando ou em conflito.
 
 No KDE, o app tira a pasta do Drive do indexador de arquivos (Baloo), que baixaria tudo para ler o

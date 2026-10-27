@@ -347,7 +347,12 @@ fn hide_echo(stdin: &std::io::Stdin) -> Option<rustix::termios::Termios> {
 async fn status(proxy: &ServiceProxy<'_>, account: &str, i18n: &I18n) -> Res {
     let status = proxy.status(account).await?;
     if status.account.is_empty() {
-        println!("{}", i18n.tr("not-logged-in", &[]));
+        // Logo depois da partida, o serviço ainda pode estar reconectando as contas guardadas.
+        let key = match status.state.as_str() {
+            "starting" => "tray-starting",
+            _ => "not-logged-in",
+        };
+        println!("{}", i18n.tr(key, &[]));
         return Ok(());
     }
     let line = |key: &str, args: &[(&str, &str)]| println!("{}", i18n.tr(key, args));

@@ -100,6 +100,30 @@ const MIGRATIONS: &[&str] = &[
         enabled INTEGER NOT NULL
     ) WITHOUT ROWID;
 ",
+    "
+    -- Pastas locais ligadas a pastas do Drive (Espelho, pastas do computador, dispositivos).
+    CREATE TABLE folder_pairs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        local      TEXT NOT NULL UNIQUE,
+        remote_id  TEXT NOT NULL,
+        kind       TEXT NOT NULL,
+        direction  TEXT NOT NULL,
+        state      TEXT NOT NULL DEFAULT 'active',
+        created_ms INTEGER NOT NULL
+    );
+    -- Último estado sincronizado de cada caminho de um par (a base da comparação em três vias).
+    CREATE TABLE synced (
+        pair_id  INTEGER NOT NULL,
+        rel_path TEXT NOT NULL,
+        item_id  TEXT NOT NULL,
+        is_dir   INTEGER NOT NULL,
+        size     INTEGER NOT NULL,
+        mtime_ns INTEGER NOT NULL,
+        inode    INTEGER NOT NULL,
+        md5      TEXT,
+        PRIMARY KEY (pair_id, rel_path)
+    ) WITHOUT ROWID;
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.

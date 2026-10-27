@@ -34,17 +34,24 @@ fn thumb_from_row(r: &Row) -> rusqlite::Result<ThumbRec> {
     })
 }
 
+/// As colunas de `items` na ordem que `item_from_row` lê.
+macro_rules! item_columns {
+    () => {
+        "id, inode, parent, remote_name, local_name, kind, mime, target_id, size, md5, \
+         head_revision, base_revision, base_md5, modified_ms, created_ms, trashed, can_edit, \
+         local_state, pin, remote_size"
+    };
+}
+
 /// `SELECT` de itens com o filtro dado.
 macro_rules! select_items {
     ($filter:literal) => {
-        concat!(
-            "SELECT id, inode, parent, remote_name, local_name, kind, mime, target_id, size, md5, \
-             head_revision, base_revision, base_md5, modified_ms, created_ms, trashed, can_edit, \
-             local_state, pin, remote_size FROM items ",
-            $filter
-        )
+        concat!("SELECT ", item_columns!(), " FROM items ", $filter)
     };
 }
+
+// Depois das macros, que ele usa.
+pub mod folders;
 
 // As consultas dos itens off-line escrevem `pin != 0` (`PinState::None`) por extenso: é o que
 // deixa o SQLite usar o índice parcial `items_pinned` (com um parâmetro no lugar do 0, ele não
@@ -184,7 +191,7 @@ impl Store {
         })
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         // Um pânico com o lock não deixa o SQLite inconsistente; seguimos com a conexão.
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -1176,7 +1183,7 @@ impl Batch<'_> {
 }
 
 /// Lê as colunas na ordem de `select_items!` (por posição: ler por nome custa uma busca por coluna).
-fn item_from_row(r: &Row) -> Result<Item> {
+pub(crate) fn item_from_row(r: &Row) -> Result<Item> {
     let kind: String = r.get(5)?;
     let kind = ItemKind::from_columns(&kind, r.get(6)?, r.get(7)?)
         .ok_or_else(|| StoreError::Corrupt(format!("tipo de item: {kind}")))?;

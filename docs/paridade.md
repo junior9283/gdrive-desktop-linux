@@ -1,16 +1,16 @@
 # Matriz de paridade
 
 Situação de cada item do catálogo da [especificação](superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md)
-(seção 6) no código, conferida na versão 0.8.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
+(seção 6) no código, conferida na versão 0.9.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
 **FEITO** ou registrados em "Diferenças conhecidas" no README como risco aceito.
 
 Legenda: **FEITO**, **PARCIAL** (existe, mas incompleto), **FALTA**.
 
 | Seções | FEITO | PARCIAL | FALTA |
 |---|---|---|---|
-| 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 45 | 8 | 18 |
-| 6.7–6.11 (janela principal, bandeja, pesquisa, Preferências, primeiro uso) | 61 | 1 | 17 |
-| 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 43 | 5 | 27 |
+| 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 60 | 7 | 4 |
+| 6.7–6.11 (janela principal, bandeja, pesquisa, Preferências, primeiro uso) | 67 | 1 | 11 |
+| 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 48 | 5 | 21 |
 
 Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packaging/nfpm.yaml`,
 `.github/workflows/release.yml`).
@@ -21,12 +21,12 @@ Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packagin
 |---|---|
 | 0.7 | Dolphin completo: ícones de status, submenu completo (abrir no Docs/Planilhas/Apresentações, copiar link dizendo o tipo de acesso), janelas "Compartilhar" e "Gerenciar versões", exclusão do Baloo ✅ |
 | 0.8 | Várias contas (até 4), uma montagem por conta, `DisableAddAccount`; Drives compartilhados na montagem, "Gerenciar drives compartilhados" e criar drive; "Adicionar atalho" no menu, escolhendo o local ✅ |
-| 0.9 | Backup de pastas ("Meu computador"), pastas conectadas e "Computadores", modo Espelho com troca entre modos, dispositivos removíveis e NAS |
+| 0.9 | Backup de pastas ("Meu computador"), pastas conectadas e "Computadores", modo Espelho com troca entre modos, dispositivos removíveis ✅ (NAS fica como diferença) |
 | 0.10 | Diagnóstico, registro detalhado e feedback; notificações restantes e aviso de nova versão; servidor MCP; políticas restantes; ransomware e recuperação do banco |
 | 1.0 | Matriz toda conferida, "Diferenças conhecidas" no README |
 
 
-Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: até 4 contas, cada uma com a própria montagem (Meu Drive e Drives compartilhados); ainda sem espelho e sem backup de pastas.
+Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: até 4 contas, cada uma com a própria montagem (Meu Drive e Drives compartilhados); modo Stream ou Espelho, pastas do computador em "Computadores" e backup de dispositivos.
 
 ### 6.1 Contas e login
 
@@ -50,12 +50,12 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 |---|---|---|
 | Stream: montagem FUSE por conta | FEITO | `gdl-fs/src/fs.rs`, uma montagem por conta (`engine_at` acha a conta pelo caminho) |
 | Local padrão e `DefaultMountPoint`, aviso/alternativo se ocupado | FEITO | `daemon/mount.rs`, `daemon.rs:834` (`mount-moved`), teste `busy_mount_point_falls_back_to_numbered_folder`. O padrão por e-mail depende de multi-conta |
-| Conteúdo da montagem | PARCIAL | `gdl-fs/src/layout.rs`: Meu Drive, Drives compartilhados, lixeira, Lost and Found, Uploads cancelados, `.shortcut-targets-by-id`. Falta `Computadores` (0.9) |
+| Conteúdo da montagem | FEITO | `gdl-fs/src/layout.rs`: Meu Drive (fora dela no Espelho), Drives compartilhados, Computadores, lixeira, Lost and Found, Uploads cancelados, `.shortcut-targets-by-id` |
 | Nomes pelo idioma / `DisableLocalizedVirtualFolders` | PARCIAL | Nomes via i18n (`Layout::new`); a política está em `config.rs:116` mas não é lida (nunca força inglês) |
 | "Locais" do Dolphin (`ShowMountPointInSidebar`) | FEITO | `gdl-daemon/src/desktop.rs`, `daemon.rs:477` |
-| Modo Espelho (pasta real, inotify + changes.list) | FALTA | Só texto desabilitado em `ui/screens/preferences.js:151` ("Chega numa próxima versão"); sem inotify/watcher |
+| Modo Espelho (pasta real, inotify + changes.list) | FEITO | `gdl-folders` (comparação em três vias, `watch.rs` com inotify e `ItemsChanged`), `daemon/mirror.rs`; documentos Google como ponteiros e atalhos como links |
 | Drives compartilhados sempre em Stream | FEITO | Os drives ficam na montagem (`Node::SharedDrives`); não há modo Espelho para eles |
-| Troca Espelho <-> Stream com salvaguardas | FALTA | Depende do Espelho |
+| Troca Espelho <-> Stream com salvaguardas | FEITO | `MirrorCheck` (tamanho, espaço livre, pendências), `SetStream` recusa com envios pendentes e manda a pasta antiga para a lixeira só se pedido; aba Google Drive |
 | Sem limite de 4 GB | FEITO | Sem limite no FUSE; upload retomável (`uploads.rs`) |
 | Documentos Google como ponteiros, abrir no navegador, copiar cria atalho + aviso | FEITO | `gdl-common/src/gdocs.rs`, `gdl-engine/src/gdocs.rs`, `gdl-cli open-pointer`, `notify-shortcut-*` |
 | Atalhos do Drive como symlinks para `.shortcut-targets-by-id` | FEITO | `fs.rs:224,386` (`FileType::Symlink`, `link_target`) |
@@ -90,7 +90,7 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 | Stream: nuvem no caminho original, edição em Lost and Found, notificação com "Ver arquivos" e "Mover tudo para…" | PARCIAL | `uploads.rs:631`, `notify.rs:92` só oferece "Ver arquivos" (`OPEN_LOST_FOUND`). Falta a ação "Mover tudo para…" |
 | Envio impossível (sem permissão etc.) vai para Lost and Found | FEITO | teste `permission_denied_goes_to_lost_and_found` |
 | Excluído na nuvem com edição pendente: não recria, Lost and Found | FEITO | teste `remote_delete_during_pending_edit_goes_to_lost_and_found_and_is_not_recreated` |
-| Espelho: duas versões lado a lado com sufixo de conflito | FALTA | Não há modo Espelho |
+| Espelho: duas versões lado a lado com sufixo de conflito | FEITO | `gdl-folders/src/decide.rs` (` (conflito AAAA-MM-DD HHhMM)`), teste `both_edited_keeps_both_versions_everywhere` |
 | Recuperar arquivos não sincronizados | FEITO | `uploads.rs:234 recover_on_start`; Lost and Found e pendentes copiáveis no logout `--move` |
 | Recuperação automática após falha do banco local | FALTA | Sem detecção de corrupção/reconstrução a partir da nuvem em `gdl-store`/`engine.rs` |
 | Detecção de ransomware (entropia, pausa, aviso com 3 opções) | FALTA | Nenhuma ocorrência de entropia/ransomware no código |
@@ -102,18 +102,18 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Aba "Meu computador": adicionar pasta | FALTA | `preferences.js:131` só mostra `pref-computer-empty` |
-| Configurador por pasta (conta, destino, tamanho, contagem) | FALTA | Não existe |
-| Parar a sincronização com confirmação | FALTA | Não existe |
-| Mesclar com pasta existente | FALTA | Não existe |
-| Pastas XDG sugeridas | FALTA | Não existe |
-| Pastas conectadas bidirecionais (destino "Computadores") | FALTA | Não há sync de pastas locais nem pasta `Computadores` |
-| Avisos: pasta sumiu/movida/sem permissão | FALTA | Não existe |
-| Proibir aninhar pastas sincronizadas | FALTA | Não existe |
-| Dispositivos removíveis via UDisks2 (notificação, lembrar, ignorados, backup único, "seguro remover") | FALTA | Nenhuma referência a UDisks |
-| `DisableExternalMediaSync` e preferência "perguntar sobre dispositivos" | FALTA | Chave só declarada em `config.rs:115`, sem efeito |
-| Compartilhamentos de rede (NAS), backup a cada 6 h | FALTA | Não existe |
-| `DisableMirroredMyDrive` e `DisableMirroredFolders` | FALTA | Chaves só declaradas em `config.rs:117-118`, sem efeito |
+| Aba "Meu computador": adicionar pasta | FEITO | `ui/screens/preferences.js` `computerTab`, `AddLocalFolder` |
+| Configurador por pasta (conta, destino, tamanho, contagem) | FEITO | `addFolder` + `CheckLocalFolder` (recusas com texto próprio) |
+| Parar a sincronização com confirmação | FEITO | `folder-actions.js` `stopFolder`; os arquivos ficam nos dois lados |
+| Mesclar com pasta existente | FEITO | `AddLocalFolder(merge)` com a pasta de mesmo nome em "Computadores/<este computador>" |
+| Pastas XDG sugeridas | FEITO | Passo de pastas do primeiro uso, com o tamanho de cada uma |
+| Pastas conectadas bidirecionais (destino "Computadores") | FEITO | `daemon/folders.rs`, pastas de apoio achadas por `appProperties`; "Computadores" na montagem |
+| Avisos: pasta sumiu/movida/sem permissão | FEITO | `notify::for_folder` (e exclusão em massa pedindo confirmação), "Escolher novo local" |
+| Proibir aninhar pastas sincronizadas | FEITO | `gdl-folders/src/guard.rs` (`overlap`, recusas `nested`/`contains`) |
+| Dispositivos removíveis via UDisks2 (notificação, lembrar, ignorados, backup único, "seguro remover") | FEITO | `gdl-daemon/src/devices.rs` e `daemon/devices.rs` (`Devices`, `BackupDevice`, `IgnoreDevice`, `ForgetDevice`); "Fazer backup" do aviso abre a aba "Meu computador", onde fica o "lembrar" |
+| `DisableExternalMediaSync` e preferência "perguntar sobre dispositivos" | FEITO | `devices_refused`, `PromptToBackupDevices` na aba "Meu computador" |
+| Compartilhamentos de rede (NAS), backup a cada 6 h | FALTA | Volumes de rede e FUSE são recusados (`guard::network_fs`); registrado em "Diferenças conhecidas" |
+| `DisableMirroredMyDrive` e `DisableMirroredFolders` | FEITO | `mirror_refused`, `folders_refused` (pares guardados não rodam com a política) |
 
 ### 6.6 Drives compartilhados, "Compartilhados comigo" e atalhos
 
@@ -147,11 +147,11 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Início: cartão Precisa de atenção | FEITO | `home/start.js` `attention` |
 | Início: Arquivos off-line, Compartilhados comigo, Status de sincronização, Gemini | FEITO | `home/start.js` `render` |
 | Início: Drives compartilhados | FALTA | Nenhum cartão nem código de shared drives |
-| Início: Pastas conectadas | FALTA | Sem cartão; a aba "Meu computador" é placeholder |
+| Início: Pastas conectadas | FEITO | Cartão "Pastas conectadas" (`foldersCard`) |
 | Atividade: tabela paginada e ordenável | FEITO | `home/activity.js` (`sortRows`, `paginate`, tamanhos 10/25/50) |
 | Atividade: menu por linha (abrir no gerenciador, abrir na web, copiar link, cancelar upload) | FEITO | `activity.js` `rowMenu` |
 | Atividade: "Compartilhar" (só após upload) | FALTA | `rowMenu` não tem a ação |
-| Visão Pastas conectadas | FALTA | `VIEWS` em `home.js` = start, activity, offline, shared, notifications, links |
+| Visão Pastas conectadas | FEITO | Visão com as linhas de `folderRows` e o mesmo menu das Preferências |
 | Visão Arquivos off-line | FEITO | `home/offline.js` + tela `offline.js` |
 | Visão Compartilhados comigo | FEITO | `home/shared.js` (Adicionar atalho / Abrir na web) |
 | Visão Drives compartilhados | FALTA | Não existe |
@@ -200,9 +200,9 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
 | Duas abas "Meu computador" e "Google Drive" | PARCIAL | `preferences.js` `TABS` tem 3 abas (computer, drive, settings); as avançadas ficam numa aba "Configurações" |
-| Aba "Meu computador" (seção 6.5: pastas do computador) | FALTA | `computerTab` é placeholder ("Chega em breve", botão desabilitado) |
+| Aba "Meu computador" (seção 6.5: pastas do computador) | FEITO | `computerTab`: pastas e dispositivos |
 | Aba Drive: modo Stream | FEITO | `driveTab` |
-| Aba Drive: modo Espelho | FALTA | Radio desabilitado, "em breve" |
+| Aba Drive: modo Espelho | FEITO | `driveTab` `toMirror`/`toStream` (a troca vale ao confirmar o diálogo) |
 | Aba Drive: local da pasta do Meu Drive e abrir pasta | FEITO | `driveTab` (`form.mount`, `api.openMount`); mudar local em `DefaultMountPoint` (`settingsTab`) |
 | Rodapé: Alterações pendentes, Cancelar, Salvar | FEITO | `draw`/`updateFooter`/`save`/`cancel` |
 | Aviso "exige reiniciar" + "Reiniciar agora" | FEITO | `ui.banner`, `api.call('restart')` |
@@ -214,7 +214,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Limites de banda download/upload KB/s | FEITO | `limit('BandwidthRxKBPS'/'BandwidthTxKBPS')` |
 | Atalho da pesquisa | FEITO | `hotkey()` (`SearchHotKey`) |
 | Relatório automático de erros (desligado por padrão) | FEITO | `AutomaticErrorReporting` checkbox |
-| Perguntar sobre backup de dispositivos + lista de ignorados | FALTA | Sem controle na tela |
+| Perguntar sobre backup de dispositivos + lista de ignorados | FEITO | Aba "Meu computador": `PromptToBackupDevices` e a lista com "Ignorar" e "Remover" |
 | Pausar em conexão limitada | FEITO | `PauseSyncingOnMeteredConnection`; `daemon/src/metered.rs` |
 | Tema (sistema ou claro) | FEITO | `theme()` (`UITheme`) |
 | Desconectar a conta | FEITO | `settingsTab` seção `pref-account` |
@@ -230,7 +230,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | 2. Aguardando login com "Gerar link" | FEITO | passo `waiting`, botão `onboarding-generate-link` |
 | 3. Apresentação | FEITO | passo `intro` |
 | 4. "Veja seus arquivos no Dolphin" com botão abrir | FEITO | passo `files` (`api.openMount`) |
-| 5. Escolher pastas para sincronizar (sugestões e tamanho) | FALTA | Sem passo; depende do modo Espelho |
+| 5. Escolher pastas para sincronizar (sugestões e tamanho) | FEITO | Passo `folders` do primeiro uso |
 | 6. Resumo | FALTA | Sem passo |
 | 7. Como tornar disponível off-line | FEITO | passo `offline` |
 | Botões Pular, Voltar, Continuar | FEITO | `footer`, `actions` em `onboarding/model.js` |
@@ -253,8 +253,8 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Gerenciar versões | FEITO | `Action::Versions` abre a janela `versions:<id>` (só arquivos com versões). |
 | Ver lixeira | FEITO | `Action::Trash` (`menu.rs:51,153`). |
 | Atualizar pasta | FEITO | `Action::Refresh`. |
-| Enviar ou sincronizar esta pasta (fora da montagem) | FALTA | Sem ação; backup/sincronização de pastas é 🔜 no README. |
-| Adicionar ao espelho da conta 1–4 | FALTA | Sem modo espelho nem várias contas. |
+| Enviar ou sincronizar esta pasta (fora da montagem) | FEITO | `Action::SyncFolder` abre o configurador; emblemas nas pastas sincronizadas (`FolderStates`). |
+| Adicionar ao espelho da conta 1–4 | FALTA | Serve ao Espelho de pastas escolhidas, que não existe no Linux; registrado em "Diferenças conhecidas". |
 | Gerenciar / Criar drive compartilhado | FEITO | `menu.rs` `NewSharedDrive`/`ManageSharedDrives` na pasta "Drives compartilhados" |
 | Criar novo documento, planilha, apresentação | FEITO | `Action::NewDocument/NewSpreadsheet/NewPresentation`, `menu.rs:47-49,67-77`. |
 | Perguntar ao Gemini (web) | FALTA | Nenhuma ação no menu (só cartão Gemini na janela principal). |
@@ -281,9 +281,9 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Notificações do sistema com ações + lista na janela | FEITO | `gdl-daemon/src/notify.rs` (`Notifier`, `org.freedesktop.Notifications`), D-Bus `Notifications/InvokeNotificationAction` (`dbus.rs:62-74`), tela em `ui/screens/home/notifications.js`. |
 | Erros fatais e de conta | PARCIAL | Existem `Offline`, `UploadFailed`; sem famílias de conta (token expirado, conta bloqueada). |
 | Armazenamento e cota | PARCIAL | `QuotaFull`, `DiskLow` (`notify.rs:108,116`); faltam "quase cheio" da cota e "disco local cheio" separado. |
-| Sincronização e pastas | PARCIAL | `LostAndFound`, `SavedWhilePaused`, `UploadCanceled`, `CopiedAsShortcut`; faltam local mudou, pasta conectada sumiu, itens recuperados, uploads parados há N dias, itens movidos para a lixeira. |
+| Sincronização e pastas | PARCIAL | `LostAndFound`, `SavedWhilePaused`, `UploadCanceled`, `CopiedAsShortcut`, pasta conectada sumiu/movida/sem permissão, exclusão em massa; faltam itens recuperados, uploads parados há N dias, itens movidos para a lixeira. |
 | Permissões e movimentações | FALTA | Nenhum evento (não pode criar/mover/excluir/renomear; avisos de compartilhamento). |
-| Dispositivos (backup?, seguro remover, backup concluído/erro) | FALTA | Sem backup de dispositivos. |
+| Dispositivos (backup?, seguro remover, backup concluído/erro) | FEITO | `notify::device_ask`/`device_done` (um aviso por dispositivo). |
 | "Nova versão do app" (releases do GitHub) | FALTA | Nenhuma consulta às releases no código. |
 | "Não mostrar de novo" + tela Preferências de notificação | FEITO | `dbus.rs:78-88`, `ui/screens/notification-settings.js`. |
 
@@ -313,10 +313,10 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | DefaultMountPoint | FEITO | `daemon.rs:1032-1035`, `mount.rs`. |
 | DefaultWebBrowser | FEITO | `gdl-common/src/browser.rs`, `config.rs:204`. |
 | DisableAddAccount | FEITO | `begin_login` e `can_add_account` |
-| DisableExternalMediaSync | FALTA | Sem consumidor. |
+| DisableExternalMediaSync | FEITO | `daemon/devices.rs` (`devices_refused`). |
 | DisableLocalizedVirtualFolders | FALTA | Sem consumidor. |
-| DisableMirroredMyDrive | FALTA | Sem consumidor (sem espelho). |
-| DisableMirroredFolders | FALTA | Sem consumidor. |
+| DisableMirroredMyDrive | FEITO | `daemon/mirror.rs` (`mirror_refused`). |
+| DisableMirroredFolders | FEITO | `daemon/folders.rs` (`folders_refused`). |
 | DisableOnboardingDialog | FEITO | `gdl-tray/src/main.rs:148`. |
 | MinFreeDiskSpaceKBytes | FEITO | `engine.rs:169`. |
 | OpenOfficeFilesInDocs | FEITO | Esconde os itens "Abrir no Docs/Planilhas/Apresentações" do menu quando desligada. |
@@ -330,7 +330,7 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | AutomaticErrorReporting | PARCIAL | Chave e caixa na UI, sem funcionalidade de relatório (ver 6.15). |
 | UITheme | FEITO | `ui/app.js`, `ui/screens/preferences.js`. |
 | ShowMountPointInSidebar | FEITO | `daemon.rs:477-483`, `desktop.rs`. |
-| PromptToBackupDevices | FALTA | Sem consumidor (sem backup de dispositivos). |
+| PromptToBackupDevices | FEITO | `daemon/devices.rs` (`devices_found`). |
 
 ### 6.17 Servidor MCP
 

@@ -1252,8 +1252,8 @@ async fn screenshots_for_the_readme() {
         ),
         (
             "preferences:computer".to_string(),
-            ".local-folders",
-            "",
+            ".devices",
+            "PENDRIVE",
             "meu-computador",
         ),
     ] {

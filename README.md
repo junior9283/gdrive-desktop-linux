@@ -35,18 +35,18 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 
 | Área | Situação |
 |---|---|
-| **Pasta do Drive** | ✅ Todo o Meu Drive em `~/Google Drive/Meu Drive` e os Drives compartilhados em `~/Google Drive/Drives compartilhados`; os arquivos ficam na nuvem e são baixados só quando você abre (e só os trechos lidos). |
+| **Pasta do Drive** | ✅ Todo o Meu Drive em `~/Google Drive/Meu Drive` e os Drives compartilhados em `~/Google Drive/Drives compartilhados`; os arquivos ficam na nuvem e são baixados só quando você abre (e só os trechos lidos). No modo Espelho, o Meu Drive fica inteiro numa pasta do computador. |
 | **Off-line** | ✅ "Disponível off-line" em arquivos e pastas; as alterações feitas sem internet sobem quando a conexão volta. |
 | **Sincronização** | ✅ Envio e recebimento automáticos, fila que sobrevive a reinícios, conflitos guardados no Lost and Found, lixeira, limites de banda e pausa. |
 | **Documentos Google** | ✅ Docs, Planilhas e Apresentações aparecem na pasta e abrem no navegador com duplo clique. |
 | **Bandeja e janela** | ✅ Ícone na bandeja, janela principal, atividade com progresso, pesquisa rápida, erros, arquivos off-line, preferências, notificações e menu da conta com foto e uso do espaço. |
 | **Primeiro uso** | ✅ Guia do Client ID dentro do app, com botões que abrem cada página do Google Cloud. |
 | **Miniaturas** | ✅ As imagens aparecem com miniatura no Dolphin e em outros gerenciadores, usando as miniaturas do próprio Google, sem baixar os arquivos. |
-| **Menu do botão direito** | ✅ Abrir no navegador, copiar link (com o aviso de quem pode abrir), adicionar atalho ao Drive, off-line / só on-line, novo Documento, Planilha ou Apresentação, atualizar e lixeira, no Dolphin, Nautilus, Nemo, Caja, Thunar e COSMIC Files. |
+| **Menu do botão direito** | ✅ Abrir no navegador, copiar link (com o aviso de quem pode abrir), adicionar atalho ao Drive, sincronizar uma pasta do computador, off-line / só on-line, novo Documento, Planilha ou Apresentação, atualizar e lixeira, no Dolphin, Nautilus, Nemo, Caja, Thunar e COSMIC Files. |
 | **Compartilhar e versões** | ✅ Pelo menu do botão direito: janela Compartilhar (pessoas, papéis, acesso geral e link), Gerenciar versões (baixar, restaurar, manter para sempre) e arquivos do Office abertos no Docs, Planilhas ou Apresentações. |
 | **Instalação e remoção** | ✅ Pacotes `.deb`, `.rpm`, Arch e `.tar.gz`, e um desinstalador com a opção de apagar também os dados do computador. |
-| **Ícones de status** | ✅ Na nuvem, off-line, sincronizando e em conflito, no Dolphin. A pasta do Drive fica fora do indexador do KDE (Baloo), que baixaria tudo para ler. |
-| **Backup e espelho** | 🔜 Backup de pastas do computador para o Drive e o modo espelho (cópia completa no computador). |
+| **Ícones de status** | ✅ Na nuvem, off-line, sincronizando e em conflito, no Dolphin, também nas pastas do computador sincronizadas. A pasta do Drive fica fora do indexador do KDE (Baloo), que baixaria tudo para ler. |
+| **Backup e espelho** | ✅ Pastas do computador sincronizadas com "Computadores" no Drive, o Meu Drive em modo Espelho (cópia completa numa pasta comum, com a troca de volta para o Stream) e backup de pendrives e cartões de memória quando são conectados. |
 | **Contas** | ✅ Até 4 contas Google ao mesmo tempo, cada uma com a própria pasta, trocadas pelo menu da conta. |
 | **Drives compartilhados** | ✅ Na pasta de cada conta, com a janela "Gerenciar drives compartilhados" para escolher quais aparecem e criar um novo. |
 
@@ -67,6 +67,8 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 | ![Janela Compartilhar com as pessoas, os papéis e o acesso geral](docs/imagens/compartilhar.png) | ![Versões guardadas de um arquivo, da atual para a mais antiga](docs/imagens/versoes.png) |
 | **Gerenciar drives compartilhados** | **Adicionar atalho ao Drive** |
 | ![Lista de Drives compartilhados com uma chave para cada um](docs/imagens/drives-compartilhados.png) | ![Escolha da pasta do atalho: o Meu Drive e os Drives compartilhados](docs/imagens/adicionar-atalho.png) |
+| **Meu computador** | **Espelhar o Meu Drive** |
+| ![Pastas do computador e dispositivos USB nas preferências](docs/imagens/meu-computador.png) | ![Escolha da pasta do Espelho, com o tamanho a baixar e o espaço livre](docs/imagens/espelhar.png) |
 
 ## Como funciona
 
@@ -98,6 +100,11 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 - **Backups de pastas:** a API pública não cria a seção "Computadores" do Drive. Os backups ficam em
   `Meu Drive/Computadores/<nome-do-computador>/`, e a pasta do app mostra "Computadores" como no
   original.
+- **Pastas de rede (NAS):** não podem ser sincronizadas; o app recusa volumes de rede e FUSE.
+- **"Adicionar ao espelho" no menu do Dolphin:** não existe, porque no Linux o Espelho é sempre do
+  Meu Drive inteiro (não de pastas escolhidas).
+- **Dispositivos:** o aviso de um pendrive novo abre as preferências, onde fica a opção de fazer
+  backup sempre; os avisos do sistema não têm caixa de seleção.
 - **Sem o limite de 4 GB por arquivo** da unidade virtual do Windows: aqui o limite é o da nuvem.
 - **Ficam fora:** presença em tempo real do Office, plugins do Outlook/Meet e backup para o Google
   Fotos (descontinuado pelo próprio Google).
@@ -206,7 +213,8 @@ Limitações conhecidas:
 - Uma pasta criada aqui que ainda não subiu, mandada para a lixeira, some só deste computador.
 - Uma conta que ainda não terminou a primeira leitura do Drive e não consegue subir na partida
   (sem internet ou com o login expirado) fica fora da lista até a próxima partida.
-- Ainda sem backup de pastas e modo espelho (veja o roteiro abaixo).
+- No modo Espelho, os Drives compartilhados continuam na pasta do Google Drive (em Stream), como
+  no original.
 
 Roteiro de teste manual (e o que já foi conferido): [docs/testes](docs/testes/README.md).
 
@@ -224,8 +232,8 @@ Cada etapa sai funcionando antes da próxima.
 | 0.5 | Menu do botão direito em todos os gerenciadores |
 | 0.6 | Desempenho: CPU parada, pastas grandes, download e envios em paralelo |
 | 0.7 | Dolphin completo: ícones de status, janelas de compartilhar e de versões |
-| 0.8 | Várias contas e Drives compartilhados ← **estamos aqui** |
-| 0.9 | Backup de pastas, pastas conectadas e modo espelho |
+| 0.8 | Várias contas e Drives compartilhados |
+| 0.9 | Backup de pastas, pastas conectadas, modo espelho e dispositivos ← **estamos aqui** |
 | 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes |
 | 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) |
 

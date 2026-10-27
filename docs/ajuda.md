@@ -22,6 +22,32 @@ pasta "Drives compartilhados"), escolha quais drives aparecem na pasta e crie um
 arquivo para um Drive compartilhado muda quem pode vê-lo; mover uma pasta do Meu Drive para um
 drive não é possível pelo app e precisa ser feito no Drive pela web.
 
+## Espelho do Meu Drive
+
+Em **Preferências › Google Drive**, **Espelhar arquivos** leva o Meu Drive inteiro para uma pasta
+comum do computador (sugerida ao lado da pasta do Google Drive; dá para escolher outra), disponível
+mesmo sem internet. Antes de confirmar, a janela mostra quanto será baixado e o espaço livre. Os
+Drives compartilhados continuam na pasta do Google Drive. **Fazer streaming dos arquivos** volta ao
+modo anterior depois que tudo o que foi alterado subir, e pode mandar a pasta do Espelho para a
+lixeira do sistema.
+
+## Pastas do computador
+
+Em **Preferências › Meu computador**, **Adicionar pasta** sincroniza uma pasta do computador com
+"Computadores/<este computador>" no Drive, nos dois sentidos. No Dolphin, o botão direito numa pasta
+fora do Drive oferece **Sincronizar esta pasta com o Google Drive**. Nada é apagado de vez: o que
+você exclui no computador vai para a lixeira do Drive, e o que sai do Drive vai para a lixeira do
+sistema. Se muitos arquivos somem de uma vez, a pasta para e pergunta antes. Pastas de rede não
+podem ser sincronizadas.
+
+## Pendrives e cartões de memória
+
+Quando um pendrive, cartão ou câmera é conectado, o app pergunta se quer fazer backup. O backup só
+envia (nada é apagado do dispositivo nem do Drive) e vai para "Computadores/<este computador>/<nome
+do dispositivo>"; no fim, o aviso diz que dá para remover o dispositivo com segurança. Em
+**Preferências › Meu computador** dá para fazer backup sempre que o dispositivo for conectado,
+ignorá-lo ou desligar a pergunta.
+
 ## A janela principal
 
 - **Cabeçalho:** o estado da sincronização, a última sincronização e o botão Pausar/Retomar.

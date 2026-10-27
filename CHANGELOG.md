@@ -7,6 +7,42 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.9.0] - 2026-10-27
+
+### Adicionado
+- Modo Espelho: em Preferências › Google Drive, o Meu Drive inteiro vai para uma pasta comum do
+  computador (sugerida ao lado da pasta do Google Drive, ou escolhida), com o tamanho a baixar e o
+  espaço livre antes de confirmar. Documentos Google viram arquivos que abrem no navegador, e
+  atalhos viram links. Voltar ao Stream espera os envios pendentes e pode mandar a pasta antiga
+  para a lixeira. Os Drives compartilhados continuam na pasta do Google Drive.
+- Pastas do computador: na aba "Meu computador", adicionar uma pasta a sincroniza nos dois
+  sentidos com "Computadores/<este computador>" no Drive (configurador com conta, tamanho,
+  contagem e opção de juntar com a pasta que já esteja lá). A pasta "Computadores" aparece na
+  pasta do Google Drive, inclusive com os backups de outros computadores.
+- Visão e cartão "Pastas conectadas" na janela principal, passo de escolha de pastas (com as
+  pastas do usuário sugeridas) no primeiro uso e avisos de pasta que sumiu, foi movida, perdeu a
+  permissão ou teria muitos itens excluídos de uma vez (a pasta para e pergunta).
+- Nada se apaga de vez: excluir no computador manda para a lixeira do Drive, e o que sai do Drive
+  vai para a lixeira do sistema. Edições nos dois lados ficam nas duas versões, com
+  " (conflito <data>)" no nome.
+- Dolphin: "Sincronizar esta pasta com o Google Drive" no botão direito de pastas fora do Drive e
+  emblemas de estado nas pastas sincronizadas.
+- Pendrives, cartões e câmeras: ao conectar, o app pergunta se faz backup (só envio, para
+  "Computadores/<este computador>/<nome>") e avisa quando dá para remover com segurança. Na aba
+  "Meu computador": fazer backup sempre, ignorar o dispositivo e desligar a pergunta.
+- Políticas `DisableMirroredMyDrive`, `DisableMirroredFolders`, `DisableExternalMediaSync` e
+  `PromptToBackupDevices`.
+
+### Mudado
+- D-Bus: `LocalFolders`, `CheckLocalFolder`, `AddLocalFolder`, `RemoveLocalFolder`,
+  `RelocateLocalFolder`, `ConfirmFolderDeletes`, `Mirror`, `MirrorCheck`, `SetMirror`,
+  `SetStream`, `Devices`, `BackupDevice`, `IgnoreDevice`, `ForgetDevice`, `FolderStates`,
+  `FolderRoots` e o sinal `LocalFoldersChanged`.
+
+### Segurança
+- O corpo dos avisos vai escapado quando o servidor de notificações interpreta marcação: o nome de
+  um arquivo ou o rótulo de um pendrive não viram link nem formatação.
+
 ### Corrigido
 - Sair pela bandeja e abrir o app de novo pelo menu não leva mais à tela de primeiro uso quando
   há conta conectada: enquanto o serviço reconecta as contas, a bandeja e a janela mostram
@@ -394,7 +430,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.7.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.4.0...v0.5.0

@@ -68,6 +68,10 @@ impl<'a> Args<'a> {
         self.get(key)?.as_u64().ok_or_else(|| wrong(key))
     }
 
+    fn i64(&self, key: &str) -> Result<i64, UiError> {
+        self.get(key)?.as_i64().ok_or_else(|| wrong(key))
+    }
+
     fn bool(&self, key: &str) -> Result<bool, UiError> {
         self.get(key)?.as_bool().ok_or_else(|| wrong(key))
     }
@@ -201,6 +205,13 @@ impl Bridge {
             "shared_drives" => j!(s.shared_drives(a.account())),
             "set_shared_drives" => j!(s.set_shared_drives(a.account(), &a.strs("enabled")?)),
             "create_shared_drive" => j!(s.create_shared_drive(a.account(), a.str("name")?)),
+            "local_folders" => j!(s.local_folders()),
+            "check_local_folder" => j!(s.check_local_folder(a.account(), a.str("path")?)),
+            "add_local_folder" => {
+                j!(s.add_local_folder(a.account(), a.str("path")?, a.bool("merge")?))
+            }
+            "remove_local_folder" => j!(s.remove_local_folder(a.account(), a.i64("id")?)),
+            "confirm_folder_deletes" => j!(s.confirm_folder_deletes(a.account(), a.i64("id")?)),
             "versions" => j!(s.versions(a.account(), a.str("item_id")?)),
             "version_download" => {
                 j!(s.version_download(a.account(), a.str("item_id")?, a.str("version_id")?))
@@ -234,6 +245,16 @@ impl Bridge {
         Ok(status.mount_point)
     }
 
+    /// A pasta do computador `id` da conta, pelo que o serviço guarda.
+    pub async fn local_folder_path(&self, account: &str, id: i64) -> Result<String, UiError> {
+        let folders = self.settle(self.service.local_folders().await)?;
+        folders
+            .into_iter()
+            .find(|f| f.id == id && f.account == account)
+            .map(|f| f.path)
+            .ok_or_else(|| UiError::new("NotFound", id.to_string()))
+    }
+
     /// Passa o erro para a página e anota se o serviço respondeu: qualquer resposta (mesmo um
     /// erro do serviço) mostra que ele está no ar.
     fn settle<T>(&self, reply: Result<T, ServiceError>) -> Result<T, UiError> {
@@ -246,11 +267,12 @@ impl Bridge {
     /// Repassa os sinais do serviço para `emit` enquanto a conexão durar.
     pub async fn forward_signals(&self, emit: Emit) -> zbus::Result<()> {
         let s = &self.service;
-        let (status, activity, notifications, preferences, login) = futures_util::try_join!(
+        let (status, activity, notifications, preferences, folders, login) = futures_util::try_join!(
             s.receive_status_changed(),
             s.receive_activity_changed(),
             s.receive_notifications_changed(),
             s.receive_preferences_changed(),
+            s.receive_local_folders_changed(),
             s.receive_login_finished(),
         )?;
         let login = login.map(|signal| {
@@ -265,6 +287,7 @@ impl Bridge {
             activity.map(named("activity-changed")).boxed(),
             notifications.map(named("notifications-changed")).boxed(),
             preferences.map(named("preferences-changed")).boxed(),
+            folders.map(named("local-folders-changed")).boxed(),
             login.boxed(),
         ];
         let mut all = select_all(streams);

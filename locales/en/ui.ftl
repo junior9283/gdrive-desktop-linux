@@ -281,6 +281,36 @@ pref-tab-drive = Google Drive
 pref-tab-settings = Settings
 pref-computer-empty = No folder from this computer is backed up to Google Drive.
 pref-add-folder = Add folder
+pref-computer-text = The folders you choose here go to "Computers" in Google Drive, and changes sync both ways.
+folder-open = Open folder
+folder-stop = Stop syncing
+folder-stop-title = Stop syncing "{ $name }"?
+folder-stop-body = The files stay on this computer and in Google Drive; only changes stop syncing.
+folder-stopped = The folder "{ $name }" is no longer synced.
+folder-state-stopped-missing = Stopped: the folder wasn't found.
+folder-state-stopped-no-permission = Stopped: no permission to read the folder.
+folder-state-stopped-moved = Stopped: the folder was moved.
+folder-state-confirm-deletes = { $count ->
+    [one] Waiting for you to confirm moving 1 item to the trash.
+   *[other] Waiting for you to confirm moving { $count } items to the trash.
+}
+folder-confirm-deletes = Move to trash
+folder-config-title = Add folder
+folder-config-account = Account
+folder-config-summary = { $files ->
+    [one] 1 file, { $size }
+   *[other] { $files } files, { $size }
+}
+folder-config-sync = Sync with Google Drive
+folder-config-merge = Merge with the folder of the same name already in "Computers"
+folder-config-done = Done
+folder-added = The folder "{ $name }" is being synced.
+folder-refused-missing = The folder doesn't exist.
+folder-refused-unreadable = The folder couldn't be read.
+folder-refused-nested = This folder is already inside a synced folder or the Google Drive folder.
+folder-refused-contains = This folder contains a synced folder or the Google Drive folder.
+folder-refused-network = Network folders can't be synced.
+folder-refused-folders-disabled = Your administrator turned off syncing folders from this computer.
 pref-coming-soon = Coming in a future version
 pref-drive-mode = How My Drive lives on this computer
 pref-stream = Stream files

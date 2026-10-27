@@ -281,6 +281,36 @@ pref-tab-drive = Google Drive
 pref-tab-settings = Configurações
 pref-computer-empty = Nenhuma pasta do computador está em backup no Google Drive.
 pref-add-folder = Adicionar pasta
+pref-computer-text = As pastas escolhidas aqui ficam em "Computadores" no Google Drive, e as mudanças seguem nos dois sentidos.
+folder-open = Abrir pasta
+folder-stop = Parar de sincronizar
+folder-stop-title = Parar de sincronizar "{ $name }"?
+folder-stop-body = Os arquivos continuam neste computador e no Google Drive; só as mudanças deixam de ser sincronizadas.
+folder-stopped = A pasta "{ $name }" não é mais sincronizada.
+folder-state-stopped-missing = Parada: a pasta não foi encontrada.
+folder-state-stopped-no-permission = Parada: sem permissão para ler a pasta.
+folder-state-stopped-moved = Parada: a pasta foi movida.
+folder-state-confirm-deletes = { $count ->
+    [one] Esperando sua confirmação para mover 1 item para a lixeira.
+   *[other] Esperando sua confirmação para mover { $count } itens para a lixeira.
+}
+folder-confirm-deletes = Mover para a lixeira
+folder-config-title = Adicionar pasta
+folder-config-account = Conta
+folder-config-summary = { $files ->
+    [one] 1 arquivo, { $size }
+   *[other] { $files } arquivos, { $size }
+}
+folder-config-sync = Sincronizar com o Google Drive
+folder-config-merge = Juntar com a pasta de mesmo nome que já está em "Computadores"
+folder-config-done = Concluído
+folder-added = A pasta "{ $name }" está sendo sincronizada.
+folder-refused-missing = A pasta não existe.
+folder-refused-unreadable = Não foi possível ler a pasta.
+folder-refused-nested = Esta pasta já está dentro de uma pasta sincronizada ou da pasta do Google Drive.
+folder-refused-contains = Esta pasta contém uma pasta já sincronizada ou a pasta do Google Drive.
+folder-refused-network = Pastas de rede não podem ser sincronizadas.
+folder-refused-folders-disabled = O administrador desativou a sincronização de pastas do computador.
 pref-coming-soon = Chega numa próxima versão
 pref-drive-mode = Como o Meu Drive fica no computador
 pref-stream = Fazer streaming dos arquivos

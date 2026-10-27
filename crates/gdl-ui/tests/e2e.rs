@@ -898,6 +898,45 @@ async fn shared_drives_screen_saves_and_creates() {
     );
 }
 
+/// O seletor do sistema não roda no Xvfb: o configurador abre pelo argumento `folder:<caminho>`
+/// (o mesmo do Dolphin).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn computer_tab_adds_and_stops_a_folder() {
+    let service = service().await;
+    let dir = std::env::temp_dir().join(format!("Documentos-e2e-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.txt"), b"um").unwrap();
+    let path = dir.display().to_string();
+    let session = Session::open(&format!("preferences:folder:{path}")).await;
+
+    session
+        .wait_text(".dialog .folder-summary", "1 arquivo")
+        .await;
+    session.click(".dialog .filled").await;
+    session.wait_text(".toast", "está sendo sincronizada").await;
+    let name = dir.file_name().unwrap().to_str().unwrap().to_string();
+    session.wait_text(".local-folders", &name).await;
+    let added = service.local_folders().await.unwrap();
+
+    session
+        .click(&format!(".local-folder[data-path='{path}'] .row-menu"))
+        .await;
+    session.click("[data-action='stop']").await;
+    session.click(".dialog .filled").await;
+    session.wait_text(".local-folders", "Nenhuma pasta").await;
+    let after = service.local_folders().await.unwrap();
+    let kept = dir.join("a.txt").exists();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert_eq!(
+        added.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        [path.as_str()]
+    );
+    assert!(after.is_empty(), "{after:?}");
+    assert!(kept, "parar não apaga os arquivos");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn shortcut_screen_picks_a_folder() {
@@ -1068,6 +1107,12 @@ async fn screenshots_for_the_readme() {
             ".folder-list",
             "Equipe",
             "adicionar-atalho",
+        ),
+        (
+            "preferences:computer".to_string(),
+            ".local-folders",
+            "",
+            "meu-computador",
         ),
     ] {
         let session = Session::open(&screen).await;

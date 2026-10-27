@@ -127,6 +127,18 @@ async fn open_mount(bridge: State<'_, Arc<Bridge>>) -> Result<(), String> {
     open_outside(mount, None).await
 }
 
+/// Abre no gerenciador de arquivos a pasta do computador `id` da conta (o caminho vem do serviço,
+/// não da página).
+#[tauri::command]
+async fn open_local_folder(
+    bridge: State<'_, Arc<Bridge>>,
+    account: String,
+    id: i64,
+) -> Result<(), String> {
+    let path = bridge.local_folder_path(&account, id).await.map_err(|e| e.message)?;
+    open_outside(path, None).await
+}
+
 /// Pede uma pasta ao usuário pelo portal (o seletor do próprio ambiente); `None` se ele cancelou.
 #[tauri::command]
 async fn pick_folder(
@@ -222,6 +234,7 @@ fn main() -> ExitCode {
             open_screen,
             open_link,
             open_mount,
+            open_local_folder,
             pick_folder,
             uninstall
         ])

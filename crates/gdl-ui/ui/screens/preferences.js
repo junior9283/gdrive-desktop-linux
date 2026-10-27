@@ -2,10 +2,12 @@
 // "Alterações pendentes", Cancelar e Salvar (todas as mudanças num `set_preferences` só). Uma
 // chave da política aparece bloqueada. A lógica fica em `preferences/model.js`.
 
-import { attempt, choice, el, saveFooter, stylesheet, toast } from '../components.js';
+import { attempt, choice, confirmDialog, el, errorText, menuButton, saveFooter, stylesheet, toast, toastError } from '../components.js';
+import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
 import { currentAccount } from '../state.js';
 import { disconnect } from './home/disconnect.js';
+import { configurator, folderArg, folderName, folderRows, refusalKey } from './preferences/folders.js';
 import {
   diff, fromPrefs, gbToKb, hotkeyFrom, kbToGb, numberOrNull, proxyMode, proxyPatch, validate,
 } from './preferences/model.js';
@@ -16,6 +18,8 @@ const DEFAULT_HOTKEY = 'Ctrl+Alt+G';
 const screen = { root: null, ctx: null, tab: 'drive', listening: null, listeningArg: null };
 // O que veio do serviço e o que o usuário mudou.
 const form = { original: {}, edited: {}, managed: new Set(), limits: {}, mount: '', restartDue: false };
+// As pastas do computador (`LocalFolders`) e as contas, para o configurador.
+const computer = { folders: [], accounts: [] };
 // Os pedaços que mudam sem redesenhar e a conferência de cada campo com linha de erro.
 const ui = { errors: {} };
 
@@ -31,16 +35,30 @@ export async function render(root, ctx) {
       .catch(() => {});
   });
   screen.listeningArg ??= listenArg(ctx);
-  await Promise.all([loadPrefs(), loadContext(), css]);
+  screen.listeningFolders ??= ctx.api.on('local-folders-changed', () => loadFolders().then(drawFolders).catch(() => {}));
+  await Promise.all([loadPrefs(), loadContext(), loadFolders(), css]);
   draw();
+  if (screen.folderArg) {
+    const path = screen.folderArg;
+    screen.folderArg = null;
+    addFolder(path);
+  }
 }
 
 // A aba pedida por quem abriu a janela: `?arg=` ao abrir, `screen-arg` com ela já aberta.
+// `folder:<caminho>` abre "Meu computador" com o configurador dessa pasta.
 function listenArg({ api }) {
-  const tab = screenArg(location.search);
-  if (TABS[tab]) screen.tab = tab;
+  const arg = screenArg(location.search);
+  screen.folderArg = folderArg(arg);
+  if (screen.folderArg) screen.tab = 'computer';
+  else if (TABS[arg]) screen.tab = arg;
   return api.on('screen-arg', (wanted) => {
-    if (TABS[wanted] && ui.tabs) showTab(wanted);
+    if (!ui.tabs) return;
+    const folder = folderArg(wanted);
+    if (folder) {
+      showTab('computer');
+      addFolder(folder);
+    } else if (TABS[wanted]) showTab(wanted);
   });
 }
 
@@ -58,7 +76,12 @@ async function loadContext() {
   const { api } = screen.ctx;
   const [status, summary] = await Promise.all([api.call('status'), api.call('offline_summary').catch(() => null)]);
   form.mount = status.mount_point;
+  computer.accounts = status.accounts.map((a) => a.email);
   form.limits = { maxCacheGb: summary ? Math.floor((summary.cache_bytes + summary.free_bytes) / 1024 ** 3) : null };
+}
+
+async function loadFolders() {
+  computer.folders = await screen.ctx.api.call('local_folders');
 }
 
 const pending = () => diff(form.original, form.edited);
@@ -127,12 +150,115 @@ function cancel() {
 
 function computerTab() {
   const { t } = screen.ctx;
-  const soon = t('pref-coming-soon');
+  // A política desliga a sincronização de pastas: o botão fica bloqueado com o aviso de sempre.
+  const disabled = form.managed.has('DisableMirroredFolders') && form.original.DisableMirroredFolders === true;
+  ui.folders = el('ul', { class: 'local-folders' });
+  drawFolders();
   return [
-    el('p', { class: 'empty' }, t('pref-computer-empty')),
-    el('button', { class: 'tonal', disabled: true, title: soon }, t('pref-add-folder')),
-    el('p', { class: 'meta' }, soon),
+    el('p', { class: 'meta' }, t('pref-computer-text')),
+    ui.folders,
+    el('fieldset', { class: 'pref', 'data-key': 'DisableMirroredFolders', disabled },
+      el('button', { class: 'tonal add-folder', onclick: () => pickAndAdd() }, t('pref-add-folder')),
+      disabled ? el('span', { class: 'meta managed-note' }, t('folder-refused-folders-disabled')) : []),
   ];
+}
+
+// A lista das pastas do computador (redesenhada quando o serviço avisa que mudou).
+function drawFolders() {
+  if (!ui.folders) return;
+  const { api, t } = screen.ctx;
+  const rows = folderRows(computer.folders, computer.accounts.length > 1);
+  if (!rows.length) {
+    ui.folders.replaceChildren(el('li', { class: 'empty' }, t('pref-computer-empty')));
+    return;
+  }
+  ui.folders.replaceChildren(...rows.map((row) => {
+    const args = { account: row.account, id: row.id };
+    const confirmDeletes = row.needsConfirm
+      ? el('button', { class: 'text', onclick: () => attempt(api.call('confirm_folder_deletes', args)) }, t('folder-confirm-deletes'))
+      : [];
+    return el('li', { class: 'local-folder', 'data-path': row.path },
+      el('div', { class: 'field' },
+        el('strong', {}, row.name),
+        el('span', { class: 'path' }, row.path),
+        row.accountLabel ? el('span', { class: 'meta' }, row.accountLabel) : [],
+        row.notice ? el('span', { class: 'folder-notice' }, t(...row.notice), confirmDeletes) : []),
+      menuButton(t('row-menu'), () => [
+        { id: 'open', label: t('folder-open'), action: () => attempt(api.openLocalFolder(row.account, row.id)) },
+        { id: 'stop', label: t('folder-stop'), action: () => stopFolder(row) },
+      ]));
+  }));
+}
+
+async function stopFolder(row) {
+  const { api, t } = screen.ctx;
+  const ok = await confirmDialog({
+    title: t('folder-stop-title', { name: row.name }),
+    body: t('folder-stop-body'),
+    confirm: t('folder-stop'),
+    cancel: t('action-cancel'),
+    danger: true,
+  });
+  if (!ok) return;
+  attempt(api.call('remove_local_folder', { account: row.account, id: row.id }), () =>
+    toast(t('folder-stopped', { name: row.name })));
+}
+
+async function pickAndAdd() {
+  const dir = await screen.ctx.api.pickFolder(screen.ctx.t('pref-pick-folder')).catch(() => null);
+  if (dir) addFolder(dir);
+}
+
+// O configurador da pasta `path`: a conta, o tamanho e a contagem (ou o motivo da recusa), a
+// sincronização com o Drive e, se a pasta já está em "Computadores", se junta com ela.
+async function addFolder(path) {
+  const { api, t, locale } = screen.ctx;
+  const name = folderName(path);
+  const account = el('select', { 'aria-label': t('folder-config-account') },
+    computer.accounts.map((email) => el('option', { value: email, selected: email === currentAccount() }, email)));
+  const summary = el('p', { class: 'folder-summary' });
+  const sync = el('input', { type: 'checkbox', class: 'folder-sync', checked: true });
+  const merge = el('input', { type: 'checkbox', class: 'folder-merge', checked: true });
+  const mergeRow = choice(merge, t('folder-config-merge'));
+  let state = null;
+  const check = async () => {
+    state = null;
+    summary.textContent = '';
+    mergeRow.hidden = true;
+    const reply = await api.call('check_local_folder', { account: account.value, path }).catch(toastError);
+    if (!reply) return;
+    state = configurator(reply);
+    summary.textContent = state.refusal
+      ? t(state.refusal)
+      : t('folder-config-summary', { files: state.files, size: formatSize(state.size, locale) });
+    summary.classList.toggle('field-error', Boolean(state.refusal));
+    mergeRow.hidden = !state.askMerge;
+    // O diálogo reavalia o Concluído a cada `input`.
+    body.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  account.addEventListener('change', check);
+  const body = el('div', { class: 'folder-config' },
+    el('p', { class: 'path' }, path),
+    computer.accounts.length > 1 ? el('label', { class: 'field' }, el('span', {}, t('folder-config-account')), account) : [],
+    summary,
+    choice(sync, t('folder-config-sync')),
+    mergeRow);
+  const answer = confirmDialog({
+    title: t('folder-config-title'),
+    body,
+    confirm: t('folder-config-done'),
+    cancel: t('action-cancel'),
+    ready: () => Boolean(state && !state.refusal && sync.checked),
+  });
+  await check();
+  if (!(await answer)) return;
+  const args = { account: account.value, path, merge: state.askMerge && merge.checked };
+  api.call('add_local_folder', args)
+    .then(() => toast(t('folder-added', { name })))
+    .catch((error) => {
+      const key = error?.name === 'Refused' && refusalKey(error.message);
+      toast(key ? t(key) : errorText(error));
+    });
 }
 
 function driveTab() {

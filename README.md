@@ -210,9 +210,13 @@ Cada etapa sai funcionando antes da próxima.
 | 0.2 | Bandeja, janela, primeiro uso com login e preferências |
 | 0.3 | Miniaturas do Google no gerenciador de arquivos |
 | 0.4 | Instaladores para as distribuições e desinstalador |
-| 0.5 | Menu do botão direito em todos os gerenciadores ← **estamos aqui** |
-| próximas | Ícones de status, backup de pastas e modo espelho, várias contas e Drives compartilhados |
-| 1.0 | Paridade com a versão Windows |
+| 0.5 | Menu do botão direito em todos os gerenciadores |
+| 0.6 | Desempenho: CPU parada, pastas grandes, download e envios em paralelo ← **estamos aqui** |
+| 0.7 | Dolphin completo: ícones de status, janelas de compartilhar e de versões |
+| 0.8 | Várias contas e Drives compartilhados |
+| 0.9 | Backup de pastas, pastas conectadas e modo espelho |
+| 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes |
+| 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) |
 
 ## Versionamento
 

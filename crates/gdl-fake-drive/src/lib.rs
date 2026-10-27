@@ -3,6 +3,7 @@
 
 mod net;
 mod server;
+mod sharing;
 mod state;
 
 use std::sync::Arc;
@@ -203,6 +204,16 @@ impl FakeDrive {
         let mut state = self.shared.state();
         state.files.remove(id);
         state.record_change(id);
+    }
+
+    /// As permissões do item, no formato da API.
+    pub fn permissions(&self, id: &str) -> Vec<Value> {
+        self.shared.state().files[id].permissions.clone()
+    }
+
+    /// Avisos por e-mail de compartilhamento enviados até agora: (e-mail, mensagem).
+    pub fn share_emails(&self) -> Vec<(String, Option<String>)> {
+        self.shared.state().share_emails.clone()
     }
 
     pub fn content(&self, id: &str) -> Vec<u8> {

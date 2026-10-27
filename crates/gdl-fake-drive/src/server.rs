@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 
 use crate::state::{self, IdRefused, Session, SessionRef, Shared, parse_query, random_id};
 
-type Shr = State<Arc<Shared>>;
-type Params = Query<HashMap<String, String>>;
+pub(crate) type Shr = State<Arc<Shared>>;
+pub(crate) type Params = Query<HashMap<String, String>>;
 
 /// Rotas em três grupos: a API exige token; a continuação do upload retomável não (a URL da
 /// sessão já é a credencial), mas sofre as mesmas falhas; o OAuth não sofre nenhuma das duas.
@@ -33,6 +33,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
         .route("/upload/drive/v3/files", post(upload_create))
         .route("/oauth2/v3/userinfo", get(userinfo))
         .route("/thumb/{spec}", get(thumb))
+        .merge(crate::sharing::routes())
         .route_layer(middleware::from_fn_with_state(
             shared.clone(),
             require_token,
@@ -50,7 +51,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
 }
 
 /// Erro no formato da Drive API.
-fn api_error(code: u16, reason: &str, message: &str) -> Response {
+pub(crate) fn api_error(code: u16, reason: &str, message: &str) -> Response {
     let status = StatusCode::from_u16(code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let body = json!({ "error": { "code": code, "message": message, "errors": [{ "domain": "global", "reason": reason, "message": message }] } });
     (status, Json(body)).into_response()
@@ -67,7 +68,7 @@ fn refused(e: IdRefused) -> Response {
     }
 }
 
-fn not_found(id: &str) -> Response {
+pub(crate) fn not_found(id: &str) -> Response {
     api_error(404, "notFound", &format!("File not found: {id}."))
 }
 
@@ -141,7 +142,7 @@ fn page_size(params: &HashMap<String, String>) -> usize {
 }
 
 /// Metadados JSON do corpo; corpo vazio vale `{}`.
-fn json_body(body: &[u8]) -> Option<Value> {
+pub(crate) fn json_body(body: &[u8]) -> Option<Value> {
     if body.is_empty() {
         Some(json!({}))
     } else {
@@ -149,7 +150,7 @@ fn json_body(body: &[u8]) -> Option<Value> {
     }
 }
 
-fn bad_json() -> Response {
+pub(crate) fn bad_json() -> Response {
     api_error(400, "parseError", "JSON inválido")
 }
 

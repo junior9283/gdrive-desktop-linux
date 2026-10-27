@@ -67,6 +67,71 @@ pub struct About {
     pub quota_used: u64,
 }
 
+/// Uma permissão de acesso a um item (`permissions`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Permission {
+    pub id: String,
+    /// `user`, `group`, `domain` ou `anyone`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// `owner`, `organizer`, `fileOrganizer`, `writer`, `commenter` ou `reader`.
+    pub role: String,
+    #[serde(rename = "emailAddress")]
+    pub email: Option<String>,
+    pub domain: Option<String>,
+    pub display_name: Option<String>,
+}
+
+/// A quem uma permissão nova dá acesso.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Grantee {
+    /// Uma pessoa (ou grupo) pelo e-mail.
+    Person(String),
+    /// Todos do domínio.
+    Domain(String),
+    /// Qualquer pessoa com o link.
+    Anyone,
+}
+
+/// Uma versão do conteúdo de um arquivo (`revisions`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "RawRevision")]
+pub struct Revision {
+    pub id: String,
+    pub modified_ms: i64,
+    pub size: Option<u64>,
+    pub keep_forever: bool,
+    /// Quem fez a versão, quando a API diz.
+    pub author: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawRevision {
+    id: String,
+    modified_time: Option<String>,
+    size: Option<String>,
+    #[serde(default)]
+    keep_forever: bool,
+    last_modifying_user: Option<Owner>,
+}
+
+impl From<RawRevision> for Revision {
+    fn from(raw: RawRevision) -> Revision {
+        Revision {
+            id: raw.id,
+            modified_ms: parse_ms(raw.modified_time.as_deref()),
+            size: parse_u64(raw.size.as_deref()),
+            keep_forever: raw.keep_forever,
+            author: raw
+                .last_modifying_user
+                .map(|u| u.display_name)
+                .filter(|n| !n.is_empty()),
+        }
+    }
+}
+
 pub(crate) fn parse_ms(text: Option<&str>) -> i64 {
     text.and_then(parse_rfc3339).unwrap_or(0)
 }

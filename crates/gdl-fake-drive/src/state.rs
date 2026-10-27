@@ -102,6 +102,18 @@ pub(crate) struct FileRec {
     pub(crate) shortcut_target: Option<String>,
     /// Compartilhado com o usuário por outra pessoa (dono, data): fora do Meu Drive.
     pub(crate) shared: Option<(String, i64)>,
+    /// Permissões no formato da API (`id`, `type`, `role`, `emailAddress`…).
+    pub(crate) permissions: Vec<Value>,
+    /// Versões anteriores do conteúdo, da mais antiga para a mais nova (a atual é o próprio item).
+    pub(crate) old_revisions: Vec<OldRevision>,
+    /// Revisões marcadas para "manter para sempre", inclusive a atual.
+    pub(crate) keep_forever: HashSet<String>,
+}
+
+pub(crate) struct OldRevision {
+    pub(crate) id: String,
+    pub(crate) content: Bytes,
+    pub(crate) modified_ms: i64,
 }
 
 impl FileRec {
@@ -159,6 +171,8 @@ pub(crate) struct State {
     refresh_tokens: HashSet<String>,
     pub(crate) token_lifetime_s: i64,
     pub(crate) fault: Option<StatusFault>,
+    /// Avisos por e-mail de compartilhamento: (e-mail, mensagem).
+    pub(crate) share_emails: Vec<(String, Option<String>)>,
     pub(crate) request_log: Vec<String>,
     /// Método HTTP de cada requisição, na mesma ordem de `request_log`.
     pub(crate) method_log: Vec<String>,
@@ -202,6 +216,7 @@ impl State {
             refresh_tokens: HashSet::new(),
             token_lifetime_s: 3599,
             fault: None,
+            share_emails: vec![],
             request_log: vec![],
             method_log: vec![],
             downloaded: 0,
@@ -257,6 +272,10 @@ impl State {
     ) -> String {
         let now = self.tick();
         let md5 = md5_hex(&content);
+        let owner = json!({
+            "id": "owner", "type": "user", "role": "owner",
+            "emailAddress": self.email, "displayName": "Usuário de teste",
+        });
         self.files.insert(
             id.clone(),
             FileRec {
@@ -273,6 +292,9 @@ impl State {
                 can_edit: true,
                 shortcut_target: target,
                 shared: None,
+                permissions: vec![owner],
+                old_revisions: vec![],
+                keep_forever: HashSet::new(),
             },
         );
         self.record_change(&id);
@@ -292,9 +314,14 @@ impl State {
         let id = self.add("", name, mime, content, None);
         self.changes.pop();
         let shared_ms = self.tick();
+        let email = self.email.clone();
         let file = self.file_mut(&id);
         file.parents.clear();
         file.shared = Some((owner.into(), shared_ms));
+        file.permissions = vec![
+            json!({ "id": "owner", "type": "user", "role": "owner", "displayName": owner }),
+            json!({ "id": "me", "type": "user", "role": "writer", "emailAddress": email }),
+        ];
         id
     }
 
@@ -302,9 +329,13 @@ impl State {
     pub(crate) fn set_content(&mut self, id: &str, content: Vec<u8>, modified_ms: Option<i64>) {
         let now = self.tick();
         let file = self.file_mut(id);
-        file.md5 = md5_hex(&content);
-        file.content = content.into();
-        file.head_revision = random_id(20);
+        let old = OldRevision {
+            id: std::mem::replace(&mut file.head_revision, random_id(20)),
+            content: std::mem::replace(&mut file.content, content.into()),
+            modified_ms: file.modified_ms,
+        };
+        file.old_revisions.push(old);
+        file.md5 = md5_hex(&file.content);
         file.modified_ms = modified_ms.unwrap_or(now);
         self.record_change(id);
     }

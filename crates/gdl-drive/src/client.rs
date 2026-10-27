@@ -21,6 +21,8 @@ use crate::retry::with_backoff;
 pub use crate::retry::{Backoff, DriveError};
 pub use crate::throttle::Bandwidth;
 
+mod sharing;
+
 pub type Result<T> = std::result::Result<T, DriveError>;
 
 /// Abaixo disto o upload vai num pedido só (multipart); a partir disto, em sessão retomável.
@@ -941,7 +943,7 @@ mod tests {
         })
     }
 
-    fn client(fake: &FakeDrive) -> DriveClient {
+    pub(super) fn client(fake: &FakeDrive) -> DriveClient {
         client_with_token(fake, TEST_ACCESS_TOKEN)
     }
 

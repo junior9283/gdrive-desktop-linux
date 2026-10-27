@@ -239,7 +239,7 @@ async fn service() -> ServiceProxy<'static> {
 /// Espera o `Status` do serviço satisfazer `done`.
 async fn status_until(service: &ServiceProxy<'_>, what: &str, done: impl Fn(&Status) -> bool) {
     until(what, async || {
-        done(&service.status().await.unwrap()).then_some(())
+        done(&service.status("").await.unwrap()).then_some(())
     })
     .await;
 }
@@ -348,12 +348,12 @@ async fn pause_button_toggles() {
     session
         .wait_text(".header-title", "Sincronização pausada")
         .await;
-    let paused = service.status().await.unwrap().paused;
+    let paused = service.status("").await.unwrap().paused;
     session.click(".header-pause").await;
     session.wait_text(".header-pause", "Pausar").await;
 
     assert!(paused);
-    assert!(!service.status().await.unwrap().paused);
+    assert!(!service.status("").await.unwrap().paused);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -362,7 +362,7 @@ async fn quit_asks_when_syncing() {
     let service = service().await;
     // Pausado, um arquivo novo fica esperando o envio.
     service.pause().await.unwrap();
-    let mount = service.status().await.unwrap().mount_point;
+    let mount = service.status("").await.unwrap().mount_point;
     let file = std::path::Path::new(&mount).join("Meu Drive/na-fila.txt");
     tokio::task::spawn_blocking(move || std::fs::write(file, b"esperando"))
         .await
@@ -375,7 +375,7 @@ async fn quit_asks_when_syncing() {
     session.click("[data-action='quit']").await;
     let question = session.text("dialog[open] .dialog-body").await;
     session.click("dialog[open] .dialog-cancel").await;
-    let still_up = service.status().await.is_ok();
+    let still_up = service.status("").await.is_ok();
     service.resume().await.unwrap();
 
     assert!(question.contains("1"), "{question}");
@@ -386,7 +386,7 @@ async fn quit_asks_when_syncing() {
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn onboarding_logs_in_with_client_id() {
     let service = service().await;
-    service.logout("discard", "").await.unwrap();
+    service.logout("", "discard", "").await.unwrap();
     status_until(&service, "sem conta", |s| s.state == "signed-out").await;
     let session = Session::open("onboarding").await;
 
@@ -439,7 +439,7 @@ async fn onboarding_logs_in_with_client_id() {
         .await
         .unwrap();
     let title = session.wait_text(".step-title", "computador").await;
-    let account = service.status().await.unwrap().account;
+    let account = service.status("").await.unwrap().account;
 
     assert!(guide.contains("Google Cloud"), "{guide}");
     assert_eq!(parts, 6);
@@ -566,7 +566,7 @@ async fn opened(wanted: &str) -> String {
 async fn search_finds_by_name_and_opens() {
     // Um arquivo lido pela montagem fica entre os recentes (o teste do primeiro uso, que roda
     // antes, refaz a conta e zera o banco local).
-    let mount = service().await.status().await.unwrap().mount_point;
+    let mount = service().await.status("").await.unwrap().mount_point;
     let notes = std::path::Path::new(&mount).join("Meu Drive/notas.txt");
     tokio::task::spawn_blocking(move || std::fs::read(notes))
         .await
@@ -641,9 +641,9 @@ impl Drop for QuotaFull {
             tokio::runtime::Handle::current().block_on(async {
                 QuotaFull::set("USR2", "free").await;
                 let service = service().await;
-                for error in service.errors().await.unwrap_or_default() {
+                for error in service.errors("").await.unwrap_or_default() {
                     if error.category == "quota" {
-                        let _ = service.retry(&error.item_id).await;
+                        let _ = service.retry("", &error.item_id).await;
                     }
                 }
             })
@@ -656,7 +656,7 @@ impl Drop for QuotaFull {
 async fn errors_list_groups_and_retries() {
     let service = service().await;
     let _quota = QuotaFull::start().await;
-    let mount = service.status().await.unwrap().mount_point;
+    let mount = service.status("").await.unwrap().mount_point;
     let file = std::path::Path::new(&mount).join("Meu Drive/sem-espaco.txt");
     tokio::task::spawn_blocking(move || std::fs::write(file, b"cheio"))
         .await
@@ -698,13 +698,13 @@ async fn offline_screen_removes_offline_access() {
     let after = session.wait_text(".offline", "Nenhum arquivo").await;
 
     assert!(usage.contains("Livre"), "{usage}");
-    assert_eq!(service.offline_summary().await.unwrap().pinned_count, 0);
+    assert_eq!(service.offline_summary("").await.unwrap().pinned_count, 0);
     assert!(!after.contains("notas.txt"), "{after}");
 }
 
 /// O id do item `name` do Drive de teste (pela pesquisa do serviço).
 async fn item_id(name: &str) -> String {
-    let found = service().await.search(name).await.unwrap();
+    let found = service().await.search("", name).await.unwrap();
     found
         .into_iter()
         .find(|r| r.name == name)
@@ -889,7 +889,7 @@ async fn screenshots_for_the_readme() {
     }
 
     let service = service().await;
-    service.logout("discard", "").await.unwrap();
+    service.logout("", "discard", "").await.unwrap();
     status_until(&service, "sem conta", |s| s.state == "signed-out").await;
     let onboarding = Session::open("onboarding").await;
     onboarding.wait_text(".step-title", "Client ID").await;

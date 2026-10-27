@@ -29,7 +29,7 @@ struct Saved {
 struct Entry {
     #[serde(flatten)]
     item: NotificationItem,
-    /// `Notification::replaces_key`: o aviso novo da mesma chave toma o lugar deste.
+    /// `Notification::slot`: o aviso novo no mesmo lugar toma o lugar deste.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     replaces_key: Option<String>,
     /// ID que o servidor de notificações deu, enquanto o serviço roda.
@@ -65,10 +65,9 @@ impl History {
     /// Acrescenta o aviso no topo, no lugar do anterior da mesma chave, e devolve o ID dele.
     pub fn push(&self, note: &Notification) -> u64 {
         let mut saved = self.saved();
-        if let Some(key) = &note.replaces_key {
-            saved
-                .entries
-                .retain(|e| e.replaces_key.as_ref() != Some(key));
+        let slot = note.slot();
+        if slot.is_some() {
+            saved.entries.retain(|e| e.replaces_key != slot);
         }
         saved.last_id += 1;
         let id = saved.last_id;
@@ -88,8 +87,9 @@ impl History {
                 read: false,
                 action_key,
                 action_label,
+                account: note.account.clone(),
             },
-            replaces_key: note.replaces_key.clone(),
+            replaces_key: slot,
             desktop_id: None,
         });
         saved.entries.truncate(MAX_ENTRIES);
@@ -191,6 +191,7 @@ mod tests {
             body: "corpo".into(),
             action: None,
             replaces_key: None,
+            account: String::new(),
         }
     }
 
@@ -258,5 +259,40 @@ mod tests {
         assert_eq!(history.items()[0].id, latest);
         assert_eq!(history.by_desktop_id(7), Some(first));
         assert_eq!(history.by_desktop_id(8), None);
+    }
+
+    /// O aviso de estado de uma conta não toma o lugar do mesmo aviso de outra.
+    #[test]
+    fn same_key_in_another_account_does_not_replace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let history = History::load(tmp.path().join("notifications.json"));
+        let offline = |account: &str, n| Notification {
+            replaces_key: Some("offline".into()),
+            account: account.into(),
+            ..note(n)
+        };
+        history.push(&offline("a@example.com", 1));
+        history.push(&offline("b@example.com", 2));
+        history.push(&offline("a@example.com", 3));
+
+        let titles: Vec<_> = history.items().into_iter().map(|i| i.title).collect();
+        assert_eq!(titles, ["aviso 3", "aviso 2"]);
+    }
+
+    /// Histórico salvo antes das contas não tem `account`: continua carregando.
+    #[test]
+    fn history_without_account_still_loads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("notifications.json");
+        std::fs::write(
+            &path,
+            r#"{"last_id":1,"entries":[{"id":1,"kind":"offline","title":"t","body":"b","time_ms":0,"read":false,"action_key":"","action_label":""}]}"#,
+        )
+        .unwrap();
+
+        let items = History::load(path).items();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].account, "");
     }
 }

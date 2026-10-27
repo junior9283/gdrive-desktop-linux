@@ -15,6 +15,7 @@ login-failure = Não foi possível entrar na conta. Feche esta janela e tente de
 
 # Notificações
 notify-title = Google Drive
+notify-account = Conta: { $email }
 notify-lost-found-title = Edição guardada em Lost and Found
 notify-lost-found-body = A sua versão de { $name } não subiu porque { $reason }. Ela foi guardada em Lost and Found.
 notify-lost-found-action = Ver arquivos

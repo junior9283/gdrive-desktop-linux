@@ -84,7 +84,17 @@ pub fn nobody_there(e: &zbus::Error) -> bool {
     matches!(e, zbus::Error::MethodError(name, ..) if NOBODY.contains(&name.as_str()))
 }
 
-/// Resposta de `Status`; sem conta conectada, tudo vazio.
+/// Uma conta na lista de `Status`.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct AccountSummary {
+    pub email: String,
+    pub mount_point: String,
+    /// Os mesmos valores de `Status::state`, só desta conta.
+    pub state: String,
+}
+
+/// Resposta de `Status`; sem conta conectada, tudo vazio. Os campos são os da conta pedida
+/// (vazio: a primeira), menos `state`, que com o pedido vazio é o pior entre as contas.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Status {
     pub account: String,
@@ -101,6 +111,8 @@ pub struct Status {
     pub errors: u32,
     /// Tempo estimado para terminar os envios; -1 sem estimativa.
     pub remaining_secs: i64,
+    /// Todas as contas conectadas, na ordem em que foram adicionadas.
+    pub accounts: Vec<AccountSummary>,
 }
 
 /// Um aviso do histórico (`Notifications`), o mais novo primeiro.
@@ -117,6 +129,10 @@ pub struct NotificationItem {
     /// Ação do botão (`open-lost-found`, `open-canceled`, `resume`); vazio sem botão.
     pub action_key: String,
     pub action_label: String,
+    /// A conta que originou o aviso (e-mail); vazio nos avisos que não são de uma conta. A ação
+    /// do botão age nela.
+    #[serde(default)]
+    pub account: String,
 }
 
 /// Uma família de aviso que o usuário pode desligar (`NotificationSettings`).
@@ -341,7 +357,7 @@ impl ServiceError {
 }
 
 /// Os mesmos métodos e sinais do objeto do serviço (`gdl_daemon::dbus::Service`): mudou aqui, mude
-/// lá.
+/// lá. `account` é o e-mail da conta; vazio, a primeira.
 #[zbus::proxy(
     interface = "io.github.junior9283.GDriveDesktopLinux1.Service",
     default_service = "io.github.junior9283.GDriveDesktopLinux1",
@@ -351,48 +367,53 @@ impl ServiceError {
 pub trait Service {
     /// Abre o login no navegador e devolve o endereço; o resultado vem em `LoginFinished`.
     fn begin_login(&self, client_id: &str, client_secret: &str) -> Result<String, ServiceError>;
-    fn status(&self) -> Result<Status, ServiceError>;
-    fn account_info(&self) -> Result<AccountInfo, ServiceError>;
+    fn status(&self, account: &str) -> Result<Status, ServiceError>;
+    fn account_info(&self, account: &str) -> Result<AccountInfo, ServiceError>;
     /// A atividade de sincronização, a mais recente primeiro (até 500 itens).
-    fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError>;
-    fn errors(&self) -> Result<Vec<SyncErrorItem>, ServiceError>;
+    fn activity(&self, account: &str) -> Result<Vec<ActivityItem>, ServiceError>;
+    fn errors(&self, account: &str) -> Result<Vec<SyncErrorItem>, ServiceError>;
     fn notifications(&self) -> Result<Vec<NotificationItem>, ServiceError>;
     fn mark_notifications_read(&self) -> Result<(), ServiceError>;
     fn dismiss_notification(&self, id: u64) -> Result<(), ServiceError>;
     fn invoke_notification_action(&self, id: u64, key: &str) -> Result<(), ServiceError>;
     fn notification_settings(&self) -> Result<Vec<NotificationSetting>, ServiceError>;
     fn set_notification_enabled(&self, kind: &str, enabled: bool) -> Result<(), ServiceError>;
-    fn retry(&self, item_id: &str) -> Result<(), ServiceError>;
+    fn retry(&self, account: &str, item_id: &str) -> Result<(), ServiceError>;
     /// `canceled`, `too-late` ou `in-use` (o arquivo está aberto para escrita).
-    fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError>;
+    fn cancel_upload(&self, account: &str, item_id: &str) -> Result<String, ServiceError>;
     fn pin(&self, path: &str) -> Result<(), ServiceError>;
     fn unpin(&self, path: &str) -> Result<(), ServiceError>;
     fn pause(&self) -> Result<(), ServiceError>;
     fn resume(&self) -> Result<(), ServiceError>;
-    fn list_lost_and_found(&self) -> Result<Vec<String>, ServiceError>;
-    fn offline_summary(&self) -> Result<OfflineSummary, ServiceError>;
+    fn list_lost_and_found(&self, account: &str) -> Result<Vec<String>, ServiceError>;
+    fn offline_summary(&self, account: &str) -> Result<OfflineSummary, ServiceError>;
     /// Os arquivos off-line: com `folder_id` vazio, os fixados mais altos; numa pasta, o que
     /// está off-line dentro dela.
-    fn offline_items(&self, folder_id: &str) -> Result<Vec<OfflineEntry>, ServiceError>;
-    fn unpin_item(&self, item_id: &str) -> Result<(), ServiceError>;
+    fn offline_items(
+        &self,
+        account: &str,
+        folder_id: &str,
+    ) -> Result<Vec<OfflineEntry>, ServiceError>;
+    fn unpin_item(&self, account: &str, item_id: &str) -> Result<(), ServiceError>;
     /// Libera o cache (menos off-line e envios pendentes) e devolve os bytes liberados.
-    fn clear_cache(&self) -> Result<u64, ServiceError>;
-    fn clear_offline_files(&self) -> Result<(), ServiceError>;
+    fn clear_cache(&self, account: &str) -> Result<u64, ServiceError>;
+    fn clear_offline_files(&self, account: &str) -> Result<(), ServiceError>;
     /// Nome (sem diferenciar maiúsculas e acentos) e, com internet, conteúdo; até 50.
-    fn search(&self, query: &str) -> Result<Vec<SearchResult>, ServiceError>;
+    fn search(&self, account: &str, query: &str) -> Result<Vec<SearchResult>, ServiceError>;
     /// Os 10 arquivos abertos por último.
-    fn recent_items(&self) -> Result<Vec<SearchResult>, ServiceError>;
+    fn recent_items(&self, account: &str) -> Result<Vec<SearchResult>, ServiceError>;
     /// `target`: `file` (abre o arquivo), `folder` (abre a pasta que o contém) ou `web`.
-    fn open_item(&self, item_id: &str, target: &str) -> Result<(), ServiceError>;
-    fn web_link(&self, item_id: &str) -> Result<String, ServiceError>;
-    fn shared_with_me(&self) -> Result<Vec<SharedItem>, ServiceError>;
+    fn open_item(&self, account: &str, item_id: &str, target: &str) -> Result<(), ServiceError>;
+    fn web_link(&self, account: &str, item_id: &str) -> Result<String, ServiceError>;
+    fn shared_with_me(&self, account: &str) -> Result<Vec<SharedItem>, ServiceError>;
     /// Cria no Meu Drive um atalho para o item compartilhado.
-    fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError>;
+    fn add_shortcut(&self, account: &str, item_id: &str) -> Result<(), ServiceError>;
     /// Quem tem acesso ao item.
-    fn sharing(&self, item_id: &str) -> Result<Sharing, ServiceError>;
+    fn sharing(&self, account: &str, item_id: &str) -> Result<Sharing, ServiceError>;
     /// Dá acesso às pessoas (`emails`) com o papel; `notify` manda o aviso com a mensagem.
     fn share_add(
         &self,
+        account: &str,
         item_id: &str,
         emails: &[&str],
         role: &str,
@@ -402,27 +423,51 @@ pub trait Service {
     /// Muda o papel de uma permissão; `role` vazio tira o acesso.
     fn share_set_role(
         &self,
+        account: &str,
         item_id: &str,
         permission_id: &str,
         role: &str,
     ) -> Result<(), ServiceError>;
     /// Acesso geral: `restricted`, `domain` ou `anyone`, com o papel.
-    fn share_set_general(&self, item_id: &str, kind: &str, role: &str) -> Result<(), ServiceError>;
+    fn share_set_general(
+        &self,
+        account: &str,
+        item_id: &str,
+        kind: &str,
+        role: &str,
+    ) -> Result<(), ServiceError>;
     /// As versões do arquivo, da mais nova para a mais antiga.
-    fn versions(&self, item_id: &str) -> Result<Versions, ServiceError>;
+    fn versions(&self, account: &str, item_id: &str) -> Result<Versions, ServiceError>;
     /// Baixa a versão para a pasta de downloads e devolve o caminho do arquivo.
-    fn version_download(&self, item_id: &str, version_id: &str) -> Result<String, ServiceError>;
+    fn version_download(
+        &self,
+        account: &str,
+        item_id: &str,
+        version_id: &str,
+    ) -> Result<String, ServiceError>;
     /// Volta o arquivo para a versão (enviada como versão nova).
-    fn version_restore(&self, item_id: &str, version_id: &str) -> Result<(), ServiceError>;
+    fn version_restore(
+        &self,
+        account: &str,
+        item_id: &str,
+        version_id: &str,
+    ) -> Result<(), ServiceError>;
     /// Marca ou desmarca "manter para sempre".
-    fn version_keep(&self, item_id: &str, version_id: &str, keep: bool)
-    -> Result<(), ServiceError>;
+    fn version_keep(
+        &self,
+        account: &str,
+        item_id: &str,
+        version_id: &str,
+        keep: bool,
+    ) -> Result<(), ServiceError>;
     /// O menu do botão direito para os caminhos; vazio fora do Meu Drive ou sem conta.
     fn menu(&self, paths: &[&str]) -> Result<Vec<MenuEntry>, ServiceError>;
     /// Faz a ação do menu nos caminhos; devolve o texto a copiar (o link), ou vazio.
     fn menu_action(&self, action: &str, paths: &[&str]) -> Result<String, ServiceError>;
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.
-    fn logout(&self, mode: &str, dir: &str) -> Result<(), ServiceError>;
+    fn logout(&self, account: &str, mode: &str, dir: &str) -> Result<(), ServiceError>;
+    /// Sai de todas as contas, com o mesmo `mode` e `dir` de `Logout`.
+    fn logout_all(&self, mode: &str, dir: &str) -> Result<(), ServiceError>;
     /// Antes de os programas saírem: desmonta, tira o início automático e o lugar nos Locais e,
     /// com `purge` (só sem conta conectada), apaga os dados locais; depois encerra o serviço.
     fn uninstall(&self, purge: bool) -> Result<(), ServiceError>;

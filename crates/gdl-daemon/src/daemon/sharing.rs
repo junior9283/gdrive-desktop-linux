@@ -41,14 +41,14 @@ fn check_role(role: &str) -> Result<(), ServiceError> {
 }
 
 impl Daemon {
-    async fn account_domain(&self) -> String {
-        self.with_account(|a| workspace_domain(&a.email))
+    async fn account_domain(&self, account: &str) -> String {
+        self.with_account(account, |a| workspace_domain(&a.email))
             .await
             .unwrap_or_default()
     }
 
-    pub async fn sharing(&self, item_id: &str) -> Result<Sharing, ServiceError> {
-        let engine = self.account_engine("").await?;
+    pub async fn sharing(&self, account: &str, item_id: &str) -> Result<Sharing, ServiceError> {
+        let engine = self.account_engine(account).await?;
         let item = live_item(&engine, item_id)?;
         let perms = engine
             .permissions(&item.id)
@@ -73,13 +73,13 @@ impl Daemon {
             can_share: item.can_edit,
             general: general.map_or("restricted", |p| p.kind.as_str()).into(),
             general_role: general.map(|p| p.role.clone()).unwrap_or_default(),
-            domain: self.account_domain().await,
+            domain: self.account_domain(account).await,
             people,
         })
     }
 
     /// O aviso de "link copiado", dizendo quem pode abrir o link. Sem resposta do Drive, nenhum.
-    pub(super) async fn notify_link_copied(&self, engine: &Engine, id: &ItemId) {
+    pub(super) async fn notify_link_copied(&self, account: &str, engine: &Engine, id: &ItemId) {
         let Ok(perms) = engine.permissions(id).await else {
             return;
         };
@@ -98,12 +98,14 @@ impl Daemon {
             body,
             action: None,
             replaces_key: Some("link-copied".into()),
+            account: account.into(),
         })
         .await;
     }
 
     pub async fn share_add(
         &self,
+        account: &str,
         item_id: &str,
         emails: &[String],
         role: &str,
@@ -119,7 +121,7 @@ impl Daemon {
         if emails.is_empty() || emails.iter().any(|e| !e.contains('@')) {
             return Err(ServiceError::InvalidArgs("e-mail inválido".into()));
         }
-        let engine = self.account_engine("").await?;
+        let engine = self.account_engine(account).await?;
         let id = ItemId(item_id.into());
         for email in emails {
             let who = Grantee::Person(email.into());
@@ -133,11 +135,12 @@ impl Daemon {
 
     pub async fn share_set_role(
         &self,
+        account: &str,
         item_id: &str,
         permission_id: &str,
         role: &str,
     ) -> Result<(), ServiceError> {
-        let engine = self.account_engine("").await?;
+        let engine = self.account_engine(account).await?;
         let id = ItemId(item_id.into());
         let done = match role {
             "" => engine.unshare(&id, permission_id).await,
@@ -152,6 +155,7 @@ impl Daemon {
     /// Troca o acesso geral do item (`restricted`, `anyone` ou `domain`).
     pub async fn share_set_general(
         &self,
+        account: &str,
         item_id: &str,
         kind: &str,
         role: &str,
@@ -159,7 +163,7 @@ impl Daemon {
         let grantee = match kind {
             "restricted" => None,
             "anyone" => Some(Grantee::Anyone),
-            "domain" => match self.account_domain().await {
+            "domain" => match self.account_domain(account).await {
                 d if d.is_empty() => {
                     return Err(ServiceError::InvalidArgs("conta sem domínio".into()));
                 }
@@ -174,15 +178,15 @@ impl Daemon {
         if grantee.is_some() {
             check_role(role)?;
         }
-        let engine = self.account_engine("").await?;
+        let engine = self.account_engine(account).await?;
         engine
             .set_general_access(&ItemId(item_id.into()), grantee.as_ref(), role)
             .await
             .map_err(|e| engine_error(e, item_id))
     }
 
-    pub async fn versions(&self, item_id: &str) -> Result<Versions, ServiceError> {
-        let engine = self.account_engine("").await?;
+    pub async fn versions(&self, account: &str, item_id: &str) -> Result<Versions, ServiceError> {
+        let engine = self.account_engine(account).await?;
         let item = live_item(&engine, item_id)?;
         let list = engine
             .revisions(&item.id)
@@ -209,10 +213,11 @@ impl Daemon {
     /// Salva a versão na pasta de downloads como `nome (data hora).ext`, sem sobrescrever nada.
     pub async fn version_download(
         &self,
+        account: &str,
         item_id: &str,
         version_id: &str,
     ) -> Result<String, ServiceError> {
-        let engine = self.account_engine("").await?;
+        let engine = self.account_engine(account).await?;
         let item = live_item(&engine, item_id)?;
         let fail = |e| engine_error(e, item_id);
         // A data da versão (para o nome) e o conteúdo, pedidos juntos.
@@ -247,10 +252,11 @@ impl Daemon {
 
     pub async fn version_restore(
         &self,
+        account: &str,
         item_id: &str,
         version_id: &str,
     ) -> Result<(), ServiceError> {
-        let engine = self.account_engine("").await?;
+        let engine = self.account_engine(account).await?;
         engine
             .restore_revision(&ItemId(item_id.into()), version_id)
             .await
@@ -259,11 +265,12 @@ impl Daemon {
 
     pub async fn version_keep(
         &self,
+        account: &str,
         item_id: &str,
         version_id: &str,
         keep: bool,
     ) -> Result<(), ServiceError> {
-        let engine = self.account_engine("").await?;
+        let engine = self.account_engine(account).await?;
         engine
             .keep_revision(&ItemId(item_id.into()), version_id, keep)
             .await

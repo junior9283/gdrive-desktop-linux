@@ -93,7 +93,7 @@ async fn main() -> Result<(), Error> {
     if !signal_ok {
         return Err("o login falhou".into());
     }
-    let mount = proxy.status().await?.mount_point;
+    let mount = proxy.status("").await?.mount_point;
     let notes = std::path::Path::new(&mount).join("Meu Drive/notas.txt");
     proxy.pin(&notes.display().to_string()).await?;
     // Lido pela montagem, o arquivo fica inteiro no cache: o fixado já está baixado.
@@ -101,7 +101,7 @@ async fn main() -> Result<(), Error> {
     // Um envio pela montagem, para a atividade de sincronização ter o que mostrar.
     let file = std::path::Path::new(&mount).join("Meu Drive/enviado-pelo-teste.txt");
     tokio::task::spawn_blocking(move || std::fs::write(file, b"oi")).await??;
-    while proxy.status().await?.syncing > 0 {
+    while proxy.status("").await?.syncing > 0 {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     println!("pronto");

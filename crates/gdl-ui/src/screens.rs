@@ -33,7 +33,7 @@ pub const SCREENS: [Screen; 11] = [
     screen("about", 480.0, 420.0),
     screen("notification-settings", 480.0, 520.0),
     screen("uninstall", 520.0, 480.0),
-    // As duas abrem com o id do item (`share:<id>`).
+    // As duas abrem com o id do item (`share:<conta>/<id>`).
     screen("share", 520.0, 640.0),
     screen("versions", 560.0, 480.0),
 ];

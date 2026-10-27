@@ -153,7 +153,7 @@ async fn conflict_storm_preserves_every_local_version() {
     .await;
     let saved: BTreeSet<String> = h
         .proxy
-        .list_lost_and_found()
+        .list_lost_and_found("")
         .await
         .unwrap()
         .iter()

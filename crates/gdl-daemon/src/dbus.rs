@@ -24,7 +24,8 @@ impl Service {
 }
 
 /// Os mesmos métodos e sinais do proxy em `gdl_ipc::Service`: mudou aqui, mude lá (os testes do
-/// serviço chamam tudo pelo proxy, e uma divergência falha neles).
+/// serviço chamam tudo pelo proxy, e uma divergência falha neles). `account` é o e-mail da
+/// conta; vazio, a primeira.
 #[zbus::interface(name = "io.github.junior9283.GDriveDesktopLinux1.Service")]
 impl Service {
     /// Abre o login no navegador e devolve o endereço; o resultado vem em `LoginFinished`.
@@ -40,24 +41,24 @@ impl Service {
         self.daemon.begin_login(creds).await
     }
 
-    async fn status(&self) -> Result<Status, ServiceError> {
-        self.daemon.status().await
+    async fn status(&self, account: &str) -> Result<Status, ServiceError> {
+        self.daemon.status(account).await
     }
 
-    async fn account_info(&self) -> Result<AccountInfo, ServiceError> {
-        self.daemon.account_info().await
+    async fn account_info(&self, account: &str) -> Result<AccountInfo, ServiceError> {
+        self.daemon.account_info(account).await
     }
 
-    async fn activity(&self) -> Result<Vec<ActivityItem>, ServiceError> {
-        self.daemon.activity().await
+    async fn activity(&self, account: &str) -> Result<Vec<ActivityItem>, ServiceError> {
+        self.daemon.activity(account).await
     }
 
-    async fn errors(&self) -> Result<Vec<SyncErrorItem>, ServiceError> {
-        self.daemon.errors().await
+    async fn errors(&self, account: &str) -> Result<Vec<SyncErrorItem>, ServiceError> {
+        self.daemon.errors(account).await
     }
 
-    async fn retry(&self, item_id: &str) -> Result<(), ServiceError> {
-        self.daemon.retry(item_id).await
+    async fn retry(&self, account: &str, item_id: &str) -> Result<(), ServiceError> {
+        self.daemon.retry(account, item_id).await
     }
 
     async fn notifications(&self) -> Vec<NotificationItem> {
@@ -88,8 +89,8 @@ impl Service {
         self.daemon.set_notification_enabled(kind, enabled).await
     }
 
-    async fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError> {
-        self.daemon.cancel_upload(item_id).await
+    async fn cancel_upload(&self, account: &str, item_id: &str) -> Result<String, ServiceError> {
+        self.daemon.cancel_upload(account, item_id).await
     }
 
     async fn pin(&self, path: &str) -> Result<(), ServiceError> {
@@ -108,67 +109,77 @@ impl Service {
         self.daemon.set_paused(false).await
     }
 
-    async fn list_lost_and_found(&self) -> Result<Vec<String>, ServiceError> {
-        self.daemon.lost_and_found().await
+    async fn list_lost_and_found(&self, account: &str) -> Result<Vec<String>, ServiceError> {
+        self.daemon.lost_and_found(account).await
     }
 
-    async fn offline_summary(&self) -> Result<OfflineSummary, ServiceError> {
-        self.daemon.offline_summary().await
+    async fn offline_summary(&self, account: &str) -> Result<OfflineSummary, ServiceError> {
+        self.daemon.offline_summary(account).await
     }
 
     /// Os arquivos off-line: com `folder_id` vazio, os fixados mais altos; numa pasta, o que
     /// está off-line dentro dela.
-    async fn offline_items(&self, folder_id: &str) -> Result<Vec<OfflineEntry>, ServiceError> {
-        self.daemon.offline_items(folder_id).await
+    async fn offline_items(
+        &self,
+        account: &str,
+        folder_id: &str,
+    ) -> Result<Vec<OfflineEntry>, ServiceError> {
+        self.daemon.offline_items(account, folder_id).await
     }
 
-    async fn unpin_item(&self, item_id: &str) -> Result<(), ServiceError> {
-        self.daemon.unpin_item(item_id).await
+    async fn unpin_item(&self, account: &str, item_id: &str) -> Result<(), ServiceError> {
+        self.daemon.unpin_item(account, item_id).await
     }
 
     /// Libera o cache (menos off-line e envios pendentes) e devolve os bytes liberados.
-    async fn clear_cache(&self) -> Result<u64, ServiceError> {
-        self.daemon.clear_cache().await
+    async fn clear_cache(&self, account: &str) -> Result<u64, ServiceError> {
+        self.daemon.clear_cache(account).await
     }
 
-    async fn clear_offline_files(&self) -> Result<(), ServiceError> {
-        self.daemon.clear_offline_files().await
+    async fn clear_offline_files(&self, account: &str) -> Result<(), ServiceError> {
+        self.daemon.clear_offline_files(account).await
     }
 
     /// Nome (sem diferenciar maiúsculas e acentos) e, com internet, conteúdo; até 50.
-    async fn search(&self, query: &str) -> Result<Vec<SearchResult>, ServiceError> {
-        self.daemon.search(query).await
+    async fn search(&self, account: &str, query: &str) -> Result<Vec<SearchResult>, ServiceError> {
+        self.daemon.search(account, query).await
     }
 
     /// Os 10 arquivos abertos por último.
-    async fn recent_items(&self) -> Result<Vec<SearchResult>, ServiceError> {
-        self.daemon.recent_items().await
+    async fn recent_items(&self, account: &str) -> Result<Vec<SearchResult>, ServiceError> {
+        self.daemon.recent_items(account).await
     }
 
     /// `target`: `file` (abre o arquivo), `folder` (abre a pasta que o contém) ou `web`.
-    async fn open_item(&self, item_id: &str, target: &str) -> Result<(), ServiceError> {
-        self.daemon.open_item(item_id, target).await
+    async fn open_item(
+        &self,
+        account: &str,
+        item_id: &str,
+        target: &str,
+    ) -> Result<(), ServiceError> {
+        self.daemon.open_item(account, item_id, target).await
     }
 
-    async fn web_link(&self, item_id: &str) -> Result<String, ServiceError> {
-        self.daemon.web_link(item_id).await
+    async fn web_link(&self, account: &str, item_id: &str) -> Result<String, ServiceError> {
+        self.daemon.web_link(account, item_id).await
     }
 
-    async fn shared_with_me(&self) -> Result<Vec<SharedItem>, ServiceError> {
-        self.daemon.shared_with_me().await
+    async fn shared_with_me(&self, account: &str) -> Result<Vec<SharedItem>, ServiceError> {
+        self.daemon.shared_with_me(account).await
     }
 
     /// Cria no Meu Drive um atalho para o item compartilhado.
-    async fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError> {
-        self.daemon.add_shortcut(item_id).await
+    async fn add_shortcut(&self, account: &str, item_id: &str) -> Result<(), ServiceError> {
+        self.daemon.add_shortcut(account, item_id).await
     }
 
-    async fn sharing(&self, item_id: &str) -> Result<Sharing, ServiceError> {
-        self.daemon.sharing(item_id).await
+    async fn sharing(&self, account: &str, item_id: &str) -> Result<Sharing, ServiceError> {
+        self.daemon.sharing(account, item_id).await
     }
 
     async fn share_add(
         &self,
+        account: &str,
         item_id: &str,
         emails: Vec<String>,
         role: &str,
@@ -176,54 +187,71 @@ impl Service {
         message: &str,
     ) -> Result<(), ServiceError> {
         self.daemon
-            .share_add(item_id, &emails, role, notify, message)
+            .share_add(account, item_id, &emails, role, notify, message)
             .await
     }
 
     /// `role` vazio tira o acesso.
     async fn share_set_role(
         &self,
+        account: &str,
         item_id: &str,
         permission_id: &str,
         role: &str,
     ) -> Result<(), ServiceError> {
         self.daemon
-            .share_set_role(item_id, permission_id, role)
+            .share_set_role(account, item_id, permission_id, role)
             .await
     }
 
     async fn share_set_general(
         &self,
+        account: &str,
         item_id: &str,
         kind: &str,
         role: &str,
     ) -> Result<(), ServiceError> {
-        self.daemon.share_set_general(item_id, kind, role).await
+        self.daemon
+            .share_set_general(account, item_id, kind, role)
+            .await
     }
 
-    async fn versions(&self, item_id: &str) -> Result<Versions, ServiceError> {
-        self.daemon.versions(item_id).await
+    async fn versions(&self, account: &str, item_id: &str) -> Result<Versions, ServiceError> {
+        self.daemon.versions(account, item_id).await
     }
 
     async fn version_download(
         &self,
+        account: &str,
         item_id: &str,
         version_id: &str,
     ) -> Result<String, ServiceError> {
-        self.daemon.version_download(item_id, version_id).await
+        self.daemon
+            .version_download(account, item_id, version_id)
+            .await
     }
 
-    async fn version_restore(&self, item_id: &str, version_id: &str) -> Result<(), ServiceError> {
-        self.daemon.version_restore(item_id, version_id).await
+    async fn version_restore(
+        &self,
+        account: &str,
+        item_id: &str,
+        version_id: &str,
+    ) -> Result<(), ServiceError> {
+        self.daemon
+            .version_restore(account, item_id, version_id)
+            .await
     }
 
     async fn version_keep(
         &self,
+        account: &str,
         item_id: &str,
         version_id: &str,
         keep: bool,
     ) -> Result<(), ServiceError> {
-        self.daemon.version_keep(item_id, version_id, keep).await
+        self.daemon
+            .version_keep(account, item_id, version_id, keep)
+            .await
     }
 
     /// O menu "Google Drive" do botão direito para os caminhos; vazio fora do Meu Drive.
@@ -237,8 +265,13 @@ impl Service {
     }
 
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.
-    async fn logout(&self, mode: &str, dir: &str) -> Result<(), ServiceError> {
-        self.daemon.logout(mode, dir).await
+    async fn logout(&self, account: &str, mode: &str, dir: &str) -> Result<(), ServiceError> {
+        self.daemon.logout(account, mode, dir).await
+    }
+
+    /// Sai de todas as contas, como `logout`.
+    async fn logout_all(&self, mode: &str, dir: &str) -> Result<(), ServiceError> {
+        self.daemon.logout_all(mode, dir).await
     }
 
     /// Prepara a desinstalação e encerra o serviço; `purge` apaga os dados locais (sem conta).

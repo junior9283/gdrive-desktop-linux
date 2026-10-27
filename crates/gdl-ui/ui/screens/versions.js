@@ -4,14 +4,14 @@
 
 import { attempt, confirmDialog, el, menuButton, stylesheet, toast } from '../components.js';
 import { formatDate, formatSize } from '../format.js';
-import { screenArg } from '../router.js';
+import { itemArg } from '../router.js';
 import { versionActions } from './versions/model.js';
 
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
-const screen = { ctx: null, root: null, id: null };
+const screen = { ctx: null, root: null, account: '', id: null };
 
 export async function render(root, ctx) {
-  Object.assign(screen, { ctx, root, id: screenArg(location.search) });
+  Object.assign(screen, { ctx, root, ...itemArg(location.search) });
   const css = stylesheet('screens/versions.css');
   if (!screen.id) {
     await css;
@@ -22,7 +22,10 @@ export async function render(root, ctx) {
   draw(data);
 }
 
-const load = () => screen.ctx.api.call('versions', { item_id: screen.id });
+// O item da tela, nos argumentos de toda chamada.
+const item = () => ({ account: screen.account, item_id: screen.id });
+
+const load = () => screen.ctx.api.call('versions', item());
 
 // Faz a mudança, avisa e redesenha com o que o Drive devolveu.
 const change = (promise, done) =>
@@ -71,7 +74,7 @@ function row(version, data) {
 
 async function run(action, version) {
   const { api, t, locale } = screen.ctx;
-  const args = { item_id: screen.id, version_id: version.id };
+  const args = { ...item(), version_id: version.id };
   if (action === 'download') {
     attempt(api.call('version_download', args), (path) => toast(t('versions-downloaded', { path })));
   } else if (action === 'restore') {

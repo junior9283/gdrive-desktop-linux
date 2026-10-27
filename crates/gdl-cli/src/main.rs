@@ -40,7 +40,10 @@ enum Command {
         client_secret_file: Option<PathBuf>,
     },
     /// Mostra a conta, a pasta e o estado da sincronização.
-    Status,
+    Status {
+        #[command(flatten)]
+        account: AccountArg,
+    },
     /// Deixa disponível off-line.
     Pin { path: PathBuf },
     /// Deixa só on-line.
@@ -50,9 +53,17 @@ enum Command {
     /// Retoma a sincronização.
     Resume,
     /// Lista o que foi guardado em Lost and Found.
-    LostAndFound,
+    LostAndFound {
+        #[command(flatten)]
+        account: AccountArg,
+    },
     /// Desconecta a conta.
     Logout {
+        #[command(flatten)]
+        account: AccountArg,
+        /// Desconecta todas as contas.
+        #[arg(long, conflicts_with = "account")]
+        all: bool,
         /// Sai quando os envios pendentes terminarem.
         #[arg(long, conflicts_with_all = ["move_to", "discard"])]
         finish: bool,
@@ -81,6 +92,13 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
+}
+
+#[derive(clap::Args)]
+struct AccountArg {
+    /// A conta (e-mail); sem isto, a primeira.
+    #[arg(long, value_name = "E-MAIL", default_value = "")]
+    account: String,
 }
 
 type Res<T = ()> = Result<T, ServiceError>;
@@ -143,18 +161,20 @@ async fn service(command: Command, i18n: &I18n) -> Res {
             client_id,
             client_secret_file,
         } => login(&proxy, client_id, client_secret_file, i18n).await,
-        Command::Status => status(&proxy, i18n).await,
+        Command::Status { account } => status(&proxy, &account.account, i18n).await,
         Command::Pin { path } => proxy.pin(&absolute(&path)?).await,
         Command::Unpin { path } => proxy.unpin(&absolute(&path)?).await,
         Command::Pause => proxy.pause().await,
         Command::Resume => proxy.resume().await,
-        Command::LostAndFound => {
-            for file in proxy.list_lost_and_found().await? {
+        Command::LostAndFound { account } => {
+            for file in proxy.list_lost_and_found(&account.account).await? {
                 println!("{file}");
             }
             Ok(())
         }
         Command::Logout {
+            account,
+            all,
             finish,
             move_to,
             discard,
@@ -165,7 +185,10 @@ async fn service(command: Command, i18n: &I18n) -> Res {
                 (_, _, true) => ("discard", String::new()),
                 _ => ("", String::new()),
             };
-            proxy.logout(mode, &dir).await
+            match all {
+                true => proxy.logout_all(mode, &dir).await,
+                false => proxy.logout(&account.account, mode, &dir).await,
+            }
         }
         Command::MenuAction { action, paths } => {
             menu_action(&conn, &proxy, &action, &paths, i18n).await
@@ -219,7 +242,7 @@ async fn uninstall(proxy: &ServiceProxy<'_>, purge: bool, yes: bool, i18n: &I18n
         }
     }
     // Depois de os programas saírem, o serviço não abre mais: pergunta (e o ativa) antes.
-    if purge && !proxy.status().await?.account.is_empty() {
+    if purge && !proxy.status("").await?.account.is_empty() {
         return Err(failed(i18n.tr("uninstall-signed-in", &[])));
     }
     match &install {
@@ -319,8 +342,8 @@ fn hide_echo(stdin: &std::io::Stdin) -> Option<rustix::termios::Termios> {
     Some(original)
 }
 
-async fn status(proxy: &ServiceProxy<'_>, i18n: &I18n) -> Res {
-    let status = proxy.status().await?;
+async fn status(proxy: &ServiceProxy<'_>, account: &str, i18n: &I18n) -> Res {
+    let status = proxy.status(account).await?;
     if status.account.is_empty() {
         println!("{}", i18n.tr("not-logged-in", &[]));
         return Ok(());

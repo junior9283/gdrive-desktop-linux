@@ -133,7 +133,7 @@ impl App {
     /// Relê o estado e atualiza o ícone, se algo visível mudou. Na primeira vez sem conta, abre
     /// o primeiro uso (salvo `DisableOnboardingDialog`).
     async fn refresh(&mut self) {
-        self.status = self.service.status().await.ok();
+        self.status = self.service.status("").await.ok();
         let signed_out = self.status.as_ref().is_some_and(is_signed_out);
         let view = match &self.status {
             Some(status) => TrayView::from_status(status, u32::from(!signed_out), &self.i18n),

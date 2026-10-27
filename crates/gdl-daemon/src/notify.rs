@@ -64,6 +64,17 @@ pub struct Notification {
     /// de abrir outro: um por estado (sem internet, armazenamento cheio) e um por arquivo com
     /// falha de envio; `None` abre sempre.
     pub replaces_key: Option<String>,
+    /// A conta (e-mail) que originou o aviso; vazio nos que não são de uma conta. A ação do botão
+    /// age nela.
+    pub account: String,
+}
+
+impl Notification {
+    /// O lugar que o aviso ocupa: o de mesma chave e mesma conta é substituído por ele.
+    pub fn slot(&self) -> Option<String> {
+        let key = self.replaces_key.as_ref()?;
+        Some(format!("{}:{key}", self.account))
+    }
 }
 
 /// O aviso de um evento do motor; `None` para o que não merece interromper o usuário.
@@ -74,6 +85,7 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
         body,
         action: None,
         replaces_key: None,
+        account: String::new(),
     };
     // Avisos de estado: o novo substitui o anterior do mesmo tipo.
     let state = |kind_id: &'static str, summary: &'static str, body: String| Notification {
@@ -184,10 +196,10 @@ impl Notifier {
     /// Mostra o aviso (no lugar do anterior do mesmo tipo) e devolve o ID que o servidor deu.
     /// Sem servidor de notificações, só registra no log.
     pub async fn send(&self, note: &Notification) -> Option<u32> {
-        let replaces = note
-            .replaces_key
+        let slot = note.slot();
+        let replaces = slot
             .as_ref()
-            .and_then(|key| self.shown().get(key).copied())
+            .and_then(|slot| self.shown().get(slot).copied())
             .unwrap_or(0);
         let actions: Vec<&str> = note
             .action
@@ -207,9 +219,9 @@ impl Notifier {
                 -1,
             )
             .await;
-        match (sent, &note.replaces_key) {
-            (Ok(id), Some(key)) => {
-                self.shown().insert(key.clone(), id);
+        match (sent, slot) {
+            (Ok(id), Some(slot)) => {
+                self.shown().insert(slot, id);
                 Some(id)
             }
             (Ok(id), None) => Some(id),

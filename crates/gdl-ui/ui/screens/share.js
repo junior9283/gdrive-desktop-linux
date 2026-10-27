@@ -4,7 +4,7 @@
 // link); e copiar o link. A lógica sem DOM fica em `share/model.js`.
 
 import { attempt, choice, el, icon, stylesheet, toast } from '../components.js';
-import { screenArg } from '../router.js';
+import { itemArg } from '../router.js';
 import { ROLES, generalKinds, parseEmails } from './share/model.js';
 
 const GENERAL_ICONS = { restricted: 'lock', domain: 'domain', anyone: 'public' };
@@ -12,10 +12,10 @@ const GENERAL_ICONS = { restricted: 'lock', domain: 'domain', anyone: 'public' }
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta). `people`
 // e `general` são as partes redesenhadas a cada mudança (o que foi digitado em "Adicionar
 // pessoas" fica).
-const screen = { ctx: null, root: null, id: null, people: null, general: null };
+const screen = { ctx: null, root: null, account: '', id: null, people: null, general: null };
 
 export async function render(root, ctx) {
-  Object.assign(screen, { ctx, root, id: screenArg(location.search) });
+  Object.assign(screen, { ctx, root, ...itemArg(location.search) });
   const css = stylesheet('screens/share.css');
   if (!screen.id) {
     await css;
@@ -26,7 +26,10 @@ export async function render(root, ctx) {
   draw(data);
 }
 
-const load = () => screen.ctx.api.call('sharing', { item_id: screen.id });
+// O item da tela, nos argumentos de toda chamada.
+const item = () => ({ account: screen.account, item_id: screen.id });
+
+const load = () => screen.ctx.api.call('sharing', item());
 
 // Faz a mudança e redesenha quem tem acesso e o acesso geral com o que o Drive devolveu.
 const change = (promise, done) =>
@@ -86,7 +89,7 @@ function addPeople() {
     const { emails: list, invalid } = parseEmails(emails.value);
     if (invalid.length) return toast(t('share-invalid', { emails: invalid.join(', ') }));
     if (!list.length) return emails.focus();
-    const added = api.call('share_add', { item_id: screen.id, emails: list, role: role.value, notify: notify.checked, message: message.value });
+    const added = api.call('share_add', { ...item(), emails: list, role: role.value, notify: notify.checked, message: message.value });
     // Com sucesso, o campo e a mensagem ficam livres para as próximas pessoas.
     change(added.then(() => {
       emails.value = '';
@@ -118,7 +121,7 @@ function personRow(person, canShare) {
     : roleSelect(t('share-role-of', { name: person.name || person.email }), person.role, ['remove']);
   control.addEventListener('change', () => {
     const role = control.value === 'remove' ? '' : control.value;
-    change(api.call('share_set_role', { item_id: screen.id, permission_id: person.id, role }), role ? null : t('share-removed'));
+    change(api.call('share_set_role', { ...item(), permission_id: person.id, role }), role ? null : t('share-removed'));
   });
   return el('li', { 'data-email': person.email }, who, control);
 }
@@ -133,7 +136,7 @@ function generalAccess(data) {
   role.disabled = !data.can_share;
   role.hidden = data.general === 'restricted';
   const apply = () =>
-    change(api.call('share_set_general', { item_id: screen.id, kind: kind.value, role: kind.value === 'restricted' ? '' : role.value }));
+    change(api.call('share_set_general', { ...item(), kind: kind.value, role: kind.value === 'restricted' ? '' : role.value }));
   kind.addEventListener('change', apply);
   role.addEventListener('change', apply);
   return el(

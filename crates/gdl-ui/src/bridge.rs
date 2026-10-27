@@ -1,5 +1,6 @@
 //! A ponte entre as telas e o serviço: um comando só (`call`) com uma tabela fixa de métodos do
-//! `ServiceProxy`, e os sinais do serviço virando eventos. As telas nunca falam com o Google.
+//! `ServiceProxy` (o argumento `account` é opcional: sem ele vale a primeira conta), e os sinais
+//! do serviço virando eventos. As telas nunca falam com o Google.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,6 +52,11 @@ impl<'a> Args<'a> {
 
     fn str(&self, key: &str) -> Result<&'a str, UiError> {
         self.get(key)?.as_str().ok_or_else(|| wrong(key))
+    }
+
+    /// A conta (e-mail) da chamada; sem ela, a primeira.
+    fn account(&self) -> &'a str {
+        self.0.get("account").and_then(Value::as_str).unwrap_or("")
     }
 
     fn u64(&self, key: &str) -> Result<u64, UiError> {
@@ -121,10 +127,10 @@ impl Bridge {
         }
         let reply = match method {
             "begin_login" => j!(s.begin_login(a.str("client_id")?, a.str("client_secret")?)),
-            "status" => j!(s.status()),
-            "account_info" => j!(s.account_info()),
-            "activity" => j!(s.activity()),
-            "errors" => j!(s.errors()),
+            "status" => j!(s.status(a.account())),
+            "account_info" => j!(s.account_info(a.account())),
+            "activity" => j!(s.activity(a.account())),
+            "errors" => j!(s.errors(a.account())),
             "notifications" => j!(s.notifications()),
             "mark_notifications_read" => j!(s.mark_notifications_read()),
             "dismiss_notification" => j!(s.dismiss_notification(a.u64("id")?)),
@@ -135,26 +141,27 @@ impl Bridge {
             "set_notification_enabled" => {
                 j!(s.set_notification_enabled(a.str("kind")?, a.bool("enabled")?))
             }
-            "retry" => j!(s.retry(a.str("item_id")?)),
-            "cancel_upload" => j!(s.cancel_upload(a.str("item_id")?)),
+            "retry" => j!(s.retry(a.account(), a.str("item_id")?)),
+            "cancel_upload" => j!(s.cancel_upload(a.account(), a.str("item_id")?)),
             "pin" => j!(s.pin(a.str("path")?)),
             "unpin" => j!(s.unpin(a.str("path")?)),
             "pause" => j!(s.pause()),
             "resume" => j!(s.resume()),
-            "list_lost_and_found" => j!(s.list_lost_and_found()),
-            "offline_summary" => j!(s.offline_summary()),
-            "offline_items" => j!(s.offline_items(a.str("folder_id")?)),
-            "unpin_item" => j!(s.unpin_item(a.str("item_id")?)),
-            "clear_cache" => j!(s.clear_cache()),
-            "clear_offline_files" => j!(s.clear_offline_files()),
-            "search" => j!(s.search(a.str("query")?)),
-            "recent_items" => j!(s.recent_items()),
-            "open_item" => j!(s.open_item(a.str("item_id")?, a.str("target")?)),
-            "web_link" => j!(s.web_link(a.str("item_id")?)),
-            "shared_with_me" => j!(s.shared_with_me()),
-            "add_shortcut" => j!(s.add_shortcut(a.str("item_id")?)),
-            "sharing" => j!(s.sharing(a.str("item_id")?)),
+            "list_lost_and_found" => j!(s.list_lost_and_found(a.account())),
+            "offline_summary" => j!(s.offline_summary(a.account())),
+            "offline_items" => j!(s.offline_items(a.account(), a.str("folder_id")?)),
+            "unpin_item" => j!(s.unpin_item(a.account(), a.str("item_id")?)),
+            "clear_cache" => j!(s.clear_cache(a.account())),
+            "clear_offline_files" => j!(s.clear_offline_files(a.account())),
+            "search" => j!(s.search(a.account(), a.str("query")?)),
+            "recent_items" => j!(s.recent_items(a.account())),
+            "open_item" => j!(s.open_item(a.account(), a.str("item_id")?, a.str("target")?)),
+            "web_link" => j!(s.web_link(a.account(), a.str("item_id")?)),
+            "shared_with_me" => j!(s.shared_with_me(a.account())),
+            "add_shortcut" => j!(s.add_shortcut(a.account(), a.str("item_id")?)),
+            "sharing" => j!(s.sharing(a.account(), a.str("item_id")?)),
             "share_add" => j!(s.share_add(
+                a.account(),
                 a.str("item_id")?,
                 &a.strs("emails")?,
                 a.str("role")?,
@@ -162,20 +169,38 @@ impl Bridge {
                 a.str("message")?
             )),
             "share_set_role" => {
-                j!(s.share_set_role(a.str("item_id")?, a.str("permission_id")?, a.str("role")?))
+                j!(s.share_set_role(
+                    a.account(),
+                    a.str("item_id")?,
+                    a.str("permission_id")?,
+                    a.str("role")?
+                ))
             }
             "share_set_general" => {
-                j!(s.share_set_general(a.str("item_id")?, a.str("kind")?, a.str("role")?))
+                j!(s.share_set_general(
+                    a.account(),
+                    a.str("item_id")?,
+                    a.str("kind")?,
+                    a.str("role")?
+                ))
             }
-            "versions" => j!(s.versions(a.str("item_id")?)),
+            "versions" => j!(s.versions(a.account(), a.str("item_id")?)),
             "version_download" => {
-                j!(s.version_download(a.str("item_id")?, a.str("version_id")?))
+                j!(s.version_download(a.account(), a.str("item_id")?, a.str("version_id")?))
             }
-            "version_restore" => j!(s.version_restore(a.str("item_id")?, a.str("version_id")?)),
+            "version_restore" => {
+                j!(s.version_restore(a.account(), a.str("item_id")?, a.str("version_id")?))
+            }
             "version_keep" => {
-                j!(s.version_keep(a.str("item_id")?, a.str("version_id")?, a.bool("keep")?))
+                j!(s.version_keep(
+                    a.account(),
+                    a.str("item_id")?,
+                    a.str("version_id")?,
+                    a.bool("keep")?
+                ))
             }
-            "logout" => j!(s.logout(a.str("mode")?, a.str("dir")?)),
+            "logout" => j!(s.logout(a.account(), a.str("mode")?, a.str("dir")?)),
+            "logout_all" => j!(s.logout_all(a.str("mode")?, a.str("dir")?)),
             "preferences" => j!(s.preferences()),
             "set_preferences" => j!(s.set_preferences(&a.pairs("values")?)),
             "reset_preferences" => j!(s.reset_preferences()),
@@ -188,7 +213,7 @@ impl Bridge {
 
     /// A pasta do Drive (a montagem), direto do `Status` do serviço.
     pub async fn mount_point(&self) -> Result<String, UiError> {
-        let status = self.settle(self.service.status().await)?;
+        let status = self.settle(self.service.status("").await)?;
         Ok(status.mount_point)
     }
 
@@ -297,7 +322,7 @@ mod tests {
     use std::sync::Mutex;
 
     use gdl_ipc::testing::{PrivateBus, p2p_pair};
-    use gdl_ipc::{BUS_NAME, OBJECT_PATH, Status};
+    use gdl_ipc::{BUS_NAME, OBJECT_PATH, SearchResult, Status};
     use zbus::object_server::SignalEmitter;
 
     use super::*;
@@ -307,7 +332,7 @@ mod tests {
 
     #[zbus::interface(name = "io.github.junior9283.GDriveDesktopLinux1.Service")]
     impl FakeService {
-        async fn status(&self) -> Result<Status, ServiceError> {
+        async fn status(&self, _account: &str) -> Result<Status, ServiceError> {
             Err(ServiceError::NotLoggedIn("nenhuma conta conectada".into()))
         }
 
@@ -317,6 +342,17 @@ mod tests {
             } else {
                 Err(ServiceError::NotFound(path.into()))
             }
+        }
+
+        async fn search(
+            &self,
+            account: &str,
+            query: &str,
+        ) -> Result<Vec<SearchResult>, ServiceError> {
+            Ok(vec![SearchResult {
+                name: format!("{account}|{query}"),
+                ..SearchResult::default()
+            }])
         }
 
         #[zbus(signal)]
@@ -348,6 +384,23 @@ mod tests {
             bridge.call("pin", json!({ "path": "/Meu Drive/a" })).await,
             Ok(Value::Null)
         );
+    }
+
+    #[tokio::test]
+    async fn account_goes_first_and_defaults_to_the_first_account() {
+        let (_server, bridge) = bridge_with_fake().await;
+
+        let with = bridge
+            .call(
+                "search",
+                json!({ "account": "ana@example.com", "query": "x" }),
+            )
+            .await;
+        let without = bridge.call("search", json!({ "query": "x" })).await;
+
+        let name = |reply: Result<Value, UiError>| reply.unwrap()[0]["name"].clone();
+        assert_eq!(name(with), "ana@example.com|x");
+        assert_eq!(name(without), "|x");
     }
 
     #[tokio::test]

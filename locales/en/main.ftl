@@ -15,6 +15,7 @@ login-failure = Sign-in failed. Close this window and try again in the app.
 
 # Notifications
 notify-title = Google Drive
+notify-account = Account: { $email }
 notify-lost-found-title = Edit saved to Lost and Found
 notify-lost-found-body = Your version of { $name } wasn't uploaded because { $reason }. It was saved to Lost and Found.
 notify-lost-found-action = View files

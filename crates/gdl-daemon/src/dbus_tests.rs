@@ -14,7 +14,7 @@ async fn login_over_dbus_emits_login_finished() {
     assert!(ok, "{error}");
     assert_eq!(email, h.fake.email());
     assert!(h.tokens.load(&email).await.unwrap().is_some());
-    let status = h.proxy.status().await.unwrap();
+    let status = h.proxy.status("").await.unwrap();
     assert_eq!(status.account, email);
     assert!(h.drive().is_dir());
 }
@@ -28,7 +28,7 @@ async fn login_rejects_account_outside_allowed_pattern() {
     assert!(!ok);
     assert!(!error.is_empty());
     assert!(h.tokens.load(&h.fake.email()).await.unwrap().is_none());
-    assert_eq!(h.proxy.status().await.unwrap().account, "");
+    assert_eq!(h.proxy.status("").await.unwrap().account, "");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -40,7 +40,7 @@ async fn status_reports_pending_and_paused() {
     let path = h.drive().join("novo.txt");
     blocking(move || std::fs::write(path, b"pendente").unwrap()).await;
 
-    let status = h.proxy.status().await.unwrap();
+    let status = h.proxy.status("").await.unwrap();
     assert_eq!(status.pending_uploads, 1);
     assert!(status.paused);
     assert!(status.mount_point.ends_with("Google Drive"));
@@ -75,12 +75,12 @@ async fn logout_with_pending_requires_mode() {
     let path = h.drive().join("rascunho.txt");
     blocking(move || std::fs::write(path, b"ainda nao subiu").unwrap()).await;
 
-    let err = h.proxy.logout("", "").await.unwrap_err();
+    let err = h.proxy.logout("", "", "").await.unwrap_err();
     assert!(err.to_string().contains("PendingUploads"), "{err}");
-    assert_eq!(h.proxy.status().await.unwrap().account, h.fake.email());
+    assert_eq!(h.proxy.status("").await.unwrap().account, h.fake.email());
 
-    h.proxy.logout("discard", "").await.unwrap();
-    assert_eq!(h.proxy.status().await.unwrap().account, "");
+    h.proxy.logout("", "discard", "").await.unwrap();
+    assert_eq!(h.proxy.status("").await.unwrap().account, "");
     assert!(h.tokens.load(&h.fake.email()).await.unwrap().is_none());
     assert!(!h.drive().exists(), "a montagem saiu");
 }
@@ -106,7 +106,7 @@ async fn logout_removes_seeded_thumbnails() {
     let other = thumbs.join("normal").join("de-outro-caminho.png");
     std::fs::write(&other, b"png de outro programa").unwrap();
 
-    h.proxy.logout("discard", "").await.unwrap();
+    h.proxy.logout("", "discard", "").await.unwrap();
 
     for png in &seeded {
         assert!(!png.exists(), "{png:?} ficou depois de sair da conta");
@@ -173,7 +173,7 @@ async fn busy_mount_point_falls_back_to_numbered_folder() {
 
     h.logged_in().await;
 
-    let status = h.proxy.status().await.unwrap();
+    let status = h.proxy.status("").await.unwrap();
     assert!(
         status.mount_point.ends_with("Google Drive (1)"),
         "{status:?}"
@@ -215,7 +215,7 @@ async fn notifications_are_sent_for_lost_and_found() {
         note.actions.contains(&"Ver arquivos".to_string()),
         "{note:?}"
     );
-    assert_eq!(h.proxy.list_lost_and_found().await.unwrap().len(), 1);
+    assert_eq!(h.proxy.list_lost_and_found("").await.unwrap().len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -230,7 +230,7 @@ async fn logout_move_copies_pending_files_without_overwriting() {
     std::fs::write(saved.join("rascunho.txt"), b"de antes").unwrap();
 
     h.proxy
-        .logout("move", saved.to_str().unwrap())
+        .logout("", "move", saved.to_str().unwrap())
         .await
         .unwrap();
 
@@ -242,7 +242,7 @@ async fn logout_move_copies_pending_files_without_overwriting() {
         std::fs::read(saved.join("rascunho (1).txt")).unwrap(),
         b"ainda nao subiu"
     );
-    assert_eq!(h.proxy.status().await.unwrap().account, "");
+    assert_eq!(h.proxy.status("").await.unwrap().account, "");
 }
 
 /// Bug: com o armazenamento cheio, cada tentativa de cada arquivo abria um aviso novo.
@@ -290,17 +290,17 @@ async fn logout_never_deletes_lost_and_found_silently() {
     })
     .await;
     drop(engine);
-    let saved = h.proxy.list_lost_and_found().await.unwrap();
+    let saved = h.proxy.list_lost_and_found("").await.unwrap();
 
-    let err = h.proxy.logout("", "").await.unwrap_err();
+    let err = h.proxy.logout("", "", "").await.unwrap_err();
     assert!(err.to_string().contains("PendingUploads"), "{err}");
     let copies = h.home.join("Copias");
     h.proxy
-        .logout("move", copies.to_str().unwrap())
+        .logout("", "move", copies.to_str().unwrap())
         .await
         .unwrap();
 
-    assert_eq!(h.proxy.status().await.unwrap().account, "");
+    assert_eq!(h.proxy.status("").await.unwrap().account, "");
     assert_eq!(std::fs::read(&saved[0]).unwrap(), b"editado aqui");
     let copied = std::fs::read_dir(&copies).unwrap().count();
     assert_eq!(copied, 1, "o Lost and Found vai junto para a pasta");
@@ -309,7 +309,7 @@ async fn logout_never_deletes_lost_and_found_silently() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn status_reports_state_and_syncing_count() {
     let h = Harness::new().await;
-    assert_eq!(h.proxy.status().await.unwrap().state, "signed-out");
+    assert_eq!(h.proxy.status("").await.unwrap().state, "signed-out");
     h.logged_in().await;
     status_until(&h, "sincronizado", |s| s.state == "synced").await;
 
@@ -317,7 +317,7 @@ async fn status_reports_state_and_syncing_count() {
     blocking(move || std::fs::write(path, b"para subir").unwrap()).await;
 
     // O envio só começa 2 s depois do fechamento: até lá, está na fila.
-    let status = h.proxy.status().await.unwrap();
+    let status = h.proxy.status("").await.unwrap();
     assert_eq!(status.state, "syncing", "{status:?}");
     assert_eq!(status.pending_uploads, 1);
     assert_eq!(status.syncing, 1);
@@ -329,7 +329,7 @@ async fn account_info_has_name_quota_and_photo() {
     let h = Harness::new().await;
     h.logged_in().await;
 
-    let info = h.proxy.account_info().await.unwrap();
+    let info = h.proxy.account_info("").await.unwrap();
 
     assert_eq!(info.email, h.fake.email());
     assert_eq!(info.name, "Pessoa de Teste");
@@ -342,7 +342,7 @@ async fn account_info_has_name_quota_and_photo() {
     // A foto fica guardada: a segunda consulta não baixa de novo.
     let photos = h.fake.requests("/photo.png");
     assert_eq!(photos, 1);
-    h.proxy.account_info().await.unwrap();
+    h.proxy.account_info("").await.unwrap();
     assert_eq!(h.fake.requests("/photo.png"), photos);
 }
 
@@ -358,14 +358,14 @@ async fn activity_over_dbus() {
     blocking(move || std::fs::write(path, b"atividade").unwrap()).await;
 
     // Na fila antes de começar.
-    let rows = h.proxy.activity().await.unwrap();
+    let rows = h.proxy.activity("").await.unwrap();
     assert_eq!(rows[0].name, "a.txt");
     assert_eq!(rows[0].state, "upload-queued");
     tokio::time::timeout(std::time::Duration::from_secs(10), changed.next())
         .await
         .expect("ActivityChanged");
     status_until(&h, "envio concluído", |s| s.pending_uploads == 0).await;
-    let rows = h.proxy.activity().await.unwrap();
+    let rows = h.proxy.activity("").await.unwrap();
     let row = rows.iter().find(|r| r.name == "a.txt").unwrap();
     assert_eq!(row.state, "uploaded");
     assert_eq!(row.percent, 100);
@@ -395,7 +395,7 @@ async fn upload_progress_reaches_activity() {
 
     let start = std::time::Instant::now();
     loop {
-        let rows = h.proxy.activity().await.unwrap();
+        let rows = h.proxy.activity("").await.unwrap();
         let row = rows.iter().find(|r| r.name == "grande.bin").unwrap();
         if row.state == "uploading" && row.percent == 40 {
             break;
@@ -418,7 +418,7 @@ async fn cancel_upload_over_dbus() {
     let file = path.clone();
     blocking(move || std::fs::write(file, vec![7u8; 20 * MIB]).unwrap()).await;
     wait_until("envio empacado na metade", || h.fake.byte_limit_reached()).await;
-    let rows = h.proxy.activity().await.unwrap();
+    let rows = h.proxy.activity("").await.unwrap();
     let id = rows
         .iter()
         .find(|r| r.name == "grande.bin")
@@ -426,13 +426,13 @@ async fn cancel_upload_over_dbus() {
         .item_id
         .clone();
 
-    assert_eq!(h.proxy.cancel_upload(&id).await.unwrap(), "canceled");
+    assert_eq!(h.proxy.cancel_upload("", &id).await.unwrap(), "canceled");
 
     assert!(!blocking(move || path.exists()).await);
-    let rows = h.proxy.activity().await.unwrap();
+    let rows = h.proxy.activity("").await.unwrap();
     assert_eq!(rows[0].name, "grande.bin");
     assert_eq!(rows[0].state, "upload-canceled");
-    assert_eq!(h.proxy.cancel_upload(&id).await.unwrap(), "too-late");
+    assert_eq!(h.proxy.cancel_upload("", &id).await.unwrap(), "too-late");
     let note = h.proxy.notifications().await.unwrap().remove(0);
     assert_eq!(
         (note.kind.as_str(), note.action_key.as_str()),
@@ -446,11 +446,11 @@ async fn cancel_upload_over_dbus() {
     assert_eq!(canceled.list().len(), 1);
     drop(engine);
     // A cópia cancelada só existe aqui: sair da conta não a apaga sem perguntar.
-    let err = h.proxy.logout("", "").await.unwrap_err();
+    let err = h.proxy.logout("", "", "").await.unwrap_err();
     assert!(err.to_string().contains("PendingUploads"), "{err}");
     let copies = h.home.join("Copias");
     h.proxy
-        .logout("move", copies.to_str().unwrap())
+        .logout("", "move", copies.to_str().unwrap())
         .await
         .unwrap();
     assert_eq!(std::fs::read_dir(&copies).unwrap().count(), 1);
@@ -475,7 +475,7 @@ async fn errors_over_dbus() {
     blocking(move || std::fs::write(path, b"sem espaco").unwrap()).await;
     status_until(&h, "erro de cota", |s| s.errors == 2).await;
 
-    let errors = h.proxy.errors().await.unwrap();
+    let errors = h.proxy.errors("").await.unwrap();
 
     let categories: Vec<_> = errors.iter().map(|e| e.category.as_str()).collect();
     assert_eq!(categories, ["quota", "lost-and-found"]);
@@ -494,12 +494,12 @@ async fn errors_over_dbus() {
     );
     assert_eq!(errors[1].item_id, "");
     h.fake.clear_faults();
-    h.proxy.retry(&errors[0].item_id).await.unwrap();
+    h.proxy.retry("", &errors[0].item_id).await.unwrap();
     status_until(&h, "envio refeito", |s| {
         s.errors == 1 && s.pending_uploads == 0
     })
     .await;
-    assert_eq!(h.proxy.errors().await.unwrap().len(), 1);
+    assert_eq!(h.proxy.errors("").await.unwrap().len(), 1);
 }
 
 /// Copia o ponteiro `Plano.gdoc` como `nome`.gdoc (vira atalho) e espera o atalho no Drive.
@@ -612,7 +612,7 @@ async fn invoking_resume_action_resumes_sync() {
         .await
         .unwrap();
 
-    assert!(!h.proxy.status().await.unwrap().paused);
+    assert!(!h.proxy.status("").await.unwrap().paused);
     let listed = h.proxy.notifications().await.unwrap();
     assert!(listed.iter().find(|n| n.id == resume[0].id).unwrap().read);
     let err = h
@@ -660,7 +660,7 @@ async fn shared_with_me_lists_and_adds_shortcut() {
         .add_shared_file("Orçamento.xlsx", "Ana Souza", b"planilha".to_vec());
     h.logged_in().await;
 
-    let items = h.proxy.shared_with_me().await.unwrap();
+    let items = h.proxy.shared_with_me("").await.unwrap();
     assert_eq!(items.len(), 1, "{items:?}");
     assert_eq!(
         (items[0].id.as_str(), items[0].name.as_str()),
@@ -675,10 +675,10 @@ async fn shared_with_me_lists_and_adds_shortcut() {
     };
     assert!(!exists().await);
 
-    h.proxy.add_shortcut(&shared).await.unwrap();
+    h.proxy.add_shortcut("", &shared).await.unwrap();
 
     assert!(exists().await, "o atalho aparece no Meu Drive");
-    let err = h.proxy.add_shortcut("nao-existe").await.unwrap_err();
+    let err = h.proxy.add_shortcut("", "nao-existe").await.unwrap_err();
     assert_eq!(err.short_name(), "NotFound", "{err}");
 }
 
@@ -698,7 +698,7 @@ async fn open_item_uses_mount_path() {
         (&file, "web"),
         (&top, "folder"),
     ] {
-        h.proxy.open_item(id, target).await.unwrap();
+        h.proxy.open_item("", id, target).await.unwrap();
     }
 
     wait_until("quatro aberturas", || h.opened().len() == before + 4).await;
@@ -714,10 +714,14 @@ async fn open_item_uses_mount_path() {
     ];
     expected.sort();
     assert_eq!(opened, expected);
-    assert_eq!(h.proxy.web_link(&file).await.unwrap(), web);
-    let err = h.proxy.open_item(&file, "janela").await.unwrap_err();
+    assert_eq!(h.proxy.web_link("", &file).await.unwrap(), web);
+    let err = h.proxy.open_item("", &file, "janela").await.unwrap_err();
     assert_eq!(err.short_name(), "InvalidArgs", "{err}");
-    let err = h.proxy.open_item("nao-existe", "file").await.unwrap_err();
+    let err = h
+        .proxy
+        .open_item("", "nao-existe", "file")
+        .await
+        .unwrap_err();
     assert_eq!(err.short_name(), "NotFound", "{err}");
 }
 
@@ -738,7 +742,7 @@ async fn offline_files_over_dbus() {
     })
     .await;
 
-    let top = h.proxy.offline_items("").await.unwrap();
+    let top = h.proxy.offline_items("", "").await.unwrap();
     assert_eq!(top.len(), 1, "{top:?}");
     assert_eq!(
         (
@@ -749,35 +753,35 @@ async fn offline_files_over_dbus() {
         (a.as_str(), a_path.as_str(), "on")
     );
     assert_eq!((top[0].size, top[0].is_folder), (5, false));
-    let in_root = h.proxy.offline_items(&root).await.unwrap();
+    let in_root = h.proxy.offline_items("", &root).await.unwrap();
     assert_eq!(in_root.len(), 1, "{in_root:?}");
     assert_eq!(
         (in_root[0].name.as_str(), in_root[0].pin.as_str()),
         ("Pasta", "mixed")
     );
     assert!(in_root[0].is_folder);
-    let summary = h.proxy.offline_summary().await.unwrap();
+    let summary = h.proxy.offline_summary("").await.unwrap();
     assert_eq!((summary.pinned_count, summary.pinned_bytes), (1, 5));
     assert_eq!(summary.cache_bytes, 5);
     assert!(summary.free_bytes > 0);
-    assert_eq!(h.proxy.clear_cache().await.unwrap(), 0, "off-line fica");
+    assert_eq!(h.proxy.clear_cache("").await.unwrap(), 0, "off-line fica");
 
-    h.proxy.unpin_item(&a).await.unwrap();
-    assert!(h.proxy.offline_items("").await.unwrap().is_empty());
+    h.proxy.unpin_item("", &a).await.unwrap();
+    assert!(h.proxy.offline_items("", "").await.unwrap().is_empty());
     h.proxy.pin(&a_path).await.unwrap();
-    h.proxy.clear_offline_files().await.unwrap();
-    assert!(h.proxy.offline_items("").await.unwrap().is_empty());
-    assert_eq!(h.proxy.clear_cache().await.unwrap(), 5);
+    h.proxy.clear_offline_files("").await.unwrap();
+    assert!(h.proxy.offline_items("", "").await.unwrap().is_empty());
+    assert_eq!(h.proxy.clear_cache("").await.unwrap(), 5);
 
-    let found = h.proxy.search("A.TX").await.unwrap();
+    let found = h.proxy.search("", "A.TX").await.unwrap();
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(
         (found[0].path.as_str(), found[0].is_folder),
         (a_path.as_str(), false)
     );
-    let folder_hit = h.proxy.search("past").await.unwrap();
+    let folder_hit = h.proxy.search("", "past").await.unwrap();
     assert_eq!(folder_hit[0].mime, "application/vnd.google-apps.folder");
-    let recent = h.proxy.recent_items().await.unwrap();
+    let recent = h.proxy.recent_items("").await.unwrap();
     assert!(recent.iter().all(|r| !r.is_folder));
 }
 
@@ -1006,7 +1010,7 @@ async fn uninstall_refuses_to_purge_with_account_connected() {
     let err = h.proxy.uninstall(true).await.unwrap_err();
 
     assert!(err.to_string().contains("Failed"), "{err}");
-    assert_eq!(h.proxy.status().await.unwrap().account, h.fake.email());
+    assert_eq!(h.proxy.status("").await.unwrap().account, h.fake.email());
     assert!(h.drive().is_dir());
 }
 
@@ -1057,7 +1061,7 @@ async fn uninstall_unmounts_and_keeps_the_account() {
 async fn uninstall_purge_keeps_only_the_kept_copies() {
     let h = Harness::new().await;
     h.logged_in().await;
-    h.proxy.logout("discard", "").await.unwrap();
+    h.proxy.logout("", "discard", "").await.unwrap();
     let paths = h.paths();
     let account = paths.data_dir.join(h.fake.email());
     let kept = account.join("lost_and_found").join("edição.txt");
@@ -1249,8 +1253,8 @@ async fn menu_opens_share_versions_and_office_editor() {
     wait_until("três aberturas", || h.opened().len() == before + 3).await;
     let opened = h.opened().split_off(before);
     for wanted in [
-        format!("--open share:{id}"),
-        format!("--open versions:{id}"),
+        format!("--open share:{}/{id}", h.fake.email()),
+        format!("--open versions:{}/{id}", h.fake.email()),
         format!("https://docs.google.com/spreadsheets/d/{id}/edit?rtpof=true"),
     ] {
         assert!(opened.contains(&wanted), "{wanted} em {opened:?}");
@@ -1290,7 +1294,7 @@ async fn copying_a_link_says_who_can_open_it() {
     );
 
     h.proxy
-        .share_set_general(&id, "anyone", "commenter")
+        .share_set_general("", &id, "anyone", "commenter")
         .await
         .unwrap();
     h.proxy.menu_action("copy-link", &[&path]).await.unwrap();
@@ -1309,7 +1313,7 @@ async fn share_window_adds_people_and_changes_general_access() {
         .add_file(&h.fake.root_id(), "Plano.txt", b"x".to_vec());
     h.logged_in().await;
 
-    let before = h.proxy.sharing(&id).await.unwrap();
+    let before = h.proxy.sharing("", &id).await.unwrap();
     assert_eq!(before.name, "Plano.txt");
     assert!(before.can_share);
     assert_eq!(
@@ -1322,6 +1326,7 @@ async fn share_window_adds_people_and_changes_general_access() {
 
     h.proxy
         .share_add(
+            "",
             &id,
             &[" ana@example.com ", "bia@example.com"],
             "commenter",
@@ -1331,15 +1336,15 @@ async fn share_window_adds_people_and_changes_general_access() {
         .await
         .unwrap();
     h.proxy
-        .share_set_general(&id, "anyone", "reader")
+        .share_set_general("", &id, "anyone", "reader")
         .await
         .unwrap();
     h.proxy
-        .share_set_general(&id, "anyone", "writer")
+        .share_set_general("", &id, "anyone", "writer")
         .await
         .unwrap();
 
-    let after = h.proxy.sharing(&id).await.unwrap();
+    let after = h.proxy.sharing("", &id).await.unwrap();
     let people: Vec<_> = after
         .people
         .iter()
@@ -1359,10 +1364,10 @@ async fn share_window_adds_people_and_changes_general_access() {
     assert_eq!(h.fake.share_emails().len(), 2, "um aviso por pessoa");
 
     h.proxy
-        .share_set_general(&id, "domain", "reader")
+        .share_set_general("", &id, "domain", "reader")
         .await
         .unwrap();
-    let domain = h.proxy.sharing(&id).await.unwrap();
+    let domain = h.proxy.sharing("", &id).await.unwrap();
     assert_eq!(
         (domain.general.as_str(), domain.general_role.as_str()),
         ("domain", "reader")
@@ -1376,14 +1381,14 @@ async fn share_window_adds_people_and_changes_general_access() {
     );
 
     h.proxy
-        .share_set_role(&id, &after.people[1].id, "")
+        .share_set_role("", &id, &after.people[1].id, "")
         .await
         .unwrap();
     h.proxy
-        .share_set_general(&id, "restricted", "")
+        .share_set_general("", &id, "restricted", "")
         .await
         .unwrap();
-    let last = h.proxy.sharing(&id).await.unwrap();
+    let last = h.proxy.sharing("", &id).await.unwrap();
     assert_eq!(last.people.len(), 2, "tirou a Ana");
     assert_eq!(last.general, "restricted");
 }
@@ -1399,19 +1404,19 @@ async fn share_window_refuses_bad_input() {
     let name = |e: gdl_ipc::ServiceError| e.short_name();
     let bad_email = h
         .proxy
-        .share_add(&id, &["sem-arroba"], "reader", false, "")
+        .share_add("", &id, &["sem-arroba"], "reader", false, "")
         .await;
     assert_eq!(name(bad_email.unwrap_err()), "InvalidArgs");
     let owner = h
         .proxy
-        .share_add(&id, &["a@example.com"], "owner", false, "")
+        .share_add("", &id, &["a@example.com"], "owner", false, "")
         .await;
     assert_eq!(
         name(owner.unwrap_err()),
         "InvalidArgs",
         "dono não se dá por aqui"
     );
-    let kind = h.proxy.share_set_general(&id, "todos", "reader").await;
+    let kind = h.proxy.share_set_general("", &id, "todos", "reader").await;
     assert_eq!(name(kind.unwrap_err()), "InvalidArgs");
     assert_eq!(h.fake.permissions(&id).len(), 1, "nada mudou");
 }
@@ -1425,13 +1430,13 @@ async fn versions_window_downloads_keeps_and_restores() {
     h.fake.modify_remote(&id, b"segunda".to_vec());
     h.logged_in().await;
 
-    let v = h.proxy.versions(&id).await.unwrap();
+    let v = h.proxy.versions("", &id).await.unwrap();
     assert_eq!(v.name, "notas.txt");
     let sizes: Vec<_> = v.versions.iter().map(|x| (x.size, x.current)).collect();
     assert_eq!(sizes, [(7, true), (8, false)]);
     let old = &v.versions[1];
 
-    let saved = h.proxy.version_download(&id, &old.id).await.unwrap();
+    let saved = h.proxy.version_download("", &id, &old.id).await.unwrap();
     let saved = std::path::PathBuf::from(saved);
     assert_eq!(saved.parent().unwrap(), h.home.join("Downloads"));
     let file_name = saved.file_name().unwrap().to_string_lossy().into_owned();
@@ -1440,13 +1445,13 @@ async fn versions_window_downloads_keeps_and_restores() {
         "{file_name}"
     );
     assert_eq!(std::fs::read(&saved).unwrap(), b"primeira");
-    let again = h.proxy.version_download(&id, &old.id).await.unwrap();
+    let again = h.proxy.version_download("", &id, &old.id).await.unwrap();
     assert_ne!(again, saved.to_string_lossy(), "não sobrescreve");
 
-    h.proxy.version_keep(&id, &old.id, true).await.unwrap();
-    assert!(h.proxy.versions(&id).await.unwrap().versions[1].keep_forever);
+    h.proxy.version_keep("", &id, &old.id, true).await.unwrap();
+    assert!(h.proxy.versions("", &id).await.unwrap().versions[1].keep_forever);
 
-    h.proxy.version_restore(&id, &old.id).await.unwrap();
+    h.proxy.version_restore("", &id, &old.id).await.unwrap();
     let content = h.drive().join("notas.txt");
     assert_eq!(
         blocking(move || std::fs::read(content).unwrap()).await,
@@ -1456,7 +1461,7 @@ async fn versions_window_downloads_keeps_and_restores() {
         h.fake.content(&id) == b"primeira"
     })
     .await;
-    assert_eq!(h.proxy.versions(&id).await.unwrap().versions.len(), 3);
+    assert_eq!(h.proxy.versions("", &id).await.unwrap().versions.len(), 3);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1623,4 +1628,128 @@ async fn all_accounts_resume_after_restart() {
     let read = blocking(move || (std::fs::read(first), std::fs::read(b), std::fs::read(c))).await;
     assert_eq!(read.0.unwrap(), b"um");
     assert!(read.1.is_ok() && read.2.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_lists_every_account() {
+    let h = Harness::new().await;
+    h.two_accounts("ana@example.com").await;
+    let ana_mount = h.mount_of("ana@example.com").display().to_string();
+
+    let all = h.proxy.status("").await.unwrap();
+    let ana = h.proxy.status("ana@example.com").await.unwrap();
+
+    assert_eq!(all.account, h.fake.email());
+    assert_eq!(ana.account, "ana@example.com");
+    assert_eq!(ana.mount_point, ana_mount);
+    let listed: Vec<_> = all
+        .accounts
+        .iter()
+        .map(|a| (a.email.as_str(), a.mount_point.as_str()))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (h.fake.email().as_str(), all.mount_point.as_str()),
+            ("ana@example.com", ana_mount.as_str())
+        ]
+    );
+    assert_eq!(ana.accounts, all.accounts);
+    let err = h.proxy.status("ninguem@example.com").await.unwrap_err();
+    assert_eq!(err.short_name(), "NotLoggedIn", "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_state_is_the_worst_of_all_accounts() {
+    let h = Harness::new().await;
+    h.two_accounts("ana@example.com").await;
+    h.proxy.pause().await.unwrap();
+
+    let all = h.proxy.status("").await.unwrap();
+
+    assert_eq!(all.state, "paused");
+    assert!(all.accounts.iter().all(|a| a.state == "paused"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn id_methods_act_on_the_requested_account() {
+    let h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "da-primeira.txt", b"um".to_vec());
+    let ana = h.fake.add_account("ana@example.com");
+    ana.add_file(&ana.root_id(), "da-ana.txt", b"dois".to_vec());
+    h.logged_in().await;
+    h.logged_in_as("ana@example.com").await;
+
+    let first = h.proxy.search("", "da-").await.unwrap();
+    let second = h.proxy.search("ana@example.com", "da-").await.unwrap();
+    let info = h.proxy.account_info("ana@example.com").await.unwrap();
+
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].name, "da-primeira.txt");
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].name, "da-ana.txt");
+    assert!(
+        second[0]
+            .path
+            .starts_with(&h.mount_of("ana@example.com").display().to_string())
+    );
+    assert_eq!(info.email, "ana@example.com");
+    // O id da conta de fora não vale na primeira.
+    let err = h.proxy.web_link("", &second[0].id).await.unwrap_err();
+    assert_eq!(err.short_name(), "NotFound", "{err}");
+    assert!(
+        h.proxy
+            .web_link("ana@example.com", &second[0].id)
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn notification_action_acts_on_its_account() {
+    let h = Harness::new().await;
+    h.two_accounts("ana@example.com").await;
+    h.proxy.pause().await.unwrap();
+
+    let path = h
+        .mount_of("ana@example.com")
+        .join("Meu Drive")
+        .join("a.txt");
+    blocking(move || std::fs::write(path, b"pausado").unwrap()).await;
+    wait_until("aviso da segunda conta", || {
+        h.notes()
+            .iter()
+            .any(|n| n.actions.iter().any(|a| a == "resume"))
+    })
+    .await;
+    let listed = h.proxy.notifications().await.unwrap();
+    let note = listed.iter().find(|n| n.kind == "resume-syncing").unwrap();
+    assert_eq!(note.account, "ana@example.com");
+    // A área de trabalho diz a conta no texto; a janela a mostra pelo campo.
+    assert!(!note.body.contains("ana@example.com"), "{note:?}");
+    let shown = h.notes();
+    let desktop = shown
+        .iter()
+        .find(|n| n.actions.iter().any(|a| a == "resume"));
+    assert!(desktop.unwrap().body.contains("ana@example.com"));
+
+    h.proxy
+        .invoke_notification_action(note.id, "resume")
+        .await
+        .unwrap();
+
+    assert!(!h.proxy.status("ana@example.com").await.unwrap().paused);
+    assert!(h.proxy.status(&h.fake.email()).await.unwrap().paused);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_all_signs_out_every_account() {
+    let h = Harness::new().await;
+    h.two_accounts("ana@example.com").await;
+
+    h.proxy.logout_all("discard", "").await.unwrap();
+
+    assert!(h.saved_accounts().is_empty());
+    assert!(h.proxy.status("").await.unwrap().accounts.is_empty());
 }

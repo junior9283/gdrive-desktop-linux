@@ -18,8 +18,9 @@ pub struct SyncSummary {
     pub remaining_secs: Option<u64>,
 }
 
-/// O estado que a bandeja e a janela principal mostram.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// O estado que a bandeja e a janela principal mostram, do que menos ao que mais pede atenção
+/// (`Status` sem conta mostra o maior entre as contas).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SyncState {
     /// Sem conta conectada (o serviço responde isto; o motor só existe com conta).
     SignedOut,

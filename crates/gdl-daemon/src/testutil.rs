@@ -170,6 +170,13 @@ impl Harness {
         assert!(ok, "login de {email}: {error}");
     }
 
+    /// A conta principal e `email` conectadas, nessa ordem.
+    pub async fn two_accounts(&self, email: &str) {
+        self.fake.add_account(email);
+        self.logged_in().await;
+        self.logged_in_as(email).await;
+    }
+
     /// A montagem de uma conta que não é a primeira: `Google Drive (<e-mail>)`.
     pub fn mount_of(&self, email: &str) -> PathBuf {
         self.home.join(format!("Google Drive ({email})"))
@@ -255,7 +262,7 @@ pub(crate) async fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 pub(crate) async fn status_until(h: &Harness, what: &str, done: impl Fn(&gdl_ipc::Status) -> bool) {
     let start = std::time::Instant::now();
     loop {
-        let status = h.proxy.status().await.unwrap();
+        let status = h.proxy.status("").await.unwrap();
         if done(&status) {
             return;
         }

@@ -9,3 +9,12 @@ export function currentScreen(search) {
 export function screenArg(search) {
   return new URLSearchParams(search).get('arg');
 }
+
+// O argumento das telas de um item (`conta/id`): `{ account, id }`, com `id` nulo sem argumento.
+// Sem a barra é só o id (a primeira conta).
+export function itemArg(search) {
+  const arg = screenArg(search);
+  if (!arg) return { account: '', id: null };
+  const slash = arg.indexOf('/');
+  return slash < 0 ? { account: '', id: arg } : { account: arg.slice(0, slash), id: arg.slice(slash + 1) };
+}

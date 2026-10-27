@@ -1,5 +1,6 @@
 # Pastas virtuais da montagem
 folder-my-drive = Meu Drive
+folder-shared-drives = Drives compartilhados
 folder-trash = .Lixeira do Drive
 folder-lost-found = .Lost and Found
 folder-canceled-uploads = .Uploads cancelados
@@ -41,6 +42,11 @@ notify-paused-action = Retomar
 notify-canceled-title = Envio cancelado
 notify-canceled-body = A sua versão de { $name } ficou guardada em Uploads cancelados.
 notify-canceled-action = Ver arquivos
+notify-moved-shared-title = Arquivo movido para um Drive compartilhado
+notify-moved-shared-body = { $name } agora pertence ao Drive compartilhado: quem pode ver o arquivo passa a ser quem tem acesso a ele.
+notify-folder-move-title = A pasta não pôde ser movida
+notify-folder-move-body = O Google não deixa mover a pasta { $name } entre o Meu Drive e um Drive compartilhado por aqui. Faça isso pelo Google Drive na web.
+notify-kind-moved-to-shared-drive = Arquivos movidos para um Drive compartilhado
 notify-kind-copied-as-shortcut = Documentos Google copiados como atalho
 notify-kind-mount-moved = Pasta do Drive aberta em outro lugar
 notify-kind-resume-syncing = Arquivos gravados com a sincronização pausada
@@ -51,7 +57,7 @@ login-rejected = A conta { $email } não é permitida neste computador.
 logout-pending = Há { $count } itens que ainda não estão no Drive (envios pendentes ou cópias no Lost and Found). Escolha terminar os envios, mover os arquivos para uma pasta ou descartá-los; o Lost and Found nunca é apagado.
 not-logged-in = Nenhuma conta conectada.
 uninstall-signed-in = Desconecte a conta antes de apagar os dados deste computador: a saída da conta decide o que fazer com os envios pendentes.
-path-not-in-drive = { $path } não está no Meu Drive.
+path-not-in-drive = { $path } não está no Meu Drive nem num Drive compartilhado.
 
 # CLI provisória
 cli-client-id = Client ID:

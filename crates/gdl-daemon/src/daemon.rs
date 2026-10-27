@@ -26,8 +26,8 @@ use gdl_engine::errors::ErrorSource;
 use gdl_engine::events::{EngineEvent, SyncState};
 use gdl_engine::gdocs::{OfficeEditor, web_url};
 use gdl_engine::kept::{Kept, KeptFolder};
-use gdl_fs::DriveFs;
-use gdl_store::{Inode, Item, ItemId, ItemKind, PinState};
+use gdl_fs::{DriveFs, Layout};
+use gdl_store::{DrivePath, Inode, Item, ItemId, ItemKind, PinState};
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -158,12 +158,13 @@ fn live_item(engine: &Engine, id: &str) -> Result<Item, ServiceError> {
         .ok_or_else(|| ServiceError::NotFound(id.into()))
 }
 
-/// Caminho do item a partir do Meu Drive (`Pasta/arquivo.txt`). Itens de Drives compartilhados
-/// ainda não têm caminho na montagem (tarefa 9 da 0.8).
-fn path_in_drive(engine: &Engine, item: &Item) -> Result<String, ServiceError> {
+/// Onde o item está no Drive: a raiz e o caminho a partir dela (`Pasta/arquivo.txt`). Itens que
+/// a montagem não mostra (de pastas compartilhadas por outras pessoas, de Drive desligado) não
+/// têm.
+fn path_in_drive(engine: &Engine, item: &Item) -> Result<DrivePath, ServiceError> {
     engine
         .store()
-        .my_drive_path_of(&item.id)
+        .path_of(&item.id)
         .map_err(failed)?
         .ok_or_else(|| ServiceError::NotFound(item.id.0.clone()))
 }
@@ -172,15 +173,17 @@ fn path_in_drive(engine: &Engine, item: &Item) -> Result<String, ServiceError> {
 /// uma vez só (numa pasta da lista de off-line, todos têm o mesmo pai).
 struct DrivePaths<'a> {
     engine: &'a Engine,
-    my_drive: &'a Path,
-    folders: HashMap<ItemId, Option<String>>,
+    mount: &'a Path,
+    layout: &'a Layout,
+    folders: HashMap<ItemId, Option<DrivePath>>,
 }
 
 impl<'a> DrivePaths<'a> {
-    fn new(engine: &'a Engine, my_drive: &'a Path) -> DrivePaths<'a> {
+    fn new(engine: &'a Engine, mount: &'a Path, layout: &'a Layout) -> DrivePaths<'a> {
         DrivePaths {
             engine,
-            my_drive,
+            mount,
+            layout,
             folders: HashMap::new(),
         }
     }
@@ -191,19 +194,23 @@ impl<'a> DrivePaths<'a> {
         let folder = item.parent.as_ref().and_then(|parent| {
             self.folders
                 .entry(parent.clone())
-                .or_insert_with(|| store.my_drive_path_of(parent).ok().flatten())
+                .or_insert_with(|| store.path_of(parent).ok().flatten())
                 .clone()
         });
-        let folder = self.my_drive.join(folder.unwrap_or_default());
-        folder.join(&item.local_name).display().to_string()
+        let folder = folder.unwrap_or_else(|| DrivePath::my_drive(""));
+        self.layout
+            .mounted(self.mount, &folder)
+            .join(&item.local_name)
+            .display()
+            .to_string()
     }
 }
 
 /// Os caminhos na montagem dos itens que mudaram de estado desde a última vez (os que foram para
 /// a lixeira não aparecem mais lá).
-fn changed_paths(engine: &Engine, my_drive: &Path) -> Vec<String> {
+fn changed_paths(engine: &Engine, mount: &Path, layout: &Layout) -> Vec<String> {
     let items = engine.store().take_state_changes().unwrap_or_default();
-    let mut paths = DrivePaths::new(engine, my_drive);
+    let mut paths = DrivePaths::new(engine, mount, layout);
     items
         .iter()
         .filter(|item| !item.trashed)
@@ -245,8 +252,13 @@ fn web_link(item: &Item) -> Result<String, ServiceError> {
     web_url(item).ok_or_else(|| ServiceError::NotFound(item.id.0.clone()))
 }
 
-fn search_results(engine: &Engine, my_drive: &Path, items: Vec<Item>) -> Vec<SearchResult> {
-    let mut paths = DrivePaths::new(engine, my_drive);
+fn search_results(
+    engine: &Engine,
+    mount: &Path,
+    layout: &Layout,
+    items: Vec<Item>,
+) -> Vec<SearchResult> {
+    let mut paths = DrivePaths::new(engine, mount, layout);
     items
         .into_iter()
         .map(|item| SearchResult {
@@ -281,6 +293,8 @@ pub struct Daemon {
     saving: tokio::sync::Mutex<()>,
     exit: watch::Sender<Option<Exit>>,
     i18n: I18n,
+    /// Os nomes das pastas da raiz da montagem, no idioma do sistema (como o FUSE mostra).
+    layout: Layout,
     accounts: tokio::sync::Mutex<Vec<Account>>,
     conn: OnceLock<Connection>,
     notifier: OnceLock<Notifier>,
@@ -306,11 +320,13 @@ impl Daemon {
         let (prefs, _) = load_preferences(&config.paths)?;
         gdl_drive::set_network(network_of(&prefs));
         let bandwidth = Arc::new(Bandwidth::default());
+        let i18n = I18n::new(&config.lang);
         apply_bandwidth(&bandwidth, &prefs);
         Ok(Arc::new(Daemon {
             bandwidth,
             metered: AtomicBool::new(false),
-            i18n: I18n::new(&config.lang),
+            layout: Layout::new(&i18n),
+            i18n,
             history: History::load(config.paths.state_dir.join(HISTORY_FILE)),
             prefs: RwLock::new(Arc::new(prefs)),
             saving: tokio::sync::Mutex::default(),
@@ -1063,8 +1079,7 @@ impl Daemon {
         });
         self.forward_events(email.into(), engine.subscribe(), shutdown.clone());
         self.forward_activity(engine.activity_changes(), shutdown.clone());
-        let my_drive = mount_point.join(self.my_drive_name());
-        self.forward_states(engine.clone(), my_drive, shutdown.clone());
+        self.forward_states(engine.clone(), mount_point.clone(), shutdown.clone());
         let moved = mount_point != preferred;
         let account = Account {
             email: email.into(),
@@ -1155,7 +1170,7 @@ impl Daemon {
     fn forward_states(
         self: &Arc<Self>,
         engine: Arc<Engine>,
-        my_drive: PathBuf,
+        mount: PathBuf,
         shutdown: CancellationToken,
     ) {
         let daemon = Arc::downgrade(self);
@@ -1169,10 +1184,13 @@ impl Daemon {
                     break;
                 };
                 let paths = {
-                    let (engine, my_drive) = (engine.clone(), my_drive.clone());
-                    tokio::task::spawn_blocking(move || changed_paths(&engine, &my_drive))
-                        .await
-                        .unwrap_or_default()
+                    let (engine, mount) = (engine.clone(), mount.clone());
+                    let daemon = daemon.clone();
+                    tokio::task::spawn_blocking(move || {
+                        changed_paths(&engine, &mount, &daemon.layout)
+                    })
+                    .await
+                    .unwrap_or_default()
                 };
                 if let Some(emitter) = daemon.emitter() {
                     for chunk in paths.chunks(STATES_PER_SIGNAL) {
@@ -1307,14 +1325,18 @@ impl Daemon {
     }
 
     pub async fn activity(&self, account: &str) -> Result<Vec<ActivityItem>, ServiceError> {
-        let (engine, my_drive) = self.engine_and_my_drive(account).await?;
+        let (engine, mount) = self.engine_and_mount(account).await?;
         let rows = engine.activity().map_err(failed)?;
         Ok(rows
             .into_iter()
             .map(|r| ActivityItem {
                 seq: r.seq,
                 time_ms: r.time_ms,
-                path: my_drive.join(&r.activity.path).display().to_string(),
+                path: self
+                    .layout
+                    .mounted(&mount, &r.activity.path)
+                    .display()
+                    .to_string(),
                 size: r.activity.size as i64,
                 state: r.activity.state.as_str().into(),
                 percent: r.activity.percent.map_or(-1, i32::from),
@@ -1325,17 +1347,17 @@ impl Daemon {
     }
 
     pub async fn errors(&self, account: &str) -> Result<Vec<SyncErrorItem>, ServiceError> {
-        let engine = self.account_engine(account).await?;
-        let mount_point = self.mount_point(account).await?;
-        let my_drive = mount_point.join(self.my_drive_name());
+        let (engine, mount_point) = self.engine_and_mount(account).await?;
         // As cópias aparecem na montagem, na pasta oculta do Lost and Found.
-        let lost_found = mount_point.join(self.i18n.tr("folder-lost-found", &[]));
+        let lost_found = mount_point.join(&self.layout.lost_found);
         let errors = engine.errors().map_err(failed)?;
         Ok(errors
             .into_iter()
             .map(|e| {
                 let (item_id, path) = match e.source {
-                    ErrorSource::Item { id, path } => (id.0, my_drive.join(path)),
+                    ErrorSource::Item { id, path } => {
+                        (id.0, self.layout.mounted(&mount_point, &path))
+                    }
                     ErrorSource::Kept(copy) => (
                         String::new(),
                         lost_found.join(copy.file_name().unwrap_or_default()),
@@ -1374,11 +1396,6 @@ impl Daemon {
     /// A montagem da conta `account`.
     async fn mount_point(&self, account: &str) -> Result<PathBuf, ServiceError> {
         self.with_account(account, |a| a.mount_point.clone()).await
-    }
-
-    /// Nome da pasta do Meu Drive na montagem (no idioma do sistema, como o FUSE mostra).
-    fn my_drive_name(&self) -> String {
-        self.i18n.tr("folder-my-drive", &[])
     }
 
     /// Cancela o envio do arquivo: `canceled` (a versão local foi para `Uploads cancelados`) ou
@@ -1480,13 +1497,13 @@ impl Daemon {
         account: &str,
         folder_id: &str,
     ) -> Result<Vec<OfflineEntry>, ServiceError> {
-        let (engine, my_drive) = self.engine_and_my_drive(account).await?;
+        let (engine, mount) = self.engine_and_mount(account).await?;
         let folder = (!folder_id.is_empty()).then(|| ItemId(folder_id.into()));
         let items = engine
             .store()
             .pinned_children(folder.as_ref())
             .map_err(failed)?;
-        let mut paths = DrivePaths::new(&engine, &my_drive);
+        let mut paths = DrivePaths::new(&engine, &mount, &self.layout);
         Ok(items
             .into_iter()
             .map(|item| OfflineEntry {
@@ -1527,15 +1544,15 @@ impl Daemon {
         account: &str,
         query: &str,
     ) -> Result<Vec<SearchResult>, ServiceError> {
-        let (engine, my_drive) = self.engine_and_my_drive(account).await?;
+        let (engine, mount) = self.engine_and_mount(account).await?;
         let items = engine.search(query).await.map_err(failed)?;
-        Ok(search_results(&engine, &my_drive, items))
+        Ok(search_results(&engine, &mount, &self.layout, items))
     }
 
     pub async fn recent_items(&self, account: &str) -> Result<Vec<SearchResult>, ServiceError> {
-        let (engine, my_drive) = self.engine_and_my_drive(account).await?;
+        let (engine, mount) = self.engine_and_mount(account).await?;
         let items = engine.recent().map_err(failed)?;
-        Ok(search_results(&engine, &my_drive, items))
+        Ok(search_results(&engine, &mount, &self.layout, items))
     }
 
     /// `file` abre o item, `folder` a pasta que o contém (os dois pela montagem) e `web` o
@@ -1549,13 +1566,16 @@ impl Daemon {
         if !matches!(target, "file" | "folder" | "web") {
             return Err(ServiceError::InvalidArgs(target.into()));
         }
-        let (engine, my_drive) = self.engine_and_my_drive(account).await?;
+        let (engine, mount) = self.engine_and_mount(account).await?;
         let item = live_item(&engine, item_id)?;
-        let path = || Ok::<_, ServiceError>(my_drive.join(path_in_drive(&engine, &item)?));
+        let path = || {
+            let at = path_in_drive(&engine, &item)?;
+            Ok::<_, ServiceError>(self.layout.mounted(&mount, &at))
+        };
         match target {
             "web" => self.open(web_link(&item)?),
             "file" => self.open_local(&path()?),
-            _ => self.open_local(path()?.parent().unwrap_or(&my_drive)),
+            _ => self.open_local(path()?.parent().unwrap_or(&mount)),
         }
         Ok(())
     }
@@ -1699,17 +1719,17 @@ impl Daemon {
         Ok(selection)
     }
 
-    /// O motor da conta `account` e a pasta do Meu Drive na montagem dela.
-    async fn engine_and_my_drive(
+    /// O motor da conta `account` e a montagem dela.
+    async fn engine_and_mount(
         &self,
         account: &str,
     ) -> Result<(Arc<Engine>, PathBuf), ServiceError> {
         let engine = self.account_engine(account).await?;
         let mount_point = self.mount_point(account).await?;
-        Ok((engine, mount_point.join(self.my_drive_name())))
+        Ok((engine, mount_point))
     }
 
-    /// Item do Meu Drive no caminho `path` da montagem.
+    /// Item do Meu Drive ou de um Drive compartilhado ligado no caminho `path` da montagem.
     async fn item_at(&self, path: &str) -> Result<(Arc<Engine>, ItemId), ServiceError> {
         let not_found =
             || ServiceError::NotFound(self.i18n.tr("path-not-in-drive", &[("path", path)]));
@@ -1717,21 +1737,25 @@ impl Daemon {
             .engine_at(Path::new(path))
             .await
             .ok_or_else(not_found)?;
-        let mut parts = relative.components();
-        let my_drive = self.my_drive_name();
-        if parts.next() != Some(Component::Normal(my_drive.as_ref())) {
-            return Err(not_found());
-        }
+        let names: Vec<&str> = relative
+            .components()
+            .map(|part| match part {
+                Component::Normal(name) => name.to_str().ok_or_else(not_found),
+                _ => Err(not_found()),
+            })
+            .collect::<Result<_, _>>()?;
         let store = engine.store();
-        let mut item = store
-            .by_inode(Inode::ROOT)
-            .map_err(failed)?
-            .ok_or_else(not_found)?;
-        for part in parts {
-            let name = match part {
-                Component::Normal(name) => name.to_str().ok_or_else(not_found)?,
-                _ => return Err(not_found()),
-            };
+        let (root, inside) = match names.split_first() {
+            Some((first, rest)) if *first == self.layout.my_drive => {
+                (store.by_inode(Inode::ROOT), rest)
+            }
+            Some((first, [drive, rest @ ..])) if *first == self.layout.shared_drives => {
+                (Layout::shared_drive_root(store, drive), rest)
+            }
+            _ => return Err(not_found()),
+        };
+        let mut item = root.map_err(failed)?.ok_or_else(not_found)?;
+        for name in inside {
             item = store
                 .lookup(&item.id, name)
                 .map_err(failed)?

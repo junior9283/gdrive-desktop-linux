@@ -813,7 +813,7 @@ mod tests {
 
     use gdl_common::time::now_ms;
     use gdl_fake_drive::Fault;
-    use gdl_store::{ItemId, ItemKind, LocalState, Store};
+    use gdl_store::{DrivePath, ItemId, ItemKind, LocalState, Store};
     use tokio::sync::broadcast;
 
     use super::*;
@@ -1584,7 +1584,7 @@ mod tests {
             errors[0].source,
             ErrorSource::Item {
                 id: local,
-                path: "grande.bin".into()
+                path: DrivePath::my_drive("grande.bin")
             }
         );
         assert!(!errors[0].message.is_empty());

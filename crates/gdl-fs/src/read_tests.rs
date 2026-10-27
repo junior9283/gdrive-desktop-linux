@@ -23,11 +23,48 @@ async fn root_shows_localized_my_drive() {
             ".Lost and Found",
             ".Uploads cancelados",
             ".shortcut-targets-by-id",
+            "Drives compartilhados",
             "Meu Drive"
         ]
     );
     let en = Mounted::with_lang(FakeDrive::start().await, "en").await;
     assert!(names(&en.mnt).contains(&"My Drive".to_string()));
+    assert!(names(&en.mnt).contains(&"Shared drives".to_string()));
+}
+
+/// Um Drive compartilhado (da Ana, com o Drive simulado como membro) com `Planos/plano.txt`.
+fn team_drive(fake: &FakeDrive) -> String {
+    let ana = fake.add_account("ana@example.com");
+    let drive = ana.add_shared_drive("Equipe");
+    fake.share_drive(&drive, &fake.email());
+    let folder = ana.add_folder(&drive, "Planos");
+    ana.add_file(&folder, "plano.txt", b"plano".to_vec());
+    drive
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shared_drive_folder_lists_enabled_drives() {
+    let fake = FakeDrive::start().await;
+    let drive = team_drive(&fake);
+    let m = Mounted::new(fake).await;
+    let shared = m.mnt.join("Drives compartilhados");
+
+    assert_eq!(names(&shared), ["Equipe"]);
+    assert_eq!(names(&shared.join("Equipe")), ["Planos"]);
+    let file = shared.join("Equipe/Planos/plano.txt");
+    assert_eq!(std::fs::read(&file).unwrap(), b"plano");
+    assert_eq!(xattr(&file, "user.gdl.state"), "cloud");
+    assert_eq!(mode(&shared), 0o555);
+
+    // Desligado, o drive some da pasta (e os itens dele do banco).
+    m.engine.set_drives_enabled(&[]).await.unwrap();
+    assert!(names(&shared).is_empty());
+    assert_eq!(
+        std::fs::metadata(shared.join("Equipe")).unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+    m.engine.set_drives_enabled(&[drive]).await.unwrap();
+    assert_eq!(names(&shared), ["Equipe"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

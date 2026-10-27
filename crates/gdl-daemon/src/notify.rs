@@ -1,7 +1,8 @@
 //! Notificações da área de trabalho (`org.freedesktop.Notifications`) para o que o usuário precisa
 //! saber: edição guardada em Lost and Found, sem internet, disco quase cheio, armazenamento cheio,
 //! falha de envio, cópia de Documento Google que virou atalho, gravação com a sincronização
-//! pausada e envio cancelado.
+//! pausada, envio cancelado, arquivo movido para um Drive compartilhado e pasta que não pode
+//! mudar de drive.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -24,8 +25,9 @@ pub const SIGN_IN: &str = "sign-in";
 
 /// Os avisos que o usuário pode desligar (Preferências > Notificações); os outros avisam de
 /// algo que ele precisa saber e sempre aparecem.
-pub const OPTIONAL_KINDS: [&str; 4] = [
+pub const OPTIONAL_KINDS: [&str; 5] = [
     "copied-as-shortcut",
+    "moved-to-shared-drive",
     "mount-moved",
     "resume-syncing",
     "offline",
@@ -173,6 +175,16 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
                 i18n.tr("notify-canceled-body", &[("name", name)]),
             )
         },
+        EngineEvent::MovedToSharedDrive { name } => note(
+            "moved-to-shared-drive",
+            "notify-moved-shared-title",
+            i18n.tr("notify-moved-shared-body", &[("name", name)]),
+        ),
+        EngineEvent::FolderMoveUnsupported { name } => note(
+            "folder-move-unsupported",
+            "notify-folder-move-title",
+            i18n.tr("notify-folder-move-body", &[("name", name)]),
+        ),
         EngineEvent::Offline(false)
         | EngineEvent::NeedsSignIn(false)
         | EngineEvent::SyncStateChanged(_) => return None,
@@ -286,6 +298,12 @@ mod tests {
             },
             EngineEvent::UploadCanceled {
                 name: "a.txt".into(),
+            },
+            EngineEvent::MovedToSharedDrive {
+                name: "a.txt".into(),
+            },
+            EngineEvent::FolderMoveUnsupported {
+                name: "Pasta".into(),
             },
         ] {
             let note = for_event(&event, &i18n).unwrap();

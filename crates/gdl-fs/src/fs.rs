@@ -214,6 +214,8 @@ pub(crate) fn errno(e: impl Into<EngineError>) -> Errno {
     match e.into() {
         EngineError::NotFound | EngineError::Cache(CacheError::NotFound) => Errno::ENOENT,
         EngineError::Cache(CacheError::DiskFull) => Errno::ENOSPC,
+        // `EXDEV` faria o gerenciador de arquivos copiar e apagar a pasta.
+        EngineError::FolderCrossDrive => Errno::EPERM,
         _ => Errno::EIO,
     }
 }
@@ -441,6 +443,10 @@ impl Inner {
                 self.item_by_id(&id)?.ok_or(Errno::ENOENT)?;
                 return Ok(self.virtual_dir(&Node::TargetDir(id)));
             }
+            Node::SharedDrives => {
+                Layout::shared_drive_root(store, name.to_str().ok_or(Errno::ENOENT)?)
+                    .map_err(errno)?
+            }
             Node::Trash => store
                 .lookup_trashed(name.to_str().ok_or(Errno::ENOENT)?)
                 .map_err(errno)?,
@@ -496,6 +502,14 @@ impl Inner {
                     ino: self.inodes.ino(&node),
                     kind: FileType::Directory,
                     name: name.into(),
+                })
+                .collect(),
+            Node::SharedDrives => Layout::shared_drive_roots(self.engine.store())
+                .map_err(errno)?
+                .into_iter()
+                .map(|(name, root)| Entry {
+                    name: name.into(),
+                    ..self.item_entry(root)
                 })
                 .collect(),
             Node::Trash => self
@@ -565,9 +579,9 @@ impl Inner {
             .collect()
     }
 
-    /// A pasta do Meu Drive em `node` e o caminho dela na montagem. Pastas virtuais, da lixeira
-    /// ou fora do Meu Drive ficam de fora.
-    fn my_drive_folder(&self, node: &Node) -> Option<(ItemId, PathBuf)> {
+    /// A pasta do Meu Drive ou de um Drive compartilhado em `node` e o caminho dela na montagem.
+    /// Pastas virtuais, da lixeira ou fora dessas raízes ficam de fora.
+    fn drive_folder(&self, node: &Node) -> Option<(ItemId, PathBuf)> {
         let Node::Item(inode) = node else {
             return None;
         };
@@ -578,24 +592,20 @@ impl Inner {
         if dir.kind != ItemKind::Folder || dir.trashed {
             return None;
         }
-        let rel = self
+        let at = self
             .engine
             .store()
-            .my_drive_path_of(&dir.id)
+            .path_of(&dir.id)
             .inspect_err(|e| tracing::debug!(erro = %e, "caminho da pasta; sem miniaturas"))
             .ok()??;
-        let mut path = self.mount_point.join(&self.layout.my_drive);
-        if !rel.is_empty() {
-            path.push(rel);
-        }
-        Some((dir.id, path))
+        Some((dir.id, self.layout.mounted(&self.mount_point, &at)))
     }
 
-    /// Semeia as miniaturas de uma pasta do Meu Drive (`my_drive_folder`) e espera até
+    /// Semeia as miniaturas de uma pasta do Meu Drive ou de um drive (`drive_folder`) e espera até
     /// `THUMB_WAIT`; o resto segue em segundo plano. Sem rede ou sem vaga entre os que esperam,
     /// só dispara; com a pasta já em semeadura (reaberta antes de terminar), nem espera.
     fn wait_thumbnails(&self, node: &Node) {
-        let Some((id, path)) = self.my_drive_folder(node) else {
+        let Some((id, path)) = self.drive_folder(node) else {
             return;
         };
         let waiter = if self.engine.is_offline() {

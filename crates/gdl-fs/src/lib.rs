@@ -7,6 +7,7 @@ mod trash;
 mod write;
 
 pub use fs::{DriveFs, THUMB_WAIT, mount};
+pub use layout::Layout;
 
 #[cfg(test)]
 mod read_tests;

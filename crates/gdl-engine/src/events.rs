@@ -114,6 +114,15 @@ pub enum EngineEvent {
     UploadCanceled {
         name: String,
     },
+    /// Um arquivo foi movido para um Drive compartilhado: quem pode vê-lo muda.
+    MovedToSharedDrive {
+        name: String,
+    },
+    /// Uma pasta não pôde mudar de Meu Drive para um Drive compartilhado (ou o contrário): a API
+    /// não move pastas assim, só a web.
+    FolderMoveUnsupported {
+        name: String,
+    },
 }
 
 #[cfg(test)]

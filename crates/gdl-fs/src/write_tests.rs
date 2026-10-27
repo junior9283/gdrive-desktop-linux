@@ -5,6 +5,7 @@ use std::io::Write;
 use std::time::{Duration, SystemTime};
 
 use gdl_common::time::rfc3339;
+use gdl_engine::events::EngineEvent;
 use gdl_engine::uploads::CancelOutcome;
 use gdl_fake_drive::{FakeDrive, Fault};
 use gdl_store::ItemId;
@@ -215,6 +216,75 @@ async fn rename_and_move_between_folders() {
     // Para fora do Meu Drive não dá.
     let err = std::fs::rename(m.drive().join("B/final.txt"), m.mnt.join("final.txt")).unwrap_err();
     assert_eq!(err.raw_os_error(), Some(libc::EXDEV));
+}
+
+/// Os avisos já emitidos pelo motor (sem os eventos de estado).
+fn warnings(events: &mut tokio::sync::broadcast::Receiver<EngineEvent>) -> Vec<EngineEvent> {
+    std::iter::from_fn(|| events.try_recv().ok())
+        .filter(|e| !matches!(e, EngineEvent::SyncStateChanged(_)))
+        .collect()
+}
+
+/// Um Drive compartilhado "Equipe" (de que o Drive simulado é membro) e o Meu Drive com a pasta
+/// `Pasta` e o arquivo `Pasta/a.txt`. Devolve o ID do drive e o do arquivo.
+fn drive_and_my_files(fake: &FakeDrive) -> (String, String) {
+    let ana = fake.add_account("ana@example.com");
+    let drive = ana.add_shared_drive("Equipe");
+    fake.share_drive(&drive, &fake.email());
+    let folder = fake.add_folder(&fake.root_id(), "Pasta");
+    let file = fake.add_file(&folder, "a.txt", b"conteudo".to_vec());
+    (drive, file)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn moving_a_folder_into_a_shared_drive_is_refused() {
+    let fake = FakeDrive::start().await;
+    let (_drive, file) = drive_and_my_files(&fake);
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+
+    // `EXDEV` faria o gerenciador copiar e apagar: a recusa é `EPERM`, com o aviso.
+    let err = std::fs::rename(
+        m.drive().join("Pasta"),
+        m.mnt.join("Drives compartilhados/Equipe/Pasta"),
+    )
+    .unwrap_err();
+
+    assert_eq!(err.raw_os_error(), Some(libc::EPERM));
+    assert_eq!(
+        warnings(&mut events),
+        [EngineEvent::FolderMoveUnsupported {
+            name: "Pasta".into()
+        }]
+    );
+    assert_eq!(names(&m.drive().join("Pasta")), ["a.txt"]);
+    assert!(names(&m.mnt.join("Drives compartilhados/Equipe")).is_empty());
+    assert_eq!(m.fake.meta(&file)["name"], "a.txt");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn moving_a_file_into_a_shared_drive_moves_it_and_warns() {
+    let fake = FakeDrive::start().await;
+    let (drive, file) = drive_and_my_files(&fake);
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+    let target = m.mnt.join("Drives compartilhados/Equipe");
+
+    std::fs::rename(m.drive().join("Pasta/a.txt"), target.join("a.txt")).unwrap();
+
+    assert_eq!(m.fake.meta(&file)["parents"], serde_json::json!([drive]));
+    assert_eq!(names(&target), ["a.txt"]);
+    assert!(names(&m.drive().join("Pasta")).is_empty());
+    assert_eq!(std::fs::read(target.join("a.txt")).unwrap(), b"conteudo");
+    assert_eq!(
+        warnings(&mut events),
+        [EngineEvent::MovedToSharedDrive {
+            name: "a.txt".into()
+        }]
+    );
+    // Dentro do mesmo drive é só renomear: sem aviso.
+    std::fs::rename(target.join("a.txt"), target.join("b.txt")).unwrap();
+    assert!(warnings(&mut events).is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

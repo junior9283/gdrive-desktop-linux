@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use gdl_drive::client::DriveError;
-use gdl_store::{ItemId, Store};
+use gdl_store::{DrivePath, ItemId, Store};
 
 use crate::kept::KeptCopies;
 use crate::{EngineError, Result};
@@ -84,8 +84,8 @@ impl ErrorCategory {
 /// De onde vem o erro.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorSource {
-    /// Item com envio que falhou; o caminho é a partir do Meu Drive.
-    Item { id: ItemId, path: String },
+    /// Item com envio que falhou, com o lugar dele no Drive.
+    Item { id: ItemId, path: DrivePath },
     /// Cópia numa pasta de cópias guardadas.
     Kept(PathBuf),
 }
@@ -103,10 +103,9 @@ pub struct SyncError {
 pub fn list(store: &Store, lost_and_found: &KeptCopies) -> Result<Vec<SyncError>> {
     let mut errors = vec![];
     for e in store.job_errors()? {
-        // Item de Drive compartilhado: o caminho ainda sai sem a raiz (tarefa 9 da 0.8).
         let path = store
             .path_of(&e.item)?
-            .map_or_else(|| e.name.clone(), |p| p.path);
+            .unwrap_or_else(|| DrivePath::my_drive(&e.name));
         errors.push(SyncError {
             category: ErrorCategory::parse(&e.category),
             name: e.name,

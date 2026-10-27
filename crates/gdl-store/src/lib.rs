@@ -762,13 +762,20 @@ impl Store {
         Ok(Some(DrivePath { root, path }))
     }
 
-    /// O caminho de `id` se ele parte do Meu Drive. A montagem ainda só mostra o Meu Drive:
-    /// a tarefa 9 da 0.8 passa os chamadores a `path_of` e remove este método.
-    pub fn my_drive_path_of(&self, id: &ItemId) -> Result<Option<String>> {
-        Ok(self
-            .path_of(id)?
-            .filter(|p| p.root == DriveRoot::MyDrive)
-            .map(|p| p.path))
+    /// Os Drives compartilhados ligados, em ordem de nome, cada um com o nome e o item da raiz
+    /// (numa consulta só).
+    pub fn enabled_drive_roots(&self) -> Result<Vec<(String, Item)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT i.id, i.inode, i.parent, i.remote_name, i.local_name, i.kind, i.mime, \
+             i.target_id, i.size, i.md5, i.head_revision, i.base_revision, i.base_md5, \
+             i.modified_ms, i.created_ms, i.trashed, i.can_edit, i.local_state, i.pin, \
+             i.remote_size, d.name \
+             FROM shared_drives d JOIN items i ON i.id = d.id \
+             WHERE d.enabled = 1 ORDER BY d.name, d.id",
+        )?;
+        let rows = stmt.query_and_then([], |r| Ok((r.get(20)?, item_from_row(r)?)))?;
+        rows.collect()
     }
 
     /// Os Drives compartilhados da conta, em ordem de nome.

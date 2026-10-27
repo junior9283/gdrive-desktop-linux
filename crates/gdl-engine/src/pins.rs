@@ -218,7 +218,7 @@ mod tests {
         let rows: Vec<_> = log
             .rows()
             .into_iter()
-            .map(|r| (r.path.clone(), r.state))
+            .map(|r| (r.path.path.clone(), r.state))
             .collect();
         assert_eq!(rows.len(), 2, "{rows:?}");
         for (path, state) in &rows {

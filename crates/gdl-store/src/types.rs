@@ -205,3 +205,13 @@ pub struct DrivePath {
     pub root: DriveRoot,
     pub path: String,
 }
+
+impl DrivePath {
+    /// `path` a partir da raiz do Meu Drive.
+    pub fn my_drive(path: impl Into<String>) -> DrivePath {
+        DrivePath {
+            root: DriveRoot::MyDrive,
+            path: path.into(),
+        }
+    }
+}

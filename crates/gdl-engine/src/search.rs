@@ -21,7 +21,7 @@ impl Engine {
     /// primeiro. Sem rede ou com erro da API, só o banco, sem erro.
     pub async fn search(&self, query: &str) -> Result<Vec<Item>> {
         let mut found = self.store.search_names(query, SEARCH_LIMIT)?;
-        self.keep_in_my_drive(&mut found)?;
+        self.keep_mounted(&mut found)?;
         if found.len() >= SEARCH_LIMIT {
             return Ok(found);
         }
@@ -34,7 +34,7 @@ impl Engine {
                     }
                     if let Some(item) = self.store.get(&id)?
                         && !item.trashed
-                        && self.in_my_drive(&item)?
+                        && self.is_mounted(&item)?
                     {
                         found.push(item);
                     }
@@ -49,15 +49,15 @@ impl Engine {
 
     pub fn recent(&self) -> Result<Vec<Item>> {
         let mut items = self.store.recent(RECENT_LIMIT)?;
-        self.keep_in_my_drive(&mut items)?;
+        self.keep_mounted(&mut items)?;
         Ok(items)
     }
 
-    /// Tira o que não está dentro do Meu Drive (ver `in_my_drive`).
-    fn keep_in_my_drive(&self, items: &mut Vec<Item>) -> Result<()> {
+    /// Tira o que não aparece na montagem (ver `is_mounted`).
+    fn keep_mounted(&self, items: &mut Vec<Item>) -> Result<()> {
         let mut inside = Vec::with_capacity(items.len());
         for item in items.drain(..) {
-            if self.in_my_drive(&item)? {
+            if self.is_mounted(&item)? {
                 inside.push(item);
             }
         }
@@ -65,11 +65,11 @@ impl Engine {
         Ok(())
     }
 
-    /// O item desce da raiz do Meu Drive (não é a raiz nem conteúdo de pastas compartilhadas
-    /// por outras pessoas nem de Drives compartilhados, que a montagem ainda não mostra: tarefa
-    /// 9 da 0.8), ou seja, tem caminho na montagem.
-    fn in_my_drive(&self, item: &Item) -> Result<bool> {
-        Ok(item.inode != Inode::ROOT && self.store.my_drive_path_of(&item.id)?.is_some())
+    /// O item desce da raiz do Meu Drive ou de um Drive compartilhado ligado (não é uma raiz
+    /// nem conteúdo de pastas compartilhadas por outras pessoas), ou seja, tem caminho na
+    /// montagem.
+    fn is_mounted(&self, item: &Item) -> Result<bool> {
+        Ok(item.parent.is_some() && self.store.path_of(&item.id)?.is_some())
     }
 
     pub async fn shared_with_me(&self) -> Result<Vec<SharedFile>> {
@@ -171,6 +171,31 @@ mod tests {
             "nem pelo nome nem pelo conteúdo"
         );
         assert!(engine.recent().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_and_recent_include_enabled_shared_drives_but_not_their_roots() {
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let ana = fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Orcamento da equipe");
+        fake.share_drive(&drive, &fake.email());
+        let file = ana.add_file(&drive, "orcamento.xlsx", b"x".to_vec());
+        let (engine, _tmp) = indexed_engine(&fake).await;
+        engine
+            .store()
+            .touch_access(&ItemId(file), gdl_common::time::now_ms())
+            .unwrap();
+        let names = |items: Vec<gdl_store::Item>| -> Vec<String> {
+            items.into_iter().map(|i| i.local_name).collect()
+        };
+
+        assert_eq!(
+            names(engine.search("orcamento").await.unwrap()),
+            ["orcamento.xlsx"]
+        );
+        assert_eq!(names(engine.recent().unwrap()), ["orcamento.xlsx"]);
+        engine.set_drives_enabled(&[]).await.unwrap();
+        assert!(engine.search("orcamento").await.unwrap().is_empty());
     }
 
     #[tokio::test]

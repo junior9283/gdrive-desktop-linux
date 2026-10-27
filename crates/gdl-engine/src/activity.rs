@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use gdl_common::time::now_ms;
-use gdl_store::{Inode, Item, Store};
+use gdl_store::{DrivePath, Inode, Item, Store};
 use tokio::sync::watch;
 
 /// Quantos itens a atividade guarda (os mais antigos saem).
@@ -53,8 +53,8 @@ pub struct Activity {
     pub inode: Inode,
     pub item_id: String,
     pub name: String,
-    /// Caminho a partir do Meu Drive (`Pasta/arquivo.txt`).
-    pub path: String,
+    /// Onde o item está: a raiz (Meu Drive ou Drive compartilhado) e o caminho a partir dela.
+    pub path: DrivePath,
     pub size: u64,
     pub state: ActivityState,
     /// Andamento do envio, quando conhecido.
@@ -68,9 +68,7 @@ impl Activity {
             .path_of(&item.id)
             .ok()
             .flatten()
-            // Item de Drive compartilhado: o caminho ainda sai sem a raiz (tarefa 9 da 0.8).
-            .map(|p| p.path)
-            .unwrap_or_else(|| item.local_name.clone());
+            .unwrap_or_else(|| DrivePath::my_drive(&item.local_name));
         Activity {
             inode: item.inode,
             item_id: item.id.0.clone(),
@@ -176,7 +174,7 @@ mod tests {
             inode: Inode(inode),
             item_id: format!("id{inode}"),
             name: format!("f{inode}"),
-            path: format!("f{inode}"),
+            path: DrivePath::my_drive(format!("f{inode}")),
             size: 1,
             state,
             percent: None,

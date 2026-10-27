@@ -1983,3 +1983,192 @@ async fn empty_credentials_without_any_account_are_refused() {
 
     assert_eq!(err.short_name(), "InvalidArgs", "{err}");
 }
+
+/// Um Drive compartilhado "Equipe" da Ana, de que a conta principal também é membro, com
+/// `Planos/plano.txt`. Devolve o ID do arquivo, que é o mesmo nas duas contas.
+fn team_drive(h: &Harness) -> String {
+    let ana = h.fake.add_account(ANA);
+    let drive = ana.add_shared_drive("Equipe");
+    h.fake.share_drive(&drive, &h.fake.email());
+    let folder = ana.add_folder(&drive, "Planos");
+    ana.add_file(&folder, "plano.txt", b"plano".to_vec())
+}
+
+/// `path` dentro do Drive compartilhado "Equipe" da montagem `mount`.
+fn in_team(mount: &std::path::Path, path: &str) -> String {
+    let team = mount.join("Drives compartilhados/Equipe");
+    team.join(path).display().to_string()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn menu_works_inside_a_shared_drive() {
+    let h = Harness::new().await;
+    let file = team_drive(&h);
+    h.logged_in().await;
+    let mount = h.home.join("Google Drive");
+    let (folder, plan) = (
+        in_team(&mount, "Planos"),
+        in_team(&mount, "Planos/plano.txt"),
+    );
+
+    let file_menu = h.proxy.menu(&[&plan]).await.unwrap();
+    let folder_menu = h.proxy.menu(&[&folder]).await.unwrap();
+
+    let ids: Vec<_> = file_menu.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids[..4], ["open-web", "share", "copy-link", "versions"]);
+    assert!(folder_menu.iter().any(|e| e.id == "new-document"));
+    // A raiz do drive também é uma pasta do menu; a pasta virtual que os reúne não é do Drive.
+    let team = in_team(&mount, "");
+    assert!(!h.proxy.menu(&[&team]).await.unwrap().is_empty());
+    let drives = mount.join("Drives compartilhados").display().to_string();
+    assert!(h.proxy.menu(&[&drives]).await.unwrap().is_empty());
+    // As ações acham o item pelo caminho.
+    let link = h.proxy.menu_action("copy-link", &[&plan]).await.unwrap();
+    assert_eq!(link, format!("https://drive.google.com/file/d/{file}/view"));
+    h.proxy.menu_action("offline", &[&plan]).await.unwrap();
+    let pinned = h.proxy.menu(&[&plan]).await.unwrap();
+    assert_eq!(
+        pinned.iter().find(|e| e.id == "offline").unwrap().state,
+        "on"
+    );
+    // O que é pesquisado e fixado dentro do drive aparece com o caminho da montagem.
+    let found = h.proxy.search("", "plano.txt").await.unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].path, plan);
+    let listed = h.proxy.offline_items("", "").await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, file);
+    assert_eq!(listed[0].path, plan);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn same_file_in_two_accounts_acts_on_the_chosen_one() {
+    let h = Harness::new().await;
+    let file = team_drive(&h);
+    h.logged_in().await;
+    h.logged_in_as(ANA).await;
+    let first = h.fake.email();
+    let (first_mount, ana_mount) = (h.home.join("Google Drive"), h.mount_of(ANA));
+    let (first_path, ana_path) = (
+        in_team(&first_mount, "Planos/plano.txt"),
+        in_team(&ana_mount, "Planos/plano.txt"),
+    );
+    let pinned = |account: &'static str| {
+        let proxy = h.proxy.clone();
+        async move { proxy.offline_items(account, "").await.unwrap().len() }
+    };
+
+    // Pelo caminho, vale a montagem de cada conta.
+    h.proxy.pin(&ana_path).await.unwrap();
+    assert_eq!((pinned("").await, pinned(ANA).await), (0, 1));
+    h.proxy.pin(&first_path).await.unwrap();
+    assert_eq!((pinned("").await, pinned(ANA).await), (1, 1));
+    // Pelo ID, vale a conta pedida: o mesmo ID é de um item diferente em cada banco.
+    h.proxy.unpin_item(&first, &file).await.unwrap();
+    assert_eq!((pinned("").await, pinned(ANA).await), (0, 1));
+    let ana_items = h.proxy.offline_items(ANA, "").await.unwrap();
+    assert_eq!(ana_items[0].path, ana_path);
+
+    let before = h.opened().len();
+    h.proxy.open_item(ANA, &file, "file").await.unwrap();
+    h.proxy.open_item(&first, &file, "folder").await.unwrap();
+    wait_until("os dois itens abertos", || h.opened().len() == before + 2).await;
+    let opened = h.opened();
+    // Cada um abre na montagem da conta pedida (o lançador roda sem ordem entre os dois).
+    assert!(opened.contains(&ana_path), "{opened:?}");
+    assert!(
+        opened.contains(&in_team(&first_mount, "Planos")),
+        "{opened:?}"
+    );
+    for account in [first.as_str(), ANA] {
+        let found = h.proxy.search(account, "plano.txt").await.unwrap();
+        assert_eq!(found.len(), 1);
+        let mount = if account == ANA {
+            &ana_mount
+        } else {
+            &first_mount
+        };
+        assert_eq!(found[0].path, in_team(mount, "Planos/plano.txt"));
+        assert!(h.proxy.web_link(account, &file).await.is_ok());
+    }
+}
+
+/// Move `name` do Meu Drive para o Drive compartilhado "Equipe" pela montagem.
+async fn move_into_team(h: &Harness, name: &str) {
+    let mount = h.home.join("Google Drive");
+    let (from, to) = (h.drive().join(name), in_team(&mount, name));
+    blocking(move || std::fs::rename(from, to).unwrap()).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn moved_to_shared_drive_warns_until_the_kind_is_turned_off() {
+    let h = Harness::new().await;
+    team_drive(&h);
+    for name in ["um.txt", "dois.txt"] {
+        h.fake.add_file(&h.fake.root_id(), name, b"x".to_vec());
+    }
+    h.logged_in().await;
+    let settings = h.proxy.notification_settings().await.unwrap();
+    let setting = settings.iter().find(|s| s.kind == "moved-to-shared-drive");
+    assert!(setting.unwrap().enabled);
+
+    move_into_team(&h, "um.txt").await;
+    wait_until("aviso da mudança de drive", || {
+        h.notes().iter().any(|n| n.body.contains("um.txt"))
+    })
+    .await;
+    let listed = h.proxy.notifications().await.unwrap();
+    let moved: Vec<_> = listed
+        .iter()
+        .filter(|n| n.kind == "moved-to-shared-drive")
+        .collect();
+    assert_eq!(moved.len(), 1, "{listed:?}");
+
+    h.proxy
+        .set_notification_enabled("moved-to-shared-drive", false)
+        .await
+        .unwrap();
+    move_into_team(&h, "dois.txt").await;
+    // Os eventos são tratados em ordem: o aviso da pausa, depois do movimento, é a barreira.
+    h.proxy.pause().await.unwrap();
+    let barrier = h.drive().join("barreira.txt");
+    blocking(move || std::fs::write(barrier, b"x").unwrap()).await;
+    wait_until("aviso da pausa", || {
+        h.notes().iter().any(|n| n.body.contains("barreira.txt"))
+    })
+    .await;
+
+    assert!(h.notes().iter().all(|n| !n.body.contains("dois.txt")));
+    let listed = h.proxy.notifications().await.unwrap();
+    assert!(
+        listed.iter().all(|n| !n.body.contains("dois.txt")),
+        "{listed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refused_folder_move_warns_and_cannot_be_turned_off() {
+    let h = Harness::new().await;
+    team_drive(&h);
+    h.fake.add_folder(&h.fake.root_id(), "Pasta");
+    h.logged_in().await;
+    let mount = h.home.join("Google Drive");
+    let (from, to) = (h.drive().join("Pasta"), in_team(&mount, "Pasta"));
+
+    let err = blocking(move || std::fs::rename(from, to).unwrap_err()).await;
+
+    assert_eq!(
+        err.raw_os_error(),
+        Some(rustix::io::Errno::PERM.raw_os_error())
+    );
+    wait_until("aviso da pasta", || {
+        h.notes().iter().any(|n| n.body.contains("Pasta"))
+    })
+    .await;
+    let err = h
+        .proxy
+        .set_notification_enabled("folder-move-unsupported", false)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("InvalidArgs"), "{err}");
+}

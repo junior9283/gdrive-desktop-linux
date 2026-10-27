@@ -18,6 +18,7 @@ const KIO_TRASH: u64 = 5;
 const KIO_FILES: u64 = 6;
 const KIO_INFO: u64 = 7;
 const CANCELED_UPLOADS: u64 = 8;
+const SHARED_DRIVES: u64 = 9;
 /// Item do banco com inode `n` aparece como `n + ITEM_BASE`; o intervalo abaixo fica para os
 /// nós fixos.
 const ITEM_BASE: u64 = 16;
@@ -32,6 +33,9 @@ pub(crate) enum Node {
     /// `.Lost and Found` ou `.Uploads cancelados`.
     Kept(KeptFolder),
     ShortcutTargets,
+    /// `Drives compartilhados`: uma subpasta por drive ligado (a raiz de cada um é um
+    /// `Node::Item`).
+    SharedDrives,
     /// `.shortcut-targets-by-id/<id>`: contém só o item alvo.
     TargetDir(ItemId),
     /// Cópia dentro de uma pasta de cópias guardadas, pelo nome.
@@ -64,6 +68,7 @@ impl Inodes {
             LOST_FOUND => Node::Kept(KeptFolder::LostAndFound),
             CANCELED_UPLOADS => Node::Kept(KeptFolder::CanceledUploads),
             SHORTCUT_TARGETS => Node::ShortcutTargets,
+            SHARED_DRIVES => Node::SharedDrives,
             KIO_TRASH => Node::KioTrash,
             KIO_FILES => Node::KioFiles,
             KIO_INFO => Node::KioInfo,
@@ -84,6 +89,7 @@ impl Inodes {
             Node::Kept(KeptFolder::LostAndFound) => LOST_FOUND,
             Node::Kept(KeptFolder::CanceledUploads) => CANCELED_UPLOADS,
             Node::ShortcutTargets => SHORTCUT_TARGETS,
+            Node::SharedDrives => SHARED_DRIVES,
             Node::KioTrash => KIO_TRASH,
             Node::KioFiles => KIO_FILES,
             Node::KioInfo => KIO_INFO,
@@ -115,6 +121,7 @@ mod tests {
             Node::Kept(KeptFolder::LostAndFound),
             Node::Kept(KeptFolder::CanceledUploads),
             Node::ShortcutTargets,
+            Node::SharedDrives,
             Node::Item(Inode::ROOT),
             Node::Item(Inode(2)),
             Node::TargetDir(ItemId("alvo".into())),
@@ -135,7 +142,7 @@ mod tests {
         assert_eq!(unique.len(), numbers.len());
         assert_eq!(
             inodes.ino(&Node::TargetDir(ItemId("alvo".into()))),
-            numbers[7]
+            numbers[8]
         );
         assert_eq!(inodes.node(0), None);
     }

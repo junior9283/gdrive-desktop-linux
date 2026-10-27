@@ -1,5 +1,6 @@
 # Virtual folders of the mount
 folder-my-drive = My Drive
+folder-shared-drives = Shared drives
 folder-trash = .Drive Trash
 folder-lost-found = .Lost and Found
 folder-canceled-uploads = .Canceled uploads
@@ -41,6 +42,11 @@ notify-paused-action = Resume
 notify-canceled-title = Upload canceled
 notify-canceled-body = Your version of { $name } is kept in Canceled uploads.
 notify-canceled-action = View files
+notify-moved-shared-title = File moved to a shared drive
+notify-moved-shared-body = { $name } now belongs to the shared drive: whoever can see the file is now whoever has access to that drive.
+notify-folder-move-title = The folder could not be moved
+notify-folder-move-body = Google doesn't allow moving the folder { $name } between My Drive and a shared drive from here. Do it in Google Drive on the web.
+notify-kind-moved-to-shared-drive = Files moved to a shared drive
 notify-kind-copied-as-shortcut = Google Docs copied as shortcuts
 notify-kind-mount-moved = Drive folder opened in another place
 notify-kind-resume-syncing = Files saved while syncing is paused
@@ -51,7 +57,7 @@ login-rejected = The account { $email } isn't allowed on this computer.
 logout-pending = There are { $count } items not yet in Drive (pending uploads or copies in Lost and Found). Choose to finish the uploads, move the files to a folder, or discard them; Lost and Found is never deleted.
 not-logged-in = No account is connected.
 uninstall-signed-in = Disconnect the account before deleting the data on this computer: signing out decides what happens to pending uploads.
-path-not-in-drive = { $path } isn't in My Drive.
+path-not-in-drive = { $path } isn't in My Drive or in a shared drive.
 
 # Provisional CLI
 cli-client-id = Client ID:

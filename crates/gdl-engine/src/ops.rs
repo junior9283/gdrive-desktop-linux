@@ -10,7 +10,7 @@ use gdl_common::temp_files::is_local_only;
 use gdl_common::time::now_ms;
 use gdl_drive::client::{Change, DriveError};
 use gdl_drive::model::RemoteFile;
-use gdl_store::{Item, ItemId, ItemKind, LocalState};
+use gdl_store::{DriveRoot, Item, ItemId, ItemKind, LocalState};
 
 use crate::activity::ActivityState;
 use crate::changes::apply_changes;
@@ -211,9 +211,40 @@ impl Engine {
         }
     }
 
-    /// Renomeia e/ou move para outra pasta do Meu Drive.
+    /// Renomeia e/ou move para outra pasta do Meu Drive ou de um Drive compartilhado. Uma pasta
+    /// não muda de raiz (a API não move assim): recusa com `FolderCrossDrive` e avisa. Um arquivo
+    /// que passa a um Drive compartilhado muda quem o vê: avisa.
     pub async fn move_item(&self, id: &ItemId, parent: &ItemId, name: &str) -> Result<Item> {
         let item = self.item(id)?;
+        // Só consulta as raízes quando a pasta de cima muda.
+        let into_shared = match item.parent.as_ref().filter(|old| *old != parent) {
+            Some(old) => {
+                let (from, to) = (self.root_of(old)?, self.root_of(parent)?);
+                if from != to && item.kind == ItemKind::Folder {
+                    let _ = self.events.send(EngineEvent::FolderMoveUnsupported {
+                        name: item.local_name,
+                    });
+                    return Err(EngineError::FolderCrossDrive);
+                }
+                from != to && matches!(to, Some(DriveRoot::Shared { .. }))
+            }
+            None => false,
+        };
+        let moved = self.relocate(item, id, parent, name).await?;
+        if into_shared {
+            let _ = self.events.send(EngineEvent::MovedToSharedDrive {
+                name: moved.local_name.clone(),
+            });
+        }
+        Ok(moved)
+    }
+
+    /// A raiz da pasta `dir`; `None` fora do Meu Drive e dos drives ligados.
+    fn root_of(&self, dir: &ItemId) -> Result<Option<DriveRoot>> {
+        Ok(self.store.path_of(dir)?.map(|p| p.root))
+    }
+
+    async fn relocate(&self, item: Item, id: &ItemId, parent: &ItemId, name: &str) -> Result<Item> {
         let remote_name = to_remote(name);
         if never_uploaded(&item) {
             // O envio pendente usa o nome e a pasta da hora em que subir. O nome decide se sobe:

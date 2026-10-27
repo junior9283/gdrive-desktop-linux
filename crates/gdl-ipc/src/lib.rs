@@ -125,7 +125,8 @@ pub struct Status {
 pub struct NotificationItem {
     pub id: u64,
     /// Família do aviso: `lost-and-found`, `offline`, `disk-low`, `quota-full`, `upload-failed`,
-    /// `copied-as-shortcut`, `mount-moved`, `resume-syncing` ou `upload-canceled`.
+    /// `copied-as-shortcut`, `moved-to-shared-drive`, `folder-move-unsupported`, `mount-moved`,
+    /// `resume-syncing` ou `upload-canceled`.
     pub kind: String,
     pub title: String,
     pub body: String,

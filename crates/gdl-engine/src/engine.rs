@@ -638,25 +638,33 @@ mod tests {
             let (engine, shutdown) = (engine.clone(), shutdown.clone());
             async move { engine.run(shutdown).await }
         });
-        wait_until("login recusado", || engine.needs_sign_in()).await;
+        // O aviso sai de uma tarefa à parte: espera cada um antes de seguir.
+        let mut announced = async |want: bool| {
+            let wait = async {
+                loop {
+                    if let Ok(EngineEvent::NeedsSignIn(on)) = events.recv().await {
+                        assert_eq!(on, want);
+                        return;
+                    }
+                }
+            };
+            tokio::time::timeout(Duration::from_secs(10), wait)
+                .await
+                .unwrap_or_else(|_| panic!("esperando NeedsSignIn({want})"));
+        };
+        announced(true).await;
         assert!(engine.summary().unwrap().needs_sign_in);
         let id = fake.add_file(&fake.root_id(), "novo.txt", b"x".to_vec());
 
         access.replace(creds, valid()).await;
 
+        announced(false).await;
         let id = gdl_store::ItemId(id);
         wait_until("consulta depois do login", || {
             engine.store.get(&id).unwrap().is_some()
         })
         .await;
         assert!(!engine.needs_sign_in());
-        let mut seen = Vec::new();
-        while let Ok(event) = events.try_recv() {
-            if let EngineEvent::NeedsSignIn(on) = event {
-                seen.push(on);
-            }
-        }
-        assert_eq!(seen, [true, false]);
         shutdown.cancel();
     }
 

@@ -504,7 +504,7 @@ impl Inner {
                     name: name.into(),
                 })
                 .collect(),
-            Node::SharedDrives => Layout::shared_drive_roots(self.engine.store())
+            Node::SharedDrives => self.engine.store().enabled_drive_roots()
                 .map_err(errno)?
                 .into_iter()
                 .map(|(name, root)| Entry {

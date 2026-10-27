@@ -63,19 +63,9 @@ impl Layout {
             .map(|(_, node)| node)
     }
 
-    /// Os Drives compartilhados ligados, cada um com o nome da pasta dele em `Drives
-    /// compartilhados` e o item da raiz.
-    pub fn shared_drive_roots(store: &Store) -> gdl_store::Result<Vec<(String, Item)>> {
-        let roots = store.enabled_drive_roots()?;
-        Ok(roots
-            .into_iter()
-            .map(|(name, root)| (gdl_common::names::to_local(&name), root))
-            .collect())
-    }
-
     /// A raiz do Drive compartilhado ligado cuja pasta se chama `dir`.
     pub fn shared_drive_root(store: &Store, dir: &str) -> gdl_store::Result<Option<Item>> {
-        let roots = Self::shared_drive_roots(store)?;
+        let roots = store.enabled_drive_roots()?;
         Ok(roots
             .into_iter()
             .find_map(|(name, root)| (name == dir).then_some(root)))
@@ -86,9 +76,7 @@ impl Layout {
     pub fn mounted(&self, mount: &Path, at: &DrivePath) -> PathBuf {
         let root = match &at.root {
             DriveRoot::MyDrive => PathBuf::from(&self.my_drive),
-            DriveRoot::Shared { name, .. } => {
-                PathBuf::from(&self.shared_drives).join(gdl_common::names::to_local(name))
-            }
+            DriveRoot::Shared { name, .. } => PathBuf::from(&self.shared_drives).join(name),
         };
         let mut path = mount.join(root);
         if !at.path.is_empty() {

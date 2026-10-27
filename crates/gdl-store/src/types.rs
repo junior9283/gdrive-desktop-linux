@@ -191,7 +191,7 @@ pub struct StoredDrive {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriveRoot {
     MyDrive,
-    /// Um Drive compartilhado ligado, com o nome que ele tem agora.
+    /// Um Drive compartilhado ligado, com o nome da pasta dele na montagem (já nome local).
     Shared {
         id: ItemId,
         name: String,

@@ -76,6 +76,53 @@ pub struct QueueStats {
     pub bytes: u64,
 }
 
+/// Nome da pasta de cada drive `(id, nome)` na montagem, na mesma ordem; `None` para o que não
+/// pode ter pasta. Nomes locais repetidos ganham o fim do ID, e nenhum deles fica com o nome
+/// puro: um drive de outra pessoa não toma a pasta de um da conta. O que ainda repetir depois
+/// disso (um drive chamado de propósito "Equipe (12345)") fica sem pasta.
+fn drive_dir_names(drives: &[(String, String)]) -> Vec<Option<String>> {
+    fn repeated(names: &[String]) -> Vec<bool> {
+        let mut count = HashMap::<&str, usize>::new();
+        for name in names {
+            *count.entry(name).or_default() += 1;
+        }
+        names.iter().map(|name| count[name.as_str()] > 1).collect()
+    }
+    let local: Vec<String> = drives.iter().map(|(_, name)| names::to_local(name)).collect();
+    let dirs: Vec<String> = local
+        .iter()
+        .zip(repeated(&local))
+        .zip(drives)
+        .map(|((name, repeated), (id, _))| {
+            if !repeated {
+                return name.clone();
+            }
+            let tail: String = id.chars().skip(id.chars().count().saturating_sub(5)).collect();
+            names::fit(name, &format!(" ({tail})"))
+        })
+        .collect();
+    let repeated = repeated(&dirs);
+    dirs.into_iter()
+        .zip(repeated)
+        .map(|(dir, repeated)| (!repeated).then_some(dir))
+        .collect()
+}
+
+/// O nome da pasta de cada Drive compartilhado ligado que tem uma, pelo ID.
+fn enabled_drive_dirs(conn: &Connection) -> Result<HashMap<String, String>> {
+    let mut stmt =
+        conn.prepare_cached("SELECT id, name FROM shared_drives WHERE enabled = 1 ORDER BY id")?;
+    let drives: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let dirs = drive_dir_names(&drives);
+    Ok(drives
+        .into_iter()
+        .zip(dirs)
+        .filter_map(|((id, _), dir)| Some((id, dir?)))
+        .collect())
+}
+
 /// Banco de uma conta. Pode ser compartilhado entre threads.
 pub struct Store {
     conn: Mutex<Connection>,
@@ -738,14 +785,7 @@ impl Store {
         let root = if *inode == Inode::ROOT.0 {
             DriveRoot::MyDrive
         } else {
-            let name: Option<String> = conn
-                .query_row(
-                    "SELECT name FROM shared_drives WHERE id = ?1 AND enabled = 1",
-                    [top],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            match name {
+            match enabled_drive_dirs(&conn)?.remove(top) {
                 Some(name) => DriveRoot::Shared {
                     id: ItemId(top.clone()),
                     name,
@@ -762,20 +802,28 @@ impl Store {
         Ok(Some(DrivePath { root, path }))
     }
 
-    /// Os Drives compartilhados ligados, em ordem de nome, cada um com o nome e o item da raiz
-    /// (numa consulta só).
+    /// Os Drives compartilhados com pasta na montagem, em ordem de nome, cada um com o nome da
+    /// pasta (`drive_dir_names`) e o item da raiz.
     pub fn enabled_drive_roots(&self) -> Result<Vec<(String, Item)>> {
         let conn = self.conn();
+        let mut dirs = enabled_drive_dirs(&conn)?;
         let mut stmt = conn.prepare_cached(
             "SELECT i.id, i.inode, i.parent, i.remote_name, i.local_name, i.kind, i.mime, \
              i.target_id, i.size, i.md5, i.head_revision, i.base_revision, i.base_md5, \
              i.modified_ms, i.created_ms, i.trashed, i.can_edit, i.local_state, i.pin, \
-             i.remote_size, d.name \
+             i.remote_size \
              FROM shared_drives d JOIN items i ON i.id = d.id \
              WHERE d.enabled = 1 ORDER BY d.name, d.id",
         )?;
-        let rows = stmt.query_and_then([], |r| Ok((r.get(20)?, item_from_row(r)?)))?;
-        rows.collect()
+        let rows = stmt.query_and_then([], item_from_row)?;
+        let mut roots = Vec::new();
+        for root in rows {
+            let root = root?;
+            if let Some(dir) = dirs.remove(&root.id.0) {
+                roots.push((dir, root));
+            }
+        }
+        Ok(roots)
     }
 
     /// Os Drives compartilhados da conta, em ordem de nome.
@@ -1278,6 +1326,75 @@ mod tests {
             None,
             "drive desligado"
         );
+    }
+
+    #[test]
+    fn drive_folders_are_never_ambiguous() {
+        let drives = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+            list.iter().map(|(id, name)| (id.to_string(), name.to_string())).collect()
+        };
+        let dirs = |list: &[(&str, &str)]| -> Vec<Option<String>> {
+            drive_dir_names(&drives(list))
+        };
+        // Só colidem depois de convertidos para nome local ("/" vira outra barra).
+        assert_eq!(
+            dirs(&[("id-aaaaa", "A/B"), ("id-bbbbb", "A\u{2215}B"), ("id-ccccc", "C")]),
+            [
+                Some("A\u{2215}B (aaaaa)".into()),
+                Some("A\u{2215}B (bbbbb)".into()),
+                Some("C".into())
+            ]
+        );
+        // Um drive com o nome que o sufixo daria a outro: nenhum dos dois fica com a pasta.
+        assert_eq!(
+            dirs(&[("x-11111", "Equipe"), ("y-22222", "Equipe"), ("z", "Equipe (11111)")]),
+            [None, Some("Equipe (22222)".into()), None]
+        );
+        // O sufixo cabe no limite de nome.
+        let long = "n".repeat(300);
+        let named = dirs(&[("a-11111", &long), ("b-22222", &long)]);
+        for dir in named {
+            let dir = dir.unwrap();
+            assert!(dir.len() <= 255 && dir.ends_with(')'), "{dir}");
+        }
+    }
+
+    #[test]
+    fn same_named_drives_get_the_end_of_the_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .upsert_items(&[
+                folder("drive-um-11111", None),
+                folder("drive-dois-22222", None),
+                item("a.txt", Some("drive-um-11111")),
+            ])
+            .unwrap();
+        for drive in ["drive-um-11111", "drive-dois-22222"] {
+            store
+                .put_shared_drive(&StoredDrive {
+                    id: id(drive),
+                    name: "Equipe".into(),
+                    enabled: true,
+                })
+                .unwrap();
+        }
+        let dir_of = |store: &Store| match store.path_of(&id("a.txt")).unwrap().unwrap().root {
+            DriveRoot::Shared { name, .. } => name,
+            DriveRoot::MyDrive => unreachable!(),
+        };
+        let mut listed: Vec<String> = store
+            .enabled_drive_roots()
+            .unwrap()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        listed.sort();
+        assert_eq!(listed, ["Equipe (11111)", "Equipe (22222)"]);
+        assert_eq!(dir_of(&store), "Equipe (11111)", "o caminho usa o mesmo nome");
+
+        store.set_drive_enabled(&id("drive-dois-22222"), false).unwrap();
+        assert_eq!(dir_of(&store), "Equipe", "sem colisão, o nome volta");
     }
 
     #[test]

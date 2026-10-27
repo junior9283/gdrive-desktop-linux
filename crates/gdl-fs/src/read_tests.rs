@@ -67,6 +67,28 @@ async fn shared_drive_folder_lists_enabled_drives() {
     assert_eq!(names(&shared), ["Equipe"]);
 }
 
+/// Alguém pode pôr a conta num drive com o nome de um dela: nenhum dos dois fica com o nome puro
+/// (senão o que fosse gravado ali poderia ir para o drive de outra pessoa).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn same_named_drives_get_distinct_folders() {
+    let fake = FakeDrive::start().await;
+    let theirs = team_drive(&fake);
+    let bia = fake.add_account("bia@example.com");
+    let mine = bia.add_shared_drive("Equipe");
+    fake.share_drive(&mine, &fake.email());
+    bia.add_file(&mine, "meu.txt", b"meu".to_vec());
+    let m = Mounted::new(fake).await;
+    let shared = m.mnt.join("Drives compartilhados");
+
+    let dir = |id: &str| format!("Equipe ({})", &id[id.len() - 5..]);
+    let mut expected = vec![dir(&theirs), dir(&mine)];
+    expected.sort();
+    assert_eq!(names(&shared), expected);
+    assert_eq!(names(&shared.join(dir(&theirs))), ["Planos"]);
+    assert_eq!(names(&shared.join(dir(&mine))), ["meu.txt"]);
+    assert!(std::fs::metadata(shared.join("Equipe")).is_err());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn readdir_and_stat_never_download_content() {
     let fake = FakeDrive::start().await;

@@ -500,6 +500,14 @@ impl Daemon {
         }
     }
 
+    /// A montagem fora do indexador do KDE (Baloo), que baixaria tudo para ler o conteúdo.
+    fn apply_baloo(&self, mount_point: &Path) {
+        let config_home = &self.config.paths.config_home;
+        if let Err(e) = desktop::set_baloo_exclusion(config_home, mount_point, true) {
+            tracing::warn!(erro = %e, "não deu para tirar a montagem do Baloo");
+        }
+    }
+
     /// `ShowMountPointInSidebar` nos Locais do KDE.
     fn apply_sidebar(&self, mount_point: &Path) {
         let title = mount_point
@@ -878,6 +886,7 @@ impl Daemon {
             _session: session,
         });
         self.apply_sidebar(&mount_point);
+        self.apply_baloo(&mount_point);
         self.apply_metered(self.is_metered()).await;
         if moved {
             let path = mount_point.display().to_string();
@@ -1512,6 +1521,7 @@ impl Daemon {
             cosmic::remove_actions(&paths.config_home)?;
             let places = paths.data_home.join("user-places.xbel");
             desktop::set_sidebar_place(&places, &mount_point, "", false)?;
+            desktop::set_baloo_exclusion(&paths.config_home, &mount_point, false)?;
             // Desmontada, a pasta fica vazia; com algo dentro, fica.
             let _ = std::fs::remove_dir(&mount_point);
             if purge {

@@ -1,5 +1,6 @@
-//! Integração com a área de trabalho: início automático na sessão (`AutoStartOnLogin`) e a
-//! montagem nos "Locais" do Dolphin (`ShowMountPointInSidebar`).
+//! Integração com a área de trabalho: início automático na sessão (`AutoStartOnLogin`), a
+//! montagem nos "Locais" do Dolphin (`ShowMountPointInSidebar`) e fora do indexador do KDE
+//! (Baloo).
 
 use std::io;
 use std::path::Path;
@@ -93,6 +94,105 @@ pub fn set_sidebar_place(
     write_atomic(places, updated.as_bytes())
 }
 
+/// Põe (ou tira) a montagem das pastas que o Baloo não indexa, em `<config_home>/baloofilerc`.
+/// Sem o arquivo, só o cria numa sessão do KDE (com `kdeglobals`).
+pub fn set_baloo_exclusion(config_home: &Path, mount: &Path, enabled: bool) -> io::Result<()> {
+    let file = config_home.join("baloofilerc");
+    let body = match std::fs::read_to_string(&file) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            if !config_home.join("kdeglobals").exists() {
+                return Ok(());
+            }
+            String::new()
+        }
+        result => result?,
+    };
+    match baloo_exclusion(&body, mount, enabled) {
+        Some(updated) => write_atomic(&file, updated.as_bytes()),
+        None => Ok(()),
+    }
+}
+
+/// O `baloofilerc` com a montagem nas pastas que o Baloo não indexa (`enabled`) ou sem ela;
+/// `None` se já está assim. As outras exclusões ficam. Indexar a montagem baixaria o Drive
+/// inteiro para ler o conteúdo dos arquivos.
+pub fn baloo_exclusion(body: &str, mount: &Path, enabled: bool) -> Option<String> {
+    // Na lista do KConfig, vírgula e barra invertida vão escapadas.
+    let ours = format!("{}/", mount.display())
+        .replace('\\', "\\\\")
+        .replace(',', "\\,");
+    let mut lines: Vec<String> = body.lines().map(String::from).collect();
+    let general = lines.iter().position(|l| l.trim() == "[General]");
+    let section_end = |start: usize| {
+        lines[start + 1..]
+            .iter()
+            .position(|l| l.starts_with('['))
+            .map_or(lines.len(), |n| start + 1 + n)
+    };
+    let key = general.and_then(|start| {
+        (start + 1..section_end(start)).find(|&i| {
+            let name = lines[i].split('=').next().unwrap_or_default().trim();
+            name == "exclude folders" || name.starts_with("exclude folders[")
+        })
+    });
+    match (key, enabled) {
+        (Some(i), _) => {
+            let (name, value) = lines[i].split_once('=').unwrap_or((&lines[i], ""));
+            let mut folders = split_kconfig_list(value);
+            let present = folders.contains(&ours);
+            if present == enabled {
+                return None;
+            }
+            if enabled {
+                folders.push(ours);
+            } else {
+                folders.retain(|f| *f != ours);
+            }
+            if folders.is_empty() {
+                lines.remove(i);
+            } else {
+                lines[i] = format!("{name}={}", folders.join(","));
+            }
+        }
+        (None, false) => return None,
+        (None, true) => {
+            let line = format!("exclude folders[$e]={ours}");
+            match general {
+                Some(start) => {
+                    // Depois da última linha com conteúdo da seção.
+                    let mut at = section_end(start);
+                    while at > start + 1 && lines[at - 1].trim().is_empty() {
+                        at -= 1;
+                    }
+                    lines.insert(at, line);
+                }
+                None => {
+                    if !lines.is_empty() {
+                        lines.push(String::new());
+                    }
+                    lines.extend(["[General]".into(), line]);
+                }
+            }
+        }
+    }
+    Some(lines.join("\n") + "\n")
+}
+
+/// Os itens de uma lista do KConfig, separados por vírgulas sem escape (o escape fica).
+fn split_kconfig_list(value: &str) -> Vec<String> {
+    let mut items = vec![String::new()];
+    let mut escaped = false;
+    for c in value.chars() {
+        match (c, escaped) {
+            (',', false) => items.push(String::new()),
+            _ => items.last_mut().unwrap().push(c),
+        }
+        escaped = c == '\\' && !escaped;
+    }
+    items.retain(|i| !i.is_empty());
+    items
+}
+
 fn xml_text(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -177,5 +277,57 @@ mod tests {
         let missing = tmp.path().join("sem-arquivo.xbel");
         set_sidebar_place(&missing, mount, "Google Drive", true).unwrap();
         assert!(!missing.exists(), "sem o arquivo do KDE, não cria");
+    }
+
+    #[test]
+    fn baloo_skips_the_mount_keeping_other_exclusions() {
+        let mount = Path::new("/home/ana/Google Drive");
+        let body = "[Basic Settings]\nIndexing-Enabled=true\n\n[General]\ndbVersion=2\n\
+                    exclude folders[$e]=$HOME/build/,/srv/\n";
+
+        let merged = baloo_exclusion(body, mount, true).unwrap();
+
+        assert!(
+            merged.contains("exclude folders[$e]=$HOME/build/,/srv/,/home/ana/Google Drive/\n"),
+            "{merged}"
+        );
+        assert!(
+            merged.starts_with("[Basic Settings]\nIndexing-Enabled=true\n"),
+            "{merged}"
+        );
+        assert_eq!(baloo_exclusion(&merged, mount, true), None, "já está lá");
+        assert_eq!(
+            baloo_exclusion(&merged, mount, false).as_deref(),
+            Some(body)
+        );
+    }
+
+    #[test]
+    fn baloo_file_is_only_created_in_a_kde_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mount = Path::new("/home/ana/Google Drive");
+        let file = tmp.path().join("baloofilerc");
+
+        set_baloo_exclusion(tmp.path(), mount, true).unwrap();
+        assert!(!file.exists(), "fora do KDE, nada");
+
+        std::fs::write(tmp.path().join("kdeglobals"), "").unwrap();
+        set_baloo_exclusion(tmp.path(), mount, true).unwrap();
+        let body = std::fs::read_to_string(&file).unwrap();
+        assert!(body.contains("=/home/ana/Google Drive/"), "{body}");
+    }
+
+    #[test]
+    fn baloo_gets_the_key_and_the_section_when_missing() {
+        let mount = Path::new("/home/ana/Drive, pessoal");
+        assert_eq!(
+            baloo_exclusion("[General]\ndbVersion=2\n", mount, true).unwrap(),
+            "[General]\ndbVersion=2\nexclude folders[$e]=/home/ana/Drive\\, pessoal/\n"
+        );
+        assert_eq!(
+            baloo_exclusion("", mount, true).unwrap(),
+            "[General]\nexclude folders[$e]=/home/ana/Drive\\, pessoal/\n"
+        );
+        assert_eq!(baloo_exclusion("", mount, false), None);
     }
 }

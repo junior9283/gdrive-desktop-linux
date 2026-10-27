@@ -1005,7 +1005,14 @@ async fn uninstall_refuses_to_purge_with_account_connected() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn uninstall_unmounts_and_keeps_the_account() {
     let h = Harness::new().await;
+    // Numa sessão do KDE, a montagem sai do indexador ao montar e volta ao desinstalar.
+    let config_home = h.paths().config_home.clone();
+    std::fs::create_dir_all(&config_home).unwrap();
+    std::fs::write(config_home.join("kdeglobals"), "").unwrap();
+    let baloo = || std::fs::read_to_string(config_home.join("baloofilerc")).unwrap_or_default();
     h.logged_in().await;
+    let mount = format!("{}/", h.home.join("Google Drive").display());
+    assert!(baloo().contains(&mount), "{}", baloo());
     let autostart = h
         .paths()
         .config_home
@@ -1023,6 +1030,7 @@ async fn uninstall_unmounts_and_keeps_the_account() {
     assert!(!h.drive().exists(), "a montagem ficou");
     assert!(!h.home.join("Google Drive").exists(), "a pasta vazia ficou");
     assert!(!autostart.exists(), "o início automático ficou");
+    assert!(!baloo().contains(&mount), "a exclusão do Baloo ficou");
     assert!(h.tokens.load(&h.fake.email()).await.unwrap().is_some());
     assert!(h.paths().config_dir.exists() || h.paths().data_dir.exists());
     let exit = tokio::time::timeout(

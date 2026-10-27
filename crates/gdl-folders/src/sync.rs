@@ -33,6 +33,8 @@ pub enum SyncError {
     Io(#[from] std::io::Error),
     #[error("a pasta de cima ainda não existe no Drive")]
     NoParent,
+    #[error("o caminho passa por um link simbólico")]
+    Symlink,
 }
 
 pub type Result<T> = std::result::Result<T, SyncError>;
@@ -228,7 +230,11 @@ impl FolderSync {
                 .locals
                 .get(&base.rel_path)
                 .is_some_and(|l| l.matches(base));
-            if *to == base.rel_path || !(parent_here && free && unchanged) {
+            if *to == base.rel_path
+                || !(parent_here && free && unchanged)
+                || self.beneath(to).is_err()
+                || self.beneath(&base.rel_path).is_err()
+            {
                 continue;
             }
             let renamed = renameat_with(
@@ -279,6 +285,12 @@ impl FolderSync {
             ),
         );
         let path = self.path(rel);
+        if matches!(
+            action,
+            Action::Download | Action::CreateLocalDir | Action::TrashLocal | Action::Conflict
+        ) {
+            self.beneath(rel)?;
+        }
         match action {
             Action::Nothing => {}
             Action::UpdateBase => {
@@ -388,7 +400,18 @@ impl FolderSync {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let part = path.with_file_name(format!(".{name}{PART_SUFFIX}"));
         let result = async {
-            let mut file = tokio::fs::File::create(&part).await?;
+            // Um temporário largado (ou plantado como link) sai antes; o novo é criado sem seguir
+            // links e sem abrir nada que já exista.
+            match std::fs::remove_file(&part) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),
+                _ => {}
+            }
+            let mut file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .open(&part)
+                .await?;
             if item.remote_size > 0 {
                 let mut body = self
                     .client
@@ -486,6 +509,20 @@ impl FolderSync {
     fn forget(&self, v: &mut View, rel: &str) -> Result<()> {
         self.store.forget_synced(self.pair.id, rel)?;
         v.gone = Some(rel.into());
+        Ok(())
+    }
+
+    /// Nenhuma pasta entre a raiz do par e `rel` é link simbólico: o que se escreve ali não sai
+    /// do par (a varredura não segue links, então o Drive pode ter um caminho "através" de um).
+    fn beneath(&self, rel: &str) -> Result<()> {
+        let mut dir = self.pair.local.clone();
+        let parent = rel.rsplit_once('/').map_or("", |(parent, _)| parent);
+        for part in parent.split('/').filter(|p| !p.is_empty()) {
+            dir.push(part);
+            if !std::fs::symlink_metadata(&dir)?.is_dir() {
+                return Err(SyncError::Symlink);
+            }
+        }
         Ok(())
     }
 
@@ -1009,6 +1046,33 @@ mod tests {
             std::fs::read(w.trash_dir.join("files/velho.txt")).unwrap(),
             b"velho"
         );
+    }
+
+    #[tokio::test]
+    async fn nothing_is_written_through_a_symlinked_folder() {
+        let w = World::new().await;
+        let sub = w.fake.add_folder(&w.folder, "sub");
+        w.fake.add_file(&sub, "x.txt", b"nuvem".to_vec());
+        let outside = w._tmp.path().join("fora");
+        std::fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, w.local.join("sub")).unwrap();
+        // E um temporário de download plantado como link para fora.
+        w.fake.add_file(&w.folder, "y.txt", b"nuvem".to_vec());
+        std::os::unix::fs::symlink(outside.join("alvo"), w.local.join(".y.txt.gdl-part")).unwrap();
+
+        w.refresh().await;
+        let report = w.sync_with(8).reconcile().await.unwrap();
+
+        assert!(!outside.join("x.txt").exists(), "nada escrito fora do par");
+        assert!(
+            !outside.join("alvo").exists(),
+            "o temporário não segue link"
+        );
+        assert!(
+            report.failed.iter().any(|(rel, _)| rel == "sub/x.txt"),
+            "{report:?}"
+        );
+        assert_eq!(w.read("y.txt"), b"nuvem");
     }
 
     #[tokio::test]

@@ -46,7 +46,8 @@ impl Trash {
     pub fn put(&self, path: &Path) -> io::Result<PathBuf> {
         let path = std::path::absolute(path)?;
         let device = std::fs::symlink_metadata(&path)?.dev();
-        let (dir, shown) = if self.home_device()? == device {
+        let in_home = self.home_device()? == device;
+        let (dir, shown) = if in_home {
             (self.home.clone(), path.clone())
         } else {
             let top = mount_top(&path, device)?;
@@ -60,6 +61,7 @@ impl Trash {
                 .recursive(true)
                 .mode(0o700)
                 .create(d)?;
+            check_private(d, in_home)?;
         }
         let name = path
             .file_name()
@@ -106,6 +108,21 @@ impl Trash {
     }
 }
 
+/// A lixeira é uma pasta de verdade (não link) do usuário; a `.Trash-<uid>` de outro disco também
+/// só dele: num disco compartilhado, outro usuário poderia tê-la criado antes para receber os
+/// arquivos. (A da pasta pessoal pode ter as permissões que o sistema deu.)
+fn check_private(dir: &Path, in_home: bool) -> io::Result<()> {
+    let m = std::fs::symlink_metadata(dir)?;
+    let uid = rustix::process::getuid().as_raw();
+    if !m.is_dir() || m.uid() != uid || (!in_home && m.mode() & 0o077 != 0) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("lixeira insegura: {}", dir.display()),
+        ));
+    }
+    Ok(())
+}
+
 /// A raiz do disco onde `path` está: a pasta mais alta ainda no mesmo dispositivo.
 fn mount_top(path: &Path, device: u64) -> io::Result<PathBuf> {
     let mut top = path.to_path_buf();
@@ -121,6 +138,23 @@ fn mount_top(path: &Path, device: u64) -> io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_trash_that_is_a_symlink_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let elsewhere = tmp.path().join("outro");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, tmp.path().join("Trash")).unwrap();
+        let trash = Trash::new(tmp.path().join("Trash"));
+        std::fs::write(tmp.path().join("a.txt"), b"um").unwrap();
+
+        assert!(trash.put(&tmp.path().join("a.txt")).is_err());
+        assert!(
+            tmp.path().join("a.txt").exists(),
+            "o arquivo fica onde estava"
+        );
+        assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
+    }
 
     #[test]
     fn files_and_folders_go_to_the_trash_with_their_info() {

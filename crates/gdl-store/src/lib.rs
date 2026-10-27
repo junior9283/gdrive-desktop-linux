@@ -88,7 +88,10 @@ fn drive_dir_names(drives: &[(String, String)]) -> Vec<Option<String>> {
         }
         names.iter().map(|name| count[name.as_str()] > 1).collect()
     }
-    let local: Vec<String> = drives.iter().map(|(_, name)| names::to_local(name)).collect();
+    let local: Vec<String> = drives
+        .iter()
+        .map(|(_, name)| names::to_local(name))
+        .collect();
     let dirs: Vec<String> = local
         .iter()
         .zip(repeated(&local))
@@ -97,7 +100,10 @@ fn drive_dir_names(drives: &[(String, String)]) -> Vec<Option<String>> {
             if !repeated {
                 return name.clone();
             }
-            let tail: String = id.chars().skip(id.chars().count().saturating_sub(5)).collect();
+            let tail: String = id
+                .chars()
+                .skip(id.chars().count().saturating_sub(5))
+                .collect();
             names::fit(name, &format!(" ({tail})"))
         })
         .collect();
@@ -1331,14 +1337,19 @@ mod tests {
     #[test]
     fn drive_folders_are_never_ambiguous() {
         let drives = |list: &[(&str, &str)]| -> Vec<(String, String)> {
-            list.iter().map(|(id, name)| (id.to_string(), name.to_string())).collect()
+            list.iter()
+                .map(|(id, name)| (id.to_string(), name.to_string()))
+                .collect()
         };
-        let dirs = |list: &[(&str, &str)]| -> Vec<Option<String>> {
-            drive_dir_names(&drives(list))
-        };
+        let dirs =
+            |list: &[(&str, &str)]| -> Vec<Option<String>> { drive_dir_names(&drives(list)) };
         // Só colidem depois de convertidos para nome local ("/" vira outra barra).
         assert_eq!(
-            dirs(&[("id-aaaaa", "A/B"), ("id-bbbbb", "A\u{2215}B"), ("id-ccccc", "C")]),
+            dirs(&[
+                ("id-aaaaa", "A/B"),
+                ("id-bbbbb", "A\u{2215}B"),
+                ("id-ccccc", "C")
+            ]),
             [
                 Some("A\u{2215}B (aaaaa)".into()),
                 Some("A\u{2215}B (bbbbb)".into()),
@@ -1347,7 +1358,11 @@ mod tests {
         );
         // Um drive com o nome que o sufixo daria a outro: nenhum dos dois fica com a pasta.
         assert_eq!(
-            dirs(&[("x-11111", "Equipe"), ("y-22222", "Equipe"), ("z", "Equipe (11111)")]),
+            dirs(&[
+                ("x-11111", "Equipe"),
+                ("y-22222", "Equipe"),
+                ("z", "Equipe (11111)")
+            ]),
             [None, Some("Equipe (22222)".into()), None]
         );
         // O sufixo cabe no limite de nome.
@@ -1391,9 +1406,15 @@ mod tests {
             .collect();
         listed.sort();
         assert_eq!(listed, ["Equipe (11111)", "Equipe (22222)"]);
-        assert_eq!(dir_of(&store), "Equipe (11111)", "o caminho usa o mesmo nome");
+        assert_eq!(
+            dir_of(&store),
+            "Equipe (11111)",
+            "o caminho usa o mesmo nome"
+        );
 
-        store.set_drive_enabled(&id("drive-dois-22222"), false).unwrap();
+        store
+            .set_drive_enabled(&id("drive-dois-22222"), false)
+            .unwrap();
         assert_eq!(dir_of(&store), "Equipe", "sem colisão, o nome volta");
     }
 

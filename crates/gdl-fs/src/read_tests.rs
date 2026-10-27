@@ -67,6 +67,25 @@ async fn reading_file_returns_remote_bytes() {
     assert_eq!(std::fs::read(m.drive().join("video.mp4")).unwrap(), data);
 }
 
+/// Desempenho: copiar um arquivo pela montagem ia a ~1,3 MB/s (o rclone, ~8 MB/s). A cópia tem
+/// de virar poucos pedidos grandes, não um por bloco de 1 MiB.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn copying_a_file_reads_ahead_in_few_requests() {
+    let fake = FakeDrive::start().await;
+    let data: Vec<u8> = (0..64 * MIB).map(|n| (n % 251) as u8).collect();
+    let id = fake.add_file(&fake.root_id(), "filme.mp4", data.clone());
+    let m = Mounted::new(fake).await;
+    let path = m.drive().join("filme.mp4");
+
+    let copied = tokio::task::spawn_blocking(move || std::fs::read(path).unwrap())
+        .await
+        .unwrap();
+
+    assert!(copied == data, "conteúdo diferente do da nuvem");
+    let requests = m.fake.requests(&format!("/drive/v3/files/{id}?alt=media"));
+    assert!(requests <= 10, "{requests} pedidos para 64 MiB");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn gdoc_reads_as_pointer_json() {
     let fake = FakeDrive::start().await;
@@ -381,4 +400,32 @@ async fn offline_engine_does_not_wait_for_thumbnails() {
     let (listed, took) = timed_names(m.drive().join("Fotos de Março #1")).await;
     assert_eq!(listed, ["foto (1).jpg"]);
     assert!(took < Duration::from_millis(700), "demorou {took:?}");
+}
+
+/// Regressão da 0.6.0: 8 saltos num vídeo (o player procurando a cena), 256 KiB lidos em cada
+/// um, baixavam 62 MiB; cada salto deve baixar só os blocos que lê.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn seeks_download_little_more_than_what_is_read() {
+    use std::io::{Read, Seek, SeekFrom};
+    let fake = FakeDrive::start().await;
+    let size = 64 * MIB;
+    fake.add_file(&fake.root_id(), "video.mp4", vec![7; size]);
+    let m = Mounted::new(fake).await;
+    let path = m.drive().join("video.mp4");
+
+    tokio::task::spawn_blocking(move || {
+        let mut file = std::fs::File::open(path).unwrap();
+        let mut buf = vec![0; 256 * 1024];
+        for frac in [0.62, 0.13, 0.87, 0.35, 0.05, 0.71, 0.48, 0.94] {
+            file.seek(SeekFrom::Start((size as f64 * frac) as u64))
+                .unwrap();
+            file.read_exact(&mut buf).unwrap();
+        }
+    })
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mib = m.fake.downloaded_bytes() / MIB as u64;
+    assert!(mib <= 16, "{mib} MiB baixados em 8 saltos");
 }

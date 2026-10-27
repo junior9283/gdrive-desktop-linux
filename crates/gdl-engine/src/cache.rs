@@ -112,9 +112,11 @@ struct ItemState {
     landed: Arc<Notify>,
     /// Fim da última leitura, para reconhecer leitura sequencial.
     last_end: Option<u64>,
-    /// Até onde a leitura antecipada já foi pedida, e o tamanho da próxima janela.
+    /// Até onde a leitura antecipada já foi pedida, e o tamanho da última janela pedida.
     ahead_until: u64,
     window: u64,
+    /// Onde começou a leitura sequencial atual (a última leitura fora de sequência).
+    run_start: u64,
     /// Último acesso gravado no banco.
     touched_ms: i64,
 }
@@ -280,13 +282,17 @@ impl BlockCache {
             let follows = state.last_end.replace(end) == Some(offset);
             let sequential = sequential.unwrap_or(follows);
             if !sequential {
-                state.window = READ_AHEAD;
+                state.window = 0;
+                state.run_start = offset;
             }
-            // Pede a próxima janela, maior, quando a anterior está na metade.
-            let window = state.window.max(READ_AHEAD);
-            let prefetch = (sequential && end + window / 2 > state.ahead_until).then(|| {
-                state.ahead_until = size.min(end + window);
-                state.window = (window * 2).min(MAX_READ_AHEAD);
+            // Só lê adiante quem já leu um bloco inteiro em sequência: um salto (o player
+            // procurando a cena) lê pouco e baixa só os blocos lidos. Depois, pede a próxima
+            // janela, com o dobro do tamanho, quando a anterior está na metade.
+            let reads_on = sequential && end - state.run_start >= BLOCK;
+            let half = state.window.max(READ_AHEAD) / 2;
+            let prefetch = (reads_on && end + half > state.ahead_until).then(|| {
+                state.window = (state.window * 2).clamp(READ_AHEAD, MAX_READ_AHEAD);
+                state.ahead_until = size.min(end + state.window);
                 state.ahead_until
             });
             let touch = now - state.touched_ms >= TOUCH_EVERY_MS;
@@ -686,13 +692,22 @@ mod tests {
         assert!(s.env.fake.downloaded_bytes() <= 2 * MIB as u64);
     }
 
+    /// A leitura antecipada começa depois de um bloco lido em sequência, não antes.
     #[tokio::test]
-    async fn sequential_read_prefetches_8_mib() {
+    async fn sequential_read_prefetches_8_mib_after_a_block() {
         let (s, ids) = setup(&[("filme.mp4", 32 * MIB)], None).await;
         let id = &ids[0];
-        s.cache.read(id, 0, 65536).await.unwrap();
-        s.cache.read(id, 65536, 65536).await.unwrap();
-        let wanted = (131072 + 8 * MIB) as u64;
+        for n in 0..BLOCK / 65536 - 1 {
+            s.cache.read(id, n * 65536, 65536).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            s.env.fake.downloaded_bytes(),
+            MIB as u64,
+            "nada antes de um bloco"
+        );
+        s.cache.read(id, BLOCK - 65536, 65536).await.unwrap();
+        let wanted = (MIB + 8 * MIB) as u64;
         wait_until("leitura antecipada dos próximos 8 MiB", || {
             s.env
                 .store

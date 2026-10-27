@@ -24,8 +24,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   vez e só usáveis depois de chegarem inteiros (~1,2 MB/s). Agora cada bloco de 1 MiB fica
   disponível assim que chega, a leitura antecipada cresce de 8 até 64 MiB enquanto a leitura
   segue sequencial (um arquivo de 64 MiB passou de 16 para até 7 pedidos) e a próxima janela é
-  pedida enquanto a anterior ainda chega. Saltos continuam baixando só os blocos lidos, e cada
-  download usa ~1 MiB de memória em vez de 8 MiB.
+  pedida enquanto a anterior ainda chega. A leitura antecipada só começa depois de 1 MiB lido em
+  sequência, então saltos (o player procurando a cena) baixam só os blocos lidos: 8 saltos de
+  256 KiB num vídeo baixam 16 MiB (eram 32 MiB). Cada download usa ~1 MiB de memória em vez de
+  8 MiB.
 - Desempenho: os envios iam um de cada vez (~2 s por arquivo pequeno; 50 arquivos de 20 KB em
   105 s). Agora até quatro sobem juntos, cada um com um arquivo diferente; versões do mesmo
   arquivo continuam uma de cada vez e em ordem, e a pasta nova sobe antes do que está nela

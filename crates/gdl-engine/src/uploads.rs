@@ -1,7 +1,7 @@
 //! Fila de envio persistente: sobe as edições locais, detecta conflitos, guarda no
 //! `Lost and Found` o que não pode subir e cancela envios a pedido do usuário.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -287,8 +287,9 @@ pub struct UploadWorker {
     turns: Mutex<HashMap<Inode, Arc<tokio::sync::Mutex<()>>>>,
     /// Cancelamentos pedidos (e envios de arquivo em andamento), por inode.
     cancels: Mutex<HashMap<Inode, CancellationToken>>,
-    /// Arquivos abertos para escrita na pasta montada (ver `mark_writing`).
-    writing: Arc<Mutex<HashSet<Inode>>>,
+    /// Arquivos abertos para escrita na pasta montada, com o número de marcas de cada um (ver
+    /// `mark_writing`).
+    writing: Arc<Mutex<HashMap<Inode, usize>>>,
     /// Envios em andamento (fila e item), para os que rodam juntos não pegarem o mesmo.
     running: Mutex<Vec<(i64, ItemId)>>,
 }
@@ -307,13 +308,21 @@ impl Drop for RunningJob<'_> {
 
 /// O arquivo segue aberto para escrita enquanto esta marca existir.
 pub struct WritingMark {
-    writing: Arc<Mutex<HashSet<Inode>>>,
+    writing: Arc<Mutex<HashMap<Inode, usize>>>,
     inode: Inode,
 }
 
 impl Drop for WritingMark {
     fn drop(&mut self) {
-        lock(&self.writing).remove(&self.inode);
+        // Contada: o último fechamento de uma abertura anterior pode chegar depois da abertura
+        // seguinte, e não leva a marca dela junto.
+        let mut writing = lock(&self.writing);
+        if let Some(n) = writing.get_mut(&self.inode) {
+            *n -= 1;
+            if *n == 0 {
+                writing.remove(&self.inode);
+            }
+        }
     }
 }
 
@@ -704,7 +713,7 @@ impl UploadWorker {
     /// Marca o arquivo `inode` como aberto para escrita (a pasta montada, da primeira abertura
     /// ao último fechamento): o cancelamento do envio é recusado enquanto a marca existir.
     pub fn mark_writing(&self, inode: Inode) -> WritingMark {
-        lock(&self.writing).insert(inode);
+        *lock(&self.writing).entry(inode).or_default() += 1;
         WritingMark {
             writing: self.writing.clone(),
             inode,
@@ -712,7 +721,7 @@ impl UploadWorker {
     }
 
     fn is_writing(&self, inode: Inode) -> bool {
-        lock(&self.writing).contains(&inode)
+        lock(&self.writing).contains_key(&inode)
     }
 
     /// Roda o envio do arquivo `inode` até ele terminar ou ser cancelado (`None`).
@@ -1447,6 +1456,28 @@ mod tests {
         assert!(s.env.store.get(&local).unwrap().is_some());
 
         drop(writing);
+        assert_eq!(
+            s.worker.cancel(&local).await.unwrap(),
+            CancelOutcome::Canceled
+        );
+    }
+
+    /// Regressão: o último fechamento de uma abertura anterior chega (o kernel manda sem esperar)
+    /// depois de o arquivo ser aberto de novo; soltar a marca velha apagava a nova.
+    #[tokio::test]
+    async fn late_release_keeps_the_mark_of_a_new_open() {
+        let s = setup(Env::new().await).await;
+        s.env.fake.inject(Fault::Offline);
+        let local = s.write_new(&s.env.root(), "aberto.txt", b"gravando");
+        assert_eq!(s.run().await, Some(UploadOutcome::Offline));
+        let inode = s.env.store.get(&local).unwrap().unwrap().inode;
+
+        let old = s.worker.mark_writing(inode);
+        let new = s.worker.mark_writing(inode);
+        drop(old);
+        assert_eq!(s.worker.cancel(&local).await.unwrap(), CancelOutcome::InUse);
+
+        drop(new);
         assert_eq!(
             s.worker.cancel(&local).await.unwrap(),
             CancelOutcome::Canceled

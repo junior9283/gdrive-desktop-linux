@@ -92,7 +92,7 @@ fn resolve(
 /// Aplica ao banco mudanças vindas do Drive (da consulta periódica ou da resposta de uma operação
 /// feita pela montagem). Devolve quantas mudaram o banco e os itens que saíram dele (apagados de
 /// vez no Drive, sem edição local), cujo conteúdo em cache quem chamou descarta.
-pub(crate) fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usize, Vec<ItemId>)> {
+pub fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usize, Vec<ItemId>)> {
     let email = store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
     let enabled_drives: BTreeSet<String> = store
         .shared_drives()?

@@ -2,3 +2,5 @@
 //! do computador ("Computadores") e o backup de dispositivos removíveis.
 
 pub mod decide;
+pub mod sync;
+pub mod trash;

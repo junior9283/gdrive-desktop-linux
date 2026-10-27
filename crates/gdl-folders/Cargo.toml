@@ -8,7 +8,23 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+chrono.workspace = true
+gdl-common.workspace = true
+gdl-drive.workspace = true
+gdl-engine.workspace = true
 gdl-store.workspace = true
+md-5.workspace = true
+percent-encoding.workspace = true
+rustix = { workspace = true, features = ["process"] }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+gdl-fake-drive.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

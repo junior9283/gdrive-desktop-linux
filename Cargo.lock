@@ -1653,7 +1653,21 @@ dependencies = [
 name = "gdl-folders"
 version = "0.8.0"
 dependencies = [
+ "async-trait",
+ "chrono",
+ "gdl-common",
+ "gdl-drive",
+ "gdl-engine",
+ "gdl-fake-drive",
  "gdl-store",
+ "md-5 0.11.0",
+ "percent-encoding",
+ "rustix",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]

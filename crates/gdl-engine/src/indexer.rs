@@ -11,7 +11,7 @@ use crate::gdocs::{pointer_extension, pointer_json};
 use crate::{EngineError, Result};
 
 /// Chaves do `kv` do banco.
-pub(crate) const START_PAGE_TOKEN: &str = "start_page_token";
+pub const START_PAGE_TOKEN: &str = "start_page_token";
 pub(crate) const ACCOUNT_EMAIL: &str = "account_email";
 pub(crate) const ROOT_ID: &str = "root_id";
 

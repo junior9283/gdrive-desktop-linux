@@ -333,9 +333,20 @@ impl Service {
             .await
     }
 
-    /// O menu "Google Drive" do botão direito para os caminhos; vazio fora do Meu Drive.
+    /// O menu "Google Drive" do botão direito para os caminhos; vazio fora do Meu Drive (menos
+    /// numa pasta do computador que pode ser sincronizada).
     async fn menu(&self, paths: Vec<String>) -> Vec<MenuEntry> {
         self.daemon.menu(&paths).await
+    }
+
+    /// O emblema de cada caminho dentro de uma pasta sincronizada; vazio fora delas.
+    async fn folder_states(&self, paths: Vec<String>) -> Vec<String> {
+        self.daemon.folder_states(&paths).await
+    }
+
+    /// As raízes das pastas sincronizadas (as extensões só perguntam `FolderStates` abaixo delas).
+    async fn folder_roots(&self) -> Vec<String> {
+        self.daemon.folder_roots().await
     }
 
     /// Faz a ação do menu; devolve o texto a copiar (o link em `copy-link`), ou vazio.

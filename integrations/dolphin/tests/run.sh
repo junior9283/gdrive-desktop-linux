@@ -15,7 +15,8 @@ probe=$(find "$build" -name gdl-dolphin-probe -type f | head -1)
 overlay=$(find "$build" -name gdl-overlay-probe -type f | head -1)
 work=$(mktemp -d) fake=""
 d="$work/drive"
-mkdir -p "$d/pasta" && touch "$d/a.txt"
+pair="$work/Documentos"
+mkdir -p "$d/pasta" "$pair" && touch "$d/a.txt" "$pair/c.txt"
 trap 'kill "$fake" 2>/dev/null; rm -rf "$work"' EXIT
 failed=0
 
@@ -30,7 +31,7 @@ expect() { # NOME ESPERADO OBTIDO
 
 expect "sem o serviço, nada aparece" "(sem menu)" "$("$probe" "$d/a.txt")"
 
-python3 -I -W ignore::DeprecationWarning "$here/../../testing/fake_service.py" "$work/actions" "$d" >"$work/ready" &
+python3 -I -W ignore::DeprecationWarning "$here/../../testing/fake_service.py" "$work/actions" "$d" "$pair" >"$work/ready" &
 fake=$!
 until grep -q pronto "$work/ready" 2>/dev/null; do sleep 0.1; done
 
@@ -67,6 +68,10 @@ state "$d/pasta" cloud
 expect "um emblema para cada estado" "a.txt: gdl-emblem-offline
 pasta: gdl-emblem-cloud
 b.txt: " "$("$overlay" "$d/a.txt" "$d/pasta" "$work/fora/b.txt")"
+expect "pasta sincronizada: o estado vem do serviço, sem esperar" "Documentos: 
+c.txt: 
+mudou Documentos: gdl-emblem-offline
+mudou c.txt: gdl-emblem-syncing" "$("$overlay" --wait 2 "$pair" "$pair/c.txt" | grep -v esperando)"
 "$overlay" --wait 1 "$d/a.txt" > "$work/overlay" &
 waiting=$!
 until grep -q esperando "$work/overlay" 2>/dev/null; do sleep 0.1; done

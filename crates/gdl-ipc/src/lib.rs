@@ -552,8 +552,14 @@ pub trait Service {
         version_id: &str,
         keep: bool,
     ) -> Result<(), ServiceError>;
-    /// O menu do botão direito para os caminhos; vazio fora do Meu Drive ou sem conta.
+    /// O menu do botão direito para os caminhos; vazio fora do Meu Drive ou sem conta. Uma pasta
+    /// do computador que pode ser sincronizada tem só `sync-folder`.
     fn menu(&self, paths: &[&str]) -> Result<Vec<MenuEntry>, ServiceError>;
+    /// O emblema de cada caminho dentro de uma pasta sincronizada (`offline`, `syncing` ou
+    /// `conflict`), vazio fora delas.
+    fn folder_states(&self, paths: &[&str]) -> Result<Vec<String>, ServiceError>;
+    /// As raízes das pastas sincronizadas: só abaixo delas `FolderStates` tem o que dizer.
+    fn folder_roots(&self) -> Result<Vec<String>, ServiceError>;
     /// Faz a ação do menu nos caminhos; devolve o texto a copiar (o link), ou vazio.
     fn menu_action(&self, action: &str, paths: &[&str]) -> Result<String, ServiceError>;
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.

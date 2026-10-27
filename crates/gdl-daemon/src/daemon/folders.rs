@@ -144,10 +144,13 @@ impl Daemon {
             async move { sync.run(events, timing, stop).await }
         });
         // O estado do par (parado, esperando confirmação) chega à interface pelo sinal e, quando
-        // muda para um que pede ação, ao usuário pelo aviso.
+        // muda para um que pede ação, ao usuário pelo aviso; o emblema da raiz muda junto.
         let daemon = Arc::downgrade(self);
         let (mut changes, until) = (sync.state_changes(), stop.clone());
-        let email = account.email.clone();
+        let (email, root) = (
+            account.email.clone(),
+            sync.pair().local.display().to_string(),
+        );
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -158,6 +161,9 @@ impl Daemon {
                     break;
                 };
                 daemon.emit_local_folders_changed().await;
+                daemon
+                    .emit_states_changed(std::slice::from_ref(&root))
+                    .await;
                 let state = *changes.borrow_and_update();
                 if let Some(note) = notify::for_folder(id, &name, &state, &daemon.i18n) {
                     daemon
@@ -169,6 +175,7 @@ impl Daemon {
                 }
             }
         });
+        self.forward_folder_states(sync.clone(), stop.clone());
         runners.lock().insert(id, (sync, stop));
     }
 
@@ -306,20 +313,99 @@ impl Daemon {
         sync.confirm_deletes().map_err(failed)
     }
 
+    /// `StatesChanged` com os caminhos que ficaram sincronizados no par: espera o primeiro e
+    /// junta os que chegarem em `STATES_SIGNAL_GAP`, como os da montagem.
+    fn forward_folder_states(self: &Arc<Self>, sync: Arc<FolderSync>, stop: CancellationToken) {
+        let daemon = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    () = stop.cancelled() => break,
+                    () = sync.synced_ready() => {}
+                }
+                tokio::time::sleep(super::STATES_SIGNAL_GAP).await;
+                let Some(daemon) = daemon.upgrade() else {
+                    break;
+                };
+                let paths: Vec<String> = sync
+                    .take_synced()
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect();
+                daemon.emit_states_changed(&paths).await;
+            }
+        });
+    }
+
+    /// A pasta do botão direito que pode virar pasta sincronizada ("Sincronizar esta pasta"):
+    /// uma só, que existe, fora das montagens, das outras pastas e dos dados do app, com alguma
+    /// conta conectada e a política deixando. Sem medir a pasta (o menu precisa ser rápido): o
+    /// configurador confere o resto.
+    pub(super) async fn folder_to_sync(&self, paths: &[String]) -> Option<PathBuf> {
+        let [path] = paths else {
+            return None;
+        };
+        let path = Path::new(path).canonicalize().ok()?;
+        if self.folders_refused().is_err()
+            || !path.is_dir()
+            || self.accounts.lock().await.is_empty()
+        {
+            return None;
+        }
+        let taken = self.taken(None).await;
+        guard::overlap(&path, &taken).is_none().then_some(path)
+    }
+
+    /// O emblema de cada caminho, como o atributo `user.gdl.state` da montagem: a raiz de uma
+    /// pasta mostra o estado dela (`conflict` parada ou esperando confirmação), o que está
+    /// dentro `offline` se já sincronizado e `syncing` se não; fora das pastas, vazio.
+    pub async fn folder_states(&self, paths: &[String]) -> Vec<String> {
+        let pairs = self.all_pairs().await;
+        let state = |path: &str| {
+            let Some((engine, pair, rel)) = pairs.iter().find_map(|(engine, pair)| {
+                let rel = Path::new(path).strip_prefix(&pair.local).ok()?;
+                Some((engine, pair, rel.to_string_lossy()))
+            }) else {
+                return "";
+            };
+            match (rel.is_empty(), pair.state) {
+                (true, PairState::Active) => "offline",
+                (true, _) => "conflict",
+                _ if engine.store().is_synced(pair.id, &rel).unwrap_or(false) => "offline",
+                _ => "syncing",
+            }
+        };
+        paths.iter().map(|p| state(p).to_owned()).collect()
+    }
+
+    pub async fn folder_roots(&self) -> Vec<String> {
+        let pairs = self.all_pairs().await;
+        pairs
+            .iter()
+            .map(|(_, p)| p.local.display().to_string())
+            .collect()
+    }
+
+    /// Os pares de todas as contas conectadas, com o motor de cada um.
+    async fn all_pairs(&self) -> Vec<(Arc<Engine>, Pair)> {
+        let mut pairs = vec![];
+        for (_, engine, _) in self.folder_accounts().await {
+            for pair in engine.store().pairs().unwrap_or_default() {
+                pairs.push((engine.clone(), pair));
+            }
+        }
+        pairs
+    }
+
     async fn emit_local_folders_changed(&self) {
         if let Some(emitter) = self.emitter() {
             let _ = Service::local_folders_changed(&emitter).await;
         }
     }
 
-    /// A pasta serve? Confere contra as pastas de todas as contas (menos `except`, que está
-    /// mudando de lugar), as montagens e os dados do app.
-    /// Devolve também o caminho canônico.
-    async fn check(
-        &self,
-        path: &Path,
-        except: Option<i64>,
-    ) -> Result<(PathBuf, guard::FolderInfo), Refusal> {
+    /// As pastas que outra não pode conter nem estar dentro: os dados do app, as montagens e as
+    /// pastas de todas as contas (menos `except`, que está mudando de lugar).
+    async fn taken(&self, except: Option<i64>) -> Vec<PathBuf> {
         let mut taken = vec![self.config.paths.data_dir.clone()];
         for (_, engine, mount) in self.folder_accounts().await {
             taken.push(mount);
@@ -331,6 +417,16 @@ impl Daemon {
                     .map(|p| p.local),
             );
         }
+        taken
+    }
+
+    /// A pasta serve? Confere contra `taken` e devolve também o caminho canônico.
+    async fn check(
+        &self,
+        path: &Path,
+        except: Option<i64>,
+    ) -> Result<(PathBuf, guard::FolderInfo), Refusal> {
+        let taken = self.taken(except).await;
         let path = path.to_path_buf();
         tokio::task::spawn_blocking(move || {
             let info = guard::check_folder(&path, &taken, guard::network_fs)?;

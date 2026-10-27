@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use gdl_common::names::{fit, split_ext, to_remote};
@@ -68,6 +68,11 @@ pub struct FolderSync {
     pub(crate) wake: tokio::sync::Notify,
     /// Muda a cada troca do estado do par (para a interface).
     state_changed: tokio::sync::watch::Sender<PairState>,
+    /// Os caminhos relativos que ficaram sincronizados desde `take_synced` (para os emblemas;
+    /// um caminho que some ou muda de nome o gerenciador de arquivos já redesenha sozinho).
+    newly_synced: Mutex<Vec<String>>,
+    /// Avisa que `newly_synced` deixou de estar vazio.
+    synced_notify: tokio::sync::Notify,
 }
 
 impl FolderSync {
@@ -88,6 +93,8 @@ impl FolderSync {
             deletes_confirmed: AtomicU64::new(0),
             wake: tokio::sync::Notify::new(),
             state_changed: tokio::sync::watch::Sender::new(state),
+            newly_synced: Mutex::default(),
+            synced_notify: tokio::sync::Notify::new(),
         }
     }
 
@@ -112,6 +119,17 @@ impl FolderSync {
     /// Avisa a cada troca de estado do par.
     pub fn state_changes(&self) -> tokio::sync::watch::Receiver<PairState> {
         self.state_changed.subscribe()
+    }
+
+    /// Os caminhos que ficaram sincronizados desde a última chamada.
+    pub fn take_synced(&self) -> Vec<PathBuf> {
+        let rels = std::mem::take(&mut *self.newly_synced.lock().unwrap());
+        rels.iter().map(|rel| self.path(rel)).collect()
+    }
+
+    /// Termina quando há caminhos novos para `take_synced`.
+    pub async fn synced_ready(&self) {
+        self.synced_notify.notified().await;
     }
 
     fn state(&self) -> Result<PairState> {
@@ -583,6 +601,11 @@ impl FolderSync {
             md5,
         };
         self.store.put_synced(self.pair.id, &[synced])?;
+        let mut synced = self.newly_synced.lock().unwrap();
+        if synced.is_empty() {
+            self.synced_notify.notify_one();
+        }
+        synced.push(rel.into());
         Ok(())
     }
 

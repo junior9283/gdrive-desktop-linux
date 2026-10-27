@@ -2726,3 +2726,90 @@ async fn signing_out_stops_the_folders_and_keeps_the_files() {
     );
     assert!(h.proxy.local_folders().await.unwrap().is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn menu_offers_to_sync_a_folder_outside_the_drive() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    let path = docs.to_str().unwrap();
+    let file = docs.join("a.txt").display().to_string();
+    let ids = |menu: Vec<gdl_ipc::MenuEntry>| menu.into_iter().map(|e| e.id).collect::<Vec<_>>();
+
+    let menu = h.proxy.menu(&[path]).await.unwrap();
+    assert_eq!(menu.len(), 1, "{menu:?}");
+    assert_eq!(
+        (menu[0].id.as_str(), menu[0].label.as_str()),
+        ("sync-folder", "Sincronizar esta pasta com o Google Drive")
+    );
+    assert!(ids(h.proxy.menu(&[&file]).await.unwrap()).is_empty());
+    assert!(ids(h.proxy.menu(&[path, path]).await.unwrap()).is_empty());
+    let before = h.opened().len();
+    h.proxy.menu_action("sync-folder", &[path]).await.unwrap();
+    wait_until("o configurador aberto", || h.opened().len() > before).await;
+    assert_eq!(
+        h.opened()[before],
+        format!("--open preferences:folder:{path}")
+    );
+
+    h.proxy.add_local_folder("", path, false).await.unwrap();
+    assert!(
+        ids(h.proxy.menu(&[path]).await.unwrap()).is_empty(),
+        "pasta já sincronizada não oferece de novo"
+    );
+    let inner = local_folder(&h, "Documentos/Notas");
+    assert!(ids(h.proxy.menu(&[inner.to_str().unwrap()]).await.unwrap()).is_empty());
+    let drive = h.drive().display().to_string();
+    assert!(
+        h.proxy.menu_action("sync-folder", &[&drive]).await.is_err(),
+        "a montagem não vira pasta sincronizada"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn states_inside_a_pair() {
+    use futures_util::StreamExt;
+
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    let path = |rel: &str| docs.join(rel).display().to_string();
+    let root = docs.display().to_string();
+    h.proxy.add_local_folder("", &root, false).await.unwrap();
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+    assert_eq!(
+        h.proxy.folder_roots().await.unwrap(),
+        std::slice::from_ref(&root)
+    );
+
+    let states = h
+        .proxy
+        .folder_states(&[&root, &path("a.txt"), &path("nada.txt"), "/fora"])
+        .await
+        .unwrap();
+    assert_eq!(states, ["offline", "offline", "syncing", ""]);
+
+    let mut changed = h.proxy.receive_states_changed().await.unwrap();
+    std::fs::write(docs.join("b.txt"), b"dois").unwrap();
+    let b = path("b.txt");
+    let mut seen = vec![];
+    while !seen.contains(&b) {
+        let signal = tokio::time::timeout(std::time::Duration::from_secs(10), changed.next())
+            .await
+            .expect("StatesChanged com b.txt")
+            .unwrap();
+        seen.extend(signal.args().unwrap().paths);
+    }
+    assert_eq!(h.proxy.folder_states(&[&b]).await.unwrap(), ["offline"]);
+
+    std::fs::remove_dir_all(&docs).unwrap();
+    for _ in 0..100 {
+        if h.proxy.folder_states(&[&root]).await.unwrap() == ["conflict"] {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("a pasta parada não mostra o emblema de erro");
+}

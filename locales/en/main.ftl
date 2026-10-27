@@ -180,6 +180,7 @@ menu-refresh = Refresh folder
 menu-trash = View items in trash
 menu-new-shared-drive = New shared drive
 menu-manage-shared-drives = Manage shared drives
+menu-sync-folder = Sync this folder with Google Drive
 new-document-name = Untitled document
 new-spreadsheet-name = Untitled spreadsheet
 new-presentation-name = Untitled presentation

@@ -180,6 +180,7 @@ menu-refresh = Atualizar pasta
 menu-trash = Ver itens na lixeira
 menu-new-shared-drive = Novo Drive compartilhado
 menu-manage-shared-drives = Gerenciar drives compartilhados
+menu-sync-folder = Sincronizar esta pasta com o Google Drive
 new-document-name = Documento sem título
 new-spreadsheet-name = Planilha sem título
 new-presentation-name = Apresentação sem título

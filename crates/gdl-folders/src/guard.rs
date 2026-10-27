@@ -42,14 +42,8 @@ pub fn check_folder(
     if !path.is_dir() {
         return Err(Refusal::Missing);
     }
-    for other in taken {
-        let other = other.canonicalize().unwrap_or_else(|_| other.clone());
-        if path.starts_with(&other) {
-            return Err(Refusal::Nested);
-        }
-        if other.starts_with(&path) {
-            return Err(Refusal::Contains);
-        }
+    if let Some(refusal) = overlap(&path, taken) {
+        return Err(refusal);
     }
     if is_network(&path) {
         return Err(Refusal::Network);
@@ -67,6 +61,18 @@ pub fn check_folder(
         }
     }
     Ok(info)
+}
+
+/// `path` (canônico) é uma das pastas `taken`, está dentro de uma ou contém uma.
+pub fn overlap(path: &Path, taken: &[PathBuf]) -> Option<Refusal> {
+    taken.iter().find_map(|other| {
+        let other = other.canonicalize().unwrap_or_else(|_| other.clone());
+        if path.starts_with(&other) {
+            Some(Refusal::Nested)
+        } else {
+            other.starts_with(path).then_some(Refusal::Contains)
+        }
+    })
 }
 
 /// O volume de `path` é de rede (NFS, SMB/CIFS, AFS, 9P, Ceph) ou FUSE (sshfs e outros).

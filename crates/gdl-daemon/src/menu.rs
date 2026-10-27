@@ -30,6 +30,8 @@ pub enum Action {
     NewSharedDrive,
     /// Só na pasta "Drives compartilhados": abre a tela de ligar e desligar os Drives.
     ManageSharedDrives,
+    /// Só numa pasta do computador que pode ser sincronizada: abre o configurador dela.
+    SyncFolder,
 }
 
 /// Um documento Google vazio de "Novo …": o tipo e a chave da tradução do nome.
@@ -39,7 +41,7 @@ pub struct NewFile {
 }
 
 impl Action {
-    pub const ALL: [Action; 17] = [
+    pub const ALL: [Action; 18] = [
         Action::OpenWeb,
         Action::OpenDocs,
         Action::OpenSheets,
@@ -57,6 +59,7 @@ impl Action {
         Action::NewSharedDrive,
         Action::ManageSharedDrives,
         Action::AddShortcut,
+        Action::SyncFolder,
     ];
 
     /// A tela que a ação abre para o item escolhido (`<tela>:<conta>/<id>`), se abrir uma.
@@ -89,6 +92,7 @@ impl Action {
             Action::AddShortcut => ("add-shortcut", "menu-add-shortcut"),
             Action::NewSharedDrive => ("new-shared-drive", "menu-new-shared-drive"),
             Action::ManageSharedDrives => ("manage-shared-drives", "menu-manage-shared-drives"),
+            Action::SyncFolder => ("sync-folder", "menu-sync-folder"),
         }
     }
 

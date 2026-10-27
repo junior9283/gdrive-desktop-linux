@@ -1269,13 +1269,18 @@ impl Daemon {
                     .await
                     .unwrap_or_default()
                 };
-                if let Some(emitter) = daemon.emitter() {
-                    for chunk in paths.chunks(STATES_PER_SIGNAL) {
-                        let _ = Service::states_changed(&emitter, chunk).await;
-                    }
-                }
+                daemon.emit_states_changed(&paths).await;
             }
         });
+    }
+
+    /// `StatesChanged` em blocos de `STATES_PER_SIGNAL` (nada se `paths` está vazio).
+    async fn emit_states_changed(&self, paths: &[String]) {
+        if let Some(emitter) = self.emitter() {
+            for chunk in paths.chunks(STATES_PER_SIGNAL) {
+                let _ = Service::states_changed(&emitter, chunk).await;
+            }
+        }
     }
 
     /// O evento do motor da conta `email`: `StatusChanged` e, se couber, um aviso dessa conta.
@@ -1796,6 +1801,9 @@ impl Daemon {
         } else {
             match self.picked_entries(paths).await {
                 Some(entries) => entries,
+                None if self.folder_to_sync(paths).await.is_some() => {
+                    vec![(Some(Action::SyncFolder), "")]
+                }
                 None => return Vec::new(),
             }
         };
@@ -1831,6 +1839,11 @@ impl Daemon {
     ) -> Result<String, ServiceError> {
         let invalid = || ServiceError::InvalidArgs(action.into());
         let action = Action::parse(action).ok_or_else(invalid)?;
+        if action == Action::SyncFolder {
+            let path = self.folder_to_sync(paths).await.ok_or_else(invalid)?;
+            self.open_screen(format!("preferences:folder:{}", path.display()));
+            return Ok(String::new());
+        }
         if let Some(screen) = action.shared_drives_screen() {
             let engine = self.shared_drives_folder(paths).await.ok_or_else(invalid)?;
             let account = self.email_of(&engine).await?;
@@ -1885,8 +1898,8 @@ impl Daemon {
                     .map_err(|e| engine_error(e, &item.id.0))?;
                 }
             }
-            Action::NewSharedDrive | Action::ManageSharedDrives => {
-                unreachable!("tratadas acima por `shared_drives_screen`")
+            Action::NewSharedDrive | Action::ManageSharedDrives | Action::SyncFolder => {
+                unreachable!("tratadas acima (`shared_drives_screen` e `folder_to_sync`)")
             }
             Action::Refresh => folder()?.0.refresh().await,
             Action::Trash => self.open(DRIVE_TRASH.into()),

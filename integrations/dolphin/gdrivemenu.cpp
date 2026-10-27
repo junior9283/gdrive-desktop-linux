@@ -68,11 +68,9 @@ public:
         for (const QUrl &url : items.urlList()) {
             paths.append(url.toLocalFile());
         }
-        auto call = QDBusMessage::createMethodCall(SERVICE, PATH, INTERFACE, QStringLiteral("Menu"));
-        call << paths;
         // Com o serviço parado, a resposta é um erro na hora (perguntar não o inicia).
-        call.setAutoStartService(false);
-        const QDBusMessage reply = QDBusConnection::sessionBus().call(call, QDBus::Block, MENU_TIMEOUT_MS);
+        const QDBusMessage reply =
+            QDBusConnection::sessionBus().call(serviceCall(QStringLiteral("Menu"), {paths}), QDBus::Block, MENU_TIMEOUT_MS);
         if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
             return {};
         }
@@ -105,8 +103,7 @@ private:
     // Sem esperar: o serviço pode demorar (criar um documento vai ao Drive).
     void run(const QString &id, const QStringList &paths)
     {
-        auto call = QDBusMessage::createMethodCall(SERVICE, PATH, INTERFACE, QStringLiteral("MenuAction"));
-        call << id << paths;
+        const auto call = serviceCall(QStringLiteral("MenuAction"), {id, paths});
         auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(call), this);
         connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *done) {
             const QDBusPendingReply<QString> reply = *done;

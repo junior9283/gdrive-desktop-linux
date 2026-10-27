@@ -2,7 +2,9 @@
 """Serviço falso para os testes das extensões dos gerenciadores de arquivos: responde `Menu` e
 `MenuAction` como o serviço real, com o "Meu Drive" na pasta do segundo argumento. Cada
 `MenuAction` vai para o arquivo do primeiro argumento. `EmitStates` (só dos testes) manda o sinal
-`StatesChanged` com os caminhos dados, como o serviço faz quando o estado deles muda."""
+`StatesChanged` com os caminhos dados, como o serviço faz quando o estado deles muda. O terceiro
+argumento, opcional, é uma pasta sincronizada: `FolderStates` dá `offline` na raiz e `syncing`
+dentro dela."""
 
 import sys
 
@@ -16,12 +18,24 @@ XML = f"""
   <method name="MenuAction">
     <arg type="s" direction="in"/><arg type="as" direction="in"/><arg type="s" direction="out"/>
   </method>
+  <method name="FolderRoots"><arg type="as" direction="out"/></method>
+  <method name="FolderStates"><arg type="as" direction="in"/><arg type="as" direction="out"/></method>
   <method name="EmitStates"><arg type="as" direction="in"/></method>
   <signal name="StatesChanged"><arg type="as"/></signal>
 </interface></node>
 """
 log = open(sys.argv[1], "a", buffering=1)
 drive = sys.argv[2].rstrip("/") + "/"
+roots = sys.argv[3:4]
+
+
+def folder_state(path):
+    for root in roots:
+        if path == root:
+            return "offline"
+        if path.startswith(root + "/"):
+            return "syncing"
+    return ""
 
 
 def menu(paths):
@@ -37,6 +51,12 @@ def menu(paths):
 def call(conn, sender, path, iface, method, params, invocation):
     if method == "Menu":
         invocation.return_value(GLib.Variant("(a(sss))", (menu(params[0]),)))
+        return
+    if method == "FolderRoots":
+        invocation.return_value(GLib.Variant("(as)", (roots,)))
+        return
+    if method == "FolderStates":
+        invocation.return_value(GLib.Variant("(as)", ([folder_state(p) for p in params[0]],)))
         return
     if method == "EmitStates":
         conn.emit_signal(None, PATH, f"{NAME}.Service", "StatesChanged", params)

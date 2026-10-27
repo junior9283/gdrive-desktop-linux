@@ -158,11 +158,12 @@ fn live_item(engine: &Engine, id: &str) -> Result<Item, ServiceError> {
         .ok_or_else(|| ServiceError::NotFound(id.into()))
 }
 
-/// Caminho do item a partir do Meu Drive (`Pasta/arquivo.txt`).
+/// Caminho do item a partir do Meu Drive (`Pasta/arquivo.txt`). Itens de Drives compartilhados
+/// ainda não têm caminho na montagem (tarefa 9 da 0.8).
 fn path_in_drive(engine: &Engine, item: &Item) -> Result<String, ServiceError> {
     engine
         .store()
-        .path_of(&item.id)
+        .my_drive_path_of(&item.id)
         .map_err(failed)?
         .ok_or_else(|| ServiceError::NotFound(item.id.0.clone()))
 }
@@ -190,7 +191,7 @@ impl<'a> DrivePaths<'a> {
         let folder = item.parent.as_ref().and_then(|parent| {
             self.folders
                 .entry(parent.clone())
-                .or_insert_with(|| store.path_of(parent).ok().flatten())
+                .or_insert_with(|| store.my_drive_path_of(parent).ok().flatten())
                 .clone()
         });
         let folder = self.my_drive.join(folder.unwrap_or_default());

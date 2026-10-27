@@ -66,9 +66,10 @@ impl Engine {
     }
 
     /// O item desce da raiz do Meu Drive (não é a raiz nem conteúdo de pastas compartilhadas
-    /// por outras pessoas), ou seja, tem caminho na montagem.
+    /// por outras pessoas nem de Drives compartilhados, que a montagem ainda não mostra: tarefa
+    /// 9 da 0.8), ou seja, tem caminho na montagem.
     fn in_my_drive(&self, item: &Item) -> Result<bool> {
-        Ok(item.inode != Inode::ROOT && self.store.path_of(&item.id)?.is_some())
+        Ok(item.inode != Inode::ROOT && self.store.my_drive_path_of(&item.id)?.is_some())
     }
 
     pub async fn shared_with_me(&self) -> Result<Vec<SharedFile>> {

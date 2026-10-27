@@ -68,6 +68,8 @@ impl Activity {
             .path_of(&item.id)
             .ok()
             .flatten()
+            // Item de Drive compartilhado: o caminho ainda sai sem a raiz (tarefa 9 da 0.8).
+            .map(|p| p.path)
             .unwrap_or_else(|| item.local_name.clone());
         Activity {
             inode: item.inode,

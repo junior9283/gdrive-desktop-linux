@@ -103,7 +103,10 @@ pub struct SyncError {
 pub fn list(store: &Store, lost_and_found: &KeptCopies) -> Result<Vec<SyncError>> {
     let mut errors = vec![];
     for e in store.job_errors()? {
-        let path = store.path_of(&e.item)?.unwrap_or_else(|| e.name.clone());
+        // Item de Drive compartilhado: o caminho ainda sai sem a raiz (tarefa 9 da 0.8).
+        let path = store
+            .path_of(&e.item)?
+            .map_or_else(|| e.name.clone(), |p| p.path);
         errors.push(SyncError {
             category: ErrorCategory::parse(&e.category),
             name: e.name,

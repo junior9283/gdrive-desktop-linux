@@ -92,6 +92,14 @@ const MIGRATIONS: &[&str] = &[
     -- Itens com edição local (sujos, subindo, em conflito) sem varrer todos os itens.
     CREATE INDEX items_edited ON items (local_name) WHERE local_state IN (1, 2, 3);
 ",
+    "
+    -- Drives compartilhados da conta; a raiz de cada um é um item pasta sem pai, com o id dele.
+    CREATE TABLE shared_drives (
+        id      TEXT PRIMARY KEY,
+        name    TEXT NOT NULL,
+        enabled INTEGER NOT NULL
+    ) WITHOUT ROWID;
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.

@@ -177,3 +177,31 @@ pub struct ThumbRec {
     /// URI `file://` usada no nome do PNG, para apagá-lo depois.
     pub uri: String,
 }
+
+/// Um Drive compartilhado da conta (tabela `shared_drives`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredDrive {
+    pub id: ItemId,
+    pub name: String,
+    /// Só os ligados têm itens no banco e aparecem na montagem.
+    pub enabled: bool,
+}
+
+/// A raiz de onde um caminho (`DrivePath`) parte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriveRoot {
+    MyDrive,
+    /// Um Drive compartilhado ligado, com o nome que ele tem agora.
+    Shared {
+        id: ItemId,
+        name: String,
+    },
+}
+
+/// Caminho de um item dentro do Drive: a raiz e, a partir da pasta de cima dela, os nomes locais
+/// (`Pasta/arquivo.txt`; vazio para a própria raiz).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrivePath {
+    pub root: DriveRoot,
+    pub path: String,
+}

@@ -1,4 +1,4 @@
-//! Indexação inicial: grava no banco a árvore inteira do Meu Drive.
+//! Indexação inicial: grava no banco a árvore inteira do Meu Drive e dos Drives compartilhados.
 
 use std::collections::BTreeSet;
 
@@ -6,6 +6,7 @@ use gdl_common::names;
 use gdl_drive::client::{Corpus, DriveClient, FOLDER_MIME, RemoteFile, SHORTCUT_MIME};
 use gdl_store::{Inode, Item, ItemId, ItemKind, LocalState, PinState, Store};
 
+use crate::drives::sync_drive_list;
 use crate::gdocs::{pointer_extension, pointer_json};
 use crate::{EngineError, Result};
 
@@ -58,7 +59,30 @@ pub(crate) fn item_from_remote(r: RemoteFile, email: &str) -> Item {
     }
 }
 
-/// Grava a raiz e todos os itens do Drive num banco vazio.
+/// Grava os itens de `corpus`, que ficam sob a raiz `root` (já gravada), e refaz os nomes locais.
+pub(crate) async fn index_corpus(
+    store: &Store,
+    client: &DriveClient,
+    corpus: &Corpus,
+    email: &str,
+    root: ItemId,
+) -> Result<()> {
+    let mut parents = BTreeSet::from([root]);
+    client
+        .list_all(corpus, |page| {
+            let items: Vec<Item> = page
+                .into_iter()
+                .map(|r| item_from_remote(r, email))
+                .collect();
+            parents.extend(items.iter().filter_map(|i| i.parent.clone()));
+            store.upsert_items(&items).map_err(EngineError::from)
+        })
+        .await?;
+    store.recompute_local_names(&parents)?;
+    Ok(())
+}
+
+/// Grava a raiz e todos os itens do Meu Drive e dos Drives compartilhados num banco vazio.
 pub async fn initial_index(store: &Store, client: &DriveClient) -> Result<()> {
     // O token vem antes da listagem: o que mudar durante ela aparece na primeira consulta.
     let token = client.start_page_token().await?;
@@ -69,18 +93,8 @@ pub async fn initial_index(store: &Store, client: &DriveClient) -> Result<()> {
     store.upsert_item(&root)?;
     let root_id = root.id.0.clone();
 
-    let mut parents = BTreeSet::from([root.id]);
-    client
-        .list_all(&Corpus::MyDrive, |page| {
-            let items: Vec<Item> = page
-                .into_iter()
-                .map(|r| item_from_remote(r, &about.email))
-                .collect();
-            parents.extend(items.iter().filter_map(|i| i.parent.clone()));
-            store.upsert_items(&items).map_err(EngineError::from)
-        })
-        .await?;
-    store.recompute_local_names(&parents)?;
+    index_corpus(store, client, &Corpus::MyDrive, &about.email, root.id).await?;
+    sync_drive_list(store, client, &about.email).await?;
     store.kv_set(ACCOUNT_EMAIL, &about.email)?;
     store.kv_set(ROOT_ID, &root_id)?;
     store.kv_set(START_PAGE_TOKEN, &token)?;

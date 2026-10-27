@@ -1,8 +1,8 @@
 //! Consulta periódica de mudanças no Drive (`changes.list`) e aplicação no banco.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use gdl_common::time::now_ms;
 use gdl_drive::client::{Change, DriveClient, DriveError};
@@ -10,6 +10,7 @@ use gdl_store::{Item, ItemId, LocalState, Store};
 use tokio::sync::broadcast;
 
 use crate::cache::BlockCache;
+use crate::drives::sync_drive_list;
 use crate::events::EngineEvent;
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, item_from_remote};
 use crate::pins::reconcile;
@@ -23,6 +24,9 @@ pub struct ChangePoller {
     offline: AtomicBool,
     /// Hora da última consulta bem-sucedida; 0 enquanto não houve nenhuma.
     last_sync_ms: AtomicI64,
+    /// Drives das mudanças que a lista de Drives não trouxe: sem procurar de novo a cada
+    /// consulta enquanto a mudança se repete (limpa em `forget_searched_drives`).
+    searched_drives: Mutex<BTreeSet<String>>,
 }
 
 /// Junta o item do banco com a versão nova da nuvem. Devolve o item e se o cache deve ser
@@ -86,6 +90,12 @@ fn resolve(
 /// vez no Drive, sem edição local), cujo conteúdo em cache quem chamou descarta.
 pub(crate) fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usize, Vec<ItemId>)> {
     let email = store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
+    let enabled_drives: BTreeSet<String> = store
+        .shared_drives()?
+        .into_iter()
+        .filter(|d| d.enabled)
+        .map(|d| d.id.0)
+        .collect();
     let mut parents = BTreeSet::new();
     // Itens novos ou que mudaram de pasta: a fixação deles segue a pasta nova.
     let mut moved = BTreeSet::new();
@@ -98,6 +108,14 @@ pub(crate) fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usiz
         let mut applied = 0;
         for change in changes {
             let (id, new) = match change {
+                // Item de Drive desligado (ou que foi para um): sai do banco, se estava nele.
+                Change::Upsert(r)
+                    if r.drive_id
+                        .as_ref()
+                        .is_some_and(|d| !enabled_drives.contains(d)) =>
+                {
+                    (ItemId(r.id), None)
+                }
                 Change::Upsert(r) => (
                     ItemId(r.id.clone()),
                     Some(item_from_remote(*r, email.as_str())),
@@ -155,6 +173,7 @@ impl ChangePoller {
             events,
             offline: AtomicBool::new(false),
             last_sync_ms: AtomicI64::new(0),
+            searched_drives: Mutex::default(),
         }
     }
 
@@ -191,6 +210,7 @@ impl ChangePoller {
             .kv_get(START_PAGE_TOKEN)?
             .ok_or(EngineError::NotIndexed)?;
         let (changes, next) = self.client.changes(&token).await?;
+        self.register_new_drives(&changes).await?;
         let (applied, removed) = apply_changes(&self.store, changes)?;
         for id in &removed {
             self.cache.discard(id).await?;
@@ -199,6 +219,48 @@ impl ChangePoller {
             self.store.kv_set(START_PAGE_TOKEN, &next)?;
         }
         Ok(applied)
+    }
+
+    /// Um Drive compartilhado que aparece nas mudanças e o banco não conhece entra ligado e
+    /// indexado antes de elas serem aplicadas (a lista é consultada só nessa hora). Um que a
+    /// lista não traz não é procurado de novo até `forget_searched_drives`.
+    async fn register_new_drives(&self, changes: &[Change]) -> Result<()> {
+        let known = self.store.shared_drives()?;
+        let unknown: BTreeSet<String> = {
+            let searched = self.searched();
+            changes
+                .iter()
+                .filter_map(|c| match c {
+                    Change::Upsert(r) => r.drive_id.clone(),
+                    Change::Removed(_) => None,
+                })
+                .filter(|d| !searched.contains(d) && known.iter().all(|k| k.id.0 != *d))
+                .collect()
+        };
+        if unknown.is_empty() {
+            return Ok(());
+        }
+        let email = self.store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
+        sync_drive_list(&self.store, &self.client, &email).await?;
+        let known = self.store.shared_drives()?;
+        self.searched().extend(
+            unknown
+                .into_iter()
+                .filter(|d| known.iter().all(|k| k.id.0 != *d)),
+        );
+        Ok(())
+    }
+
+    /// A lista de Drives foi consultada por outro caminho: os que as mudanças trazem e ela não
+    /// tinha voltam a ser procurados.
+    pub(crate) fn forget_searched_drives(&self) {
+        self.searched().clear();
+    }
+
+    fn searched(&self) -> std::sync::MutexGuard<'_, BTreeSet<String>> {
+        self.searched_drives
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// Uma consulta, avisando quando a rede cai e volta e anotando a hora da última que deu certo.
@@ -449,5 +511,43 @@ mod tests {
         assert!(env.store.next_job(now_ms()).unwrap().is_some());
         assert_eq!(rx.try_recv().unwrap(), EngineEvent::Offline(true));
         assert_eq!(rx.try_recv().unwrap(), EngineEvent::Offline(false));
+    }
+
+    #[tokio::test]
+    async fn drive_missing_from_the_list_is_searched_once() {
+        let (env, poller) = indexed().await;
+        initial_index(&env.store, &env.client).await.unwrap();
+        let ghost = Change::Upsert(Box::new(gdl_drive::model::RemoteFile {
+            id: "x".into(),
+            name: "x".into(),
+            mime_type: "text/plain".into(),
+            parents: vec!["fantasma".into()],
+            size: Some(0),
+            md5: None,
+            head_revision: None,
+            modified_ms: 0,
+            created_ms: 0,
+            trashed: false,
+            can_edit: true,
+            shortcut_target: None,
+            web_view_link: None,
+            drive_id: Some("fantasma".into()),
+        }));
+        let lists = || env.fake.requests("/drive/v3/drives");
+        let before = lists();
+
+        poller
+            .register_new_drives(std::slice::from_ref(&ghost))
+            .await
+            .unwrap();
+        poller
+            .register_new_drives(std::slice::from_ref(&ghost))
+            .await
+            .unwrap();
+        assert_eq!(lists() - before, 1, "a segunda consulta não foi à rede");
+
+        poller.forget_searched_drives();
+        poller.register_new_drives(&[ghost]).await.unwrap();
+        assert_eq!(lists() - before, 2);
     }
 }

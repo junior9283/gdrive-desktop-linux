@@ -995,6 +995,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn new_file_in_a_shared_drive_is_created_there() {
+        let env = Env::new().await;
+        let ana = env.fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Equipe");
+        env.fake.share_drive(&drive, &env.fake.email());
+        let s = setup(env).await;
+        let local = s.write_new(&ItemId(drive.clone()), "novo.txt", b"ola");
+
+        let Some(UploadOutcome::Uploaded(id)) = s.run().await else {
+            panic!("esperava envio");
+        };
+
+        assert_eq!(s.env.fake.content(&id.0), b"ola");
+        let meta = s.env.fake.meta(&id.0);
+        assert_eq!(meta["parents"][0], drive);
+        assert_eq!(meta["driveId"], drive);
+        assert_eq!(s.env.item(&id.0).parent, Some(ItemId(drive)));
+        assert!(s.env.store.get(&local).unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn update_keeps_same_drive_id() {
         let env = Env::new().await;
         let id = ItemId(

@@ -62,6 +62,10 @@ const INCOMPLETE_PINNED: &str = "FROM items i \
 const TOP_PINNED: &str = "WHERE pin != 0 AND pin = ?1 AND trashed = 0 AND NOT EXISTS ( \
      SELECT 1 FROM items p WHERE p.id = items.parent AND p.pin != 0)";
 
+/// `WITH` que reúne em `down` o item `?1` e tudo o que há dentro dele.
+const DRIVE_ITEMS: &str = "WITH RECURSIVE down(id) AS ( \
+     SELECT ?1 UNION SELECT i.id FROM items i JOIN down ON i.parent = down.id)";
+
 /// Resumo da fila de envio (`Store::queue_stats`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct QueueStats {
@@ -707,10 +711,11 @@ impl Store {
         )
     }
 
-    /// Caminho de `id` a partir da raiz do Meu Drive (`Pasta/arquivo.txt`), pelos nomes locais;
-    /// `None` se algum pai estiver faltando ou se a cadeia não termina na raiz (itens de pastas
-    /// compartilhadas por outras pessoas, que não aparecem na montagem).
-    pub fn path_of(&self, id: &ItemId) -> Result<Option<String>> {
+    /// Caminho de `id` a partir da pasta de cima da raiz (Meu Drive ou Drive compartilhado
+    /// ligado), pelos nomes locais; `None` se algum pai estiver faltando ou se a cadeia não
+    /// termina numa dessas raízes (itens de pastas compartilhadas por outras pessoas, que não
+    /// aparecem na montagem, e itens de Drive desligado).
+    pub fn path_of(&self, id: &ItemId) -> Result<Option<DrivePath>> {
         // Sobe pelos pais numa consulta só; `depth` ordena do item para a raiz.
         let conn = self.conn();
         let mut stmt = conn.prepare_cached(
@@ -719,22 +724,111 @@ impl Store {
                  UNION ALL \
                  SELECT i.id, i.parent, i.local_name, i.inode, up.depth + 1 \
                  FROM items i JOIN up ON i.id = up.parent) \
-             SELECT parent, name, inode FROM up ORDER BY depth DESC",
+             SELECT id, parent, name, inode FROM up ORDER BY depth DESC",
         )?;
-        let rows: Vec<(Option<String>, String, u64)> = stmt
-            .query_map(params![id.0], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        let rows: Vec<(String, Option<String>, String, u64)> = stmt
+            .query_map(params![id.0], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?
             .collect::<rusqlite::Result<_>>()?;
-        // Chegou à raiz do Meu Drive só se nenhum pai faltou e a cadeia termina nela.
-        match rows.first() {
-            Some((None, _, inode)) if *inode == Inode::ROOT.0 => Ok(Some(
-                rows.iter()
-                    .skip(1)
-                    .map(|(_, name, _)| name.as_str())
-                    .collect::<Vec<_>>()
-                    .join("/"),
-            )),
-            _ => Ok(None),
-        }
+        // Chegou a uma raiz só se nenhum pai faltou e a cadeia termina nela.
+        let Some((top, None, _, inode)) = rows.first() else {
+            return Ok(None);
+        };
+        let root = if *inode == Inode::ROOT.0 {
+            DriveRoot::MyDrive
+        } else {
+            let name: Option<String> = conn
+                .query_row(
+                    "SELECT name FROM shared_drives WHERE id = ?1 AND enabled = 1",
+                    [top],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match name {
+                Some(name) => DriveRoot::Shared {
+                    id: ItemId(top.clone()),
+                    name,
+                },
+                None => return Ok(None),
+            }
+        };
+        let path = rows
+            .iter()
+            .skip(1)
+            .map(|(_, _, name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join("/");
+        Ok(Some(DrivePath { root, path }))
+    }
+
+    /// O caminho de `id` se ele parte do Meu Drive. A montagem ainda só mostra o Meu Drive:
+    /// a tarefa 9 da 0.8 passa os chamadores a `path_of` e remove este método.
+    pub fn my_drive_path_of(&self, id: &ItemId) -> Result<Option<String>> {
+        Ok(self
+            .path_of(id)?
+            .filter(|p| p.root == DriveRoot::MyDrive)
+            .map(|p| p.path))
+    }
+
+    /// Os Drives compartilhados da conta, em ordem de nome.
+    pub fn shared_drives(&self) -> Result<Vec<StoredDrive>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare_cached("SELECT id, name, enabled FROM shared_drives ORDER BY name, id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(StoredDrive {
+                id: ItemId(r.get(0)?),
+                name: r.get(1)?,
+                enabled: r.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Grava o Drive compartilhado; de um que já existe, só o nome muda (ligado ou não, fica
+    /// como estava).
+    pub fn put_shared_drive(&self, drive: &StoredDrive) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO shared_drives (id, name, enabled) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+            params![drive.id.0, drive.name, drive.enabled],
+        )?;
+        Ok(())
+    }
+
+    /// Tira o Drive da tabela (os itens dele ficam como estão: ver `forget_drive_items`).
+    pub fn delete_shared_drive(&self, id: &ItemId) -> Result<()> {
+        self.conn()
+            .execute("DELETE FROM shared_drives WHERE id = ?1", [&id.0])?;
+        Ok(())
+    }
+
+    pub fn set_drive_enabled(&self, id: &ItemId, enabled: bool) -> Result<()> {
+        self.conn().execute(
+            "UPDATE shared_drives SET enabled = ?2 WHERE id = ?1",
+            params![id.0, enabled],
+        )?;
+        Ok(())
+    }
+
+    /// Itens com edição local ou envio na fila dentro do Drive compartilhado `drive`.
+    pub fn drive_has_pending(&self, drive: &ItemId) -> Result<bool> {
+        Ok(self.conn().query_row(
+            &format!(
+                "{DRIVE_ITEMS} SELECT EXISTS (SELECT 1 FROM items i JOIN down ON i.id = down.id \
+                 WHERE i.local_state IN (1, 2, 3) \
+                 OR i.id IN (SELECT item_id FROM upload_queue))"
+            ),
+            [&drive.0],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Apaga do banco a raiz do Drive compartilhado e tudo o que há dentro (como `remove_item`
+    /// de cada um) e devolve os IDs apagados, para quem chamou descartar o cache deles.
+    pub fn forget_drive_items(&self, drive: &ItemId) -> Result<Vec<ItemId>> {
+        self.modify(|b| b.forget_drive_items(drive))
     }
 
     /// Envios na fila, quantos deles já falharam ao menos uma vez e os bytes dos itens deles.
@@ -946,6 +1040,19 @@ impl Batch<'_> {
         purge_rows(self.conn, id)
     }
 
+    /// Ver `Store::forget_drive_items`.
+    pub fn forget_drive_items(&self, drive: &ItemId) -> Result<Vec<ItemId>> {
+        let ids: Vec<ItemId> = self
+            .conn
+            .prepare(&format!("{DRIVE_ITEMS} SELECT id FROM down"))?
+            .query_map([&drive.0], |r| Ok(ItemId(r.get(0)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for id in &ids {
+            purge_rows(self.conn, id)?;
+        }
+        Ok(ids)
+    }
+
     /// O conteúdo mudou: as sessões retomáveis dos envios do item (do conteúdo velho) caem.
     pub fn reset_upload_sessions(&self, id: &ItemId) -> Result<()> {
         self.conn.execute(
@@ -1024,6 +1131,13 @@ mod tests {
         ItemId(s.into())
     }
 
+    fn folder(name: &str, parent: Option<&str>) -> Item {
+        Item {
+            kind: ItemKind::Folder,
+            ..item(name, parent)
+        }
+    }
+
     fn item(name: &str, parent: Option<&str>) -> Item {
         Item {
             id: id(name),
@@ -1088,10 +1202,6 @@ mod tests {
     fn path_of_only_reaches_the_my_drive_root() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
-        let folder = |name: &str, parent: Option<&str>| Item {
-            kind: ItemKind::Folder,
-            ..item(name, parent)
-        };
         store
             .upsert_item(&Item {
                 inode: Inode::ROOT,
@@ -1106,13 +1216,84 @@ mod tests {
             .upsert_item(&item("orcamento.xlsx", Some("Projeto")))
             .unwrap();
 
+        let from_my_drive = |path: &str| {
+            Some(DrivePath {
+                root: DriveRoot::MyDrive,
+                path: path.into(),
+            })
+        };
         assert_eq!(
-            store.path_of(&id("a.txt")).unwrap().as_deref(),
-            Some("Docs/a.txt")
+            store.path_of(&id("a.txt")).unwrap(),
+            from_my_drive("Docs/a.txt")
         );
-        assert_eq!(store.path_of(&id("root")).unwrap().as_deref(), Some(""));
+        assert_eq!(store.path_of(&id("root")).unwrap(), from_my_drive(""));
         assert_eq!(store.path_of(&id("orcamento.xlsx")).unwrap(), None);
         assert_eq!(store.path_of(&id("Projeto")).unwrap(), None);
+    }
+
+    #[test]
+    fn path_of_reaches_enabled_shared_drives_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .upsert_items(&[
+                folder("equipe", None),
+                folder("Planos", Some("equipe")),
+                item("a.txt", Some("Planos")),
+            ])
+            .unwrap();
+        let drive = |enabled| StoredDrive {
+            id: id("equipe"),
+            name: "Equipe".into(),
+            enabled,
+        };
+
+        assert_eq!(
+            store.path_of(&id("a.txt")).unwrap(),
+            None,
+            "drive ainda não conhecido"
+        );
+        store.put_shared_drive(&drive(true)).unwrap();
+        assert_eq!(
+            store.path_of(&id("a.txt")).unwrap(),
+            Some(DrivePath {
+                root: DriveRoot::Shared {
+                    id: id("equipe"),
+                    name: "Equipe".into()
+                },
+                path: "Planos/a.txt".into()
+            })
+        );
+        store.set_drive_enabled(&id("equipe"), false).unwrap();
+        assert_eq!(
+            store.path_of(&id("a.txt")).unwrap(),
+            None,
+            "drive desligado"
+        );
+    }
+
+    #[test]
+    fn forgetting_a_drive_removes_its_items_and_reports_pending() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .upsert_items(&[
+                folder("equipe", None),
+                item("a.txt", Some("equipe")),
+                item("fora.txt", Some("root")),
+            ])
+            .unwrap();
+        assert!(!store.drive_has_pending(&id("equipe")).unwrap());
+        store
+            .set_local_state(&id("a.txt"), LocalState::Dirty)
+            .unwrap();
+        assert!(store.drive_has_pending(&id("equipe")).unwrap());
+
+        let mut gone = store.forget_drive_items(&id("equipe")).unwrap();
+        gone.sort();
+        assert_eq!(gone, [id("a.txt"), id("equipe")]);
+        assert!(store.get(&id("a.txt")).unwrap().is_none());
+        assert!(store.get(&id("fora.txt")).unwrap().is_some());
     }
 
     #[test]

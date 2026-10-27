@@ -581,7 +581,7 @@ impl Inner {
         let rel = self
             .engine
             .store()
-            .path_of(&dir.id)
+            .my_drive_path_of(&dir.id)
             .inspect_err(|e| tracing::debug!(erro = %e, "caminho da pasta; sem miniaturas"))
             .ok()??;
         let mut path = self.mount_point.join(&self.layout.my_drive);

@@ -3,6 +3,7 @@
 pub mod activity;
 pub mod cache;
 pub mod changes;
+pub mod drives;
 pub mod engine;
 pub mod errors;
 pub mod events;
@@ -42,6 +43,8 @@ pub enum EngineError {
     LocalEdits,
     #[error("o arquivo ainda não foi enviado para o Google Drive")]
     NotUploaded,
+    #[error("o Drive compartilhado tem arquivos que ainda não foram enviados")]
+    PendingUploads,
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

@@ -544,3 +544,26 @@ async fn seeks_download_little_more_than_what_is_read() {
     let mib = m.fake.downloaded_bytes() / MIB as u64;
     assert!(mib <= 16, "{mib} MiB baixados em 8 saltos");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn my_drive_leaves_the_mount_in_mirror_mode() {
+    let fake = FakeDrive::start().await;
+    let root = fake.root_id();
+    fake.add_file(&root, "a.txt", b"a".to_vec());
+    let m = Mounted::new(fake).await;
+    assert!(names(&m.mnt).contains(&"Meu Drive".to_string()));
+
+    m.engine
+        .store()
+        .add_pair(
+            std::path::Path::new("/espelho"),
+            &ItemId(root),
+            gdl_store::folders::PairKind::Mirror,
+            gdl_store::folders::Direction::TwoWay,
+        )
+        .unwrap();
+
+    assert!(!names(&m.mnt).contains(&"Meu Drive".to_string()));
+    assert!(names(&m.mnt).contains(&".shortcut-targets-by-id".to_string()));
+    assert!(std::fs::metadata(m.mnt.join("Meu Drive/a.txt")).is_err());
+}

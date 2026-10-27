@@ -13,7 +13,7 @@ use gdl_common::names::{fit, split_ext, to_remote};
 use gdl_common::temp_files::is_local_only;
 use gdl_drive::client::{DriveClient, RemoteFile, SessionSlot};
 use gdl_drive::model::Change;
-use gdl_store::folders::{Pair, PairState, Synced};
+use gdl_store::folders::{Pair, PairKind, PairState, Synced};
 use gdl_store::{Item, ItemId, ItemKind, Store};
 use md5::{Digest, Md5};
 use rustix::fs::{CWD, RenameFlags, renameat_with};
@@ -55,6 +55,18 @@ pub struct Report {
     pub failed: Vec<(String, String)>,
 }
 
+/// O que o Espelho grava além dos arquivos: o ponteiro de cada documento Google (com o e-mail da
+/// conta) e cada atalho como link simbólico para o alvo na montagem.
+pub struct Links {
+    pub email: String,
+    /// `<montagem>/.shortcut-targets-by-id`.
+    pub shortcut_targets: PathBuf,
+}
+
+/// O `md5` da base de um ponteiro ou link gravado pelo app: ele nunca sobe, e vai para a lixeira
+/// quando o item sai do Drive.
+const LINK_MARK: &str = "gdl-link";
+
 pub struct FolderSync {
     store: Arc<Store>,
     client: Arc<DriveClient>,
@@ -73,6 +85,7 @@ pub struct FolderSync {
     newly_synced: Mutex<Vec<String>>,
     /// Avisa que `newly_synced` deixou de estar vazio.
     synced_notify: tokio::sync::Notify,
+    links: Option<Links>,
 }
 
 impl FolderSync {
@@ -95,7 +108,14 @@ impl FolderSync {
             state_changed: tokio::sync::watch::Sender::new(state),
             newly_synced: Mutex::default(),
             synced_notify: tokio::sync::Notify::new(),
+            links: None,
         }
+    }
+
+    /// Grava também os documentos Google e os atalhos (o Espelho).
+    pub fn with_links(mut self, links: Links) -> FolderSync {
+        self.links = Some(links);
+        self
     }
 
     pub fn pair(&self) -> &Pair {
@@ -119,6 +139,17 @@ impl FolderSync {
     /// Avisa a cada troca de estado do par.
     pub fn state_changes(&self) -> tokio::sync::watch::Receiver<PairState> {
         self.state_changed.subscribe()
+    }
+
+    /// Quantos caminhos do computador ainda não foram para o Drive como estão aqui (novos ou
+    /// mudados desde a última sincronização).
+    pub async fn pending_uploads(&self) -> Result<usize> {
+        let v = self.view().await?;
+        let pending = v
+            .locals
+            .iter()
+            .filter(|(rel, l)| v.bases.get(*rel).is_none_or(|b| !l.matches(b)));
+        Ok(pending.count())
     }
 
     /// Os caminhos que ficaram sincronizados desde a última chamada.
@@ -208,6 +239,7 @@ impl FolderSync {
                 Err(e) => self.failed(report, rel, e),
             }
         }
+        self.write_links(&v, report);
         Ok(v.again)
     }
 
@@ -221,14 +253,14 @@ impl FolderSync {
         let locals = tokio::task::spawn_blocking(move || scan(&root))
             .await
             .map_err(io::Error::other)??;
-        let remotes: BTreeMap<String, Item> = self
-            .store
-            .descendants(&self.pair.remote_id)?
-            .into_iter()
-            .filter(|(rel, item)| {
-                matches!(item.kind, ItemKind::File | ItemKind::Folder) && !ignored(last(rel))
-            })
-            .collect();
+        let (mut remotes, mut links) = (BTreeMap::new(), BTreeMap::new());
+        for (rel, item) in remote_tree(&self.store, &self.pair.remote_id, self.pair.kind)? {
+            match item.kind {
+                ItemKind::File | ItemKind::Folder => remotes.insert(rel, item),
+                _ if self.links.is_some() => links.insert(rel, item),
+                _ => None,
+            };
+        }
         let root = (String::new(), self.pair.remote_id.0.clone());
         let dirs = remotes
             .iter()
@@ -236,16 +268,20 @@ impl FolderSync {
             .map(|(rel, item)| (rel.clone(), item.id.0.clone()))
             .chain([root])
             .collect();
-        let bases = self
+        let (link_bases, bases): (BTreeMap<_, _>, BTreeMap<_, _>) = self
             .store
             .synced_of(self.pair.id)?
             .into_iter()
             .map(|s| (s.rel_path.clone(), s))
-            .collect();
+            .partition(|(_, s)| s.md5.as_deref() == Some(LINK_MARK));
+        let mut locals = locals;
+        locals.retain(|rel, _| !links.contains_key(rel) && !link_bases.contains_key(rel));
         Ok(View {
             locals,
             remotes,
             bases,
+            links,
+            link_bases,
             dirs,
             gone: None,
             again: false,
@@ -633,6 +669,94 @@ impl FolderSync {
     fn path(&self, rel: &str) -> PathBuf {
         self.pair.local.join(rel)
     }
+
+    /// Grava os ponteiros e links que faltam ou mudaram e manda para a lixeira os dos itens que
+    /// saíram do Drive.
+    fn write_links(&self, v: &View, report: &mut Report) {
+        let Some(links) = &self.links else {
+            return;
+        };
+        for (rel, item) in &v.links {
+            match self.write_link(links, rel, item, v.link_bases.contains_key(rel)) {
+                Ok(true) => report.applied += 1,
+                Ok(false) => {}
+                Err(e) => self.failed(report, rel.clone(), e),
+            }
+        }
+        for rel in v
+            .link_bases
+            .keys()
+            .filter(|rel| !v.links.contains_key(*rel))
+        {
+            let path = self.path(rel);
+            let gone = match std::fs::symlink_metadata(&path) {
+                Ok(_) => self.trash.put(&path).map(drop),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e),
+            };
+            match gone
+                .map_err(SyncError::from)
+                .and_then(|()| Ok(self.store.forget_synced(self.pair.id, rel)?))
+            {
+                Ok(()) => report.applied += 1,
+                Err(e) => self.failed(report, rel.clone(), e),
+            }
+        }
+    }
+
+    /// Grava o ponteiro ou link de `item` em `rel`; verdadeiro se mudou algo. O que o usuário pôs
+    /// no mesmo lugar (sem base de link) fica como está.
+    fn write_link(&self, links: &Links, rel: &str, item: &Item, known: bool) -> Result<bool> {
+        self.beneath(rel)?;
+        let path = self.path(rel);
+        let existing = std::fs::symlink_metadata(&path).ok();
+        if existing.is_some() && !known {
+            return Ok(false);
+        }
+        let changed = match &item.kind {
+            ItemKind::GoogleDoc { mime } => {
+                let json = gdl_engine::gdocs::pointer_json(&item.id.0, mime, &links.email);
+                // Um ponteiro já gravado (`known`) só muda com o item: o tamanho basta, sem reler.
+                let same = existing
+                    .as_ref()
+                    .is_some_and(|m| m.is_file() && m.len() == json.len() as u64);
+                if !same {
+                    if existing.is_some_and(|m| m.is_symlink()) {
+                        std::fs::remove_file(&path)?;
+                    }
+                    std::fs::write(&path, json)?;
+                }
+                !same
+            }
+            ItemKind::Shortcut { target_id, .. } => {
+                let target = self.store.get(target_id)?;
+                let name = target.map_or_else(|| target_id.0.clone(), |t| t.local_name);
+                let wanted = links.shortcut_targets.join(&target_id.0).join(name);
+                let same = std::fs::read_link(&path).is_ok_and(|t| t == wanted);
+                if !same {
+                    if existing.is_some() {
+                        std::fs::remove_file(&path)?;
+                    }
+                    std::os::unix::fs::symlink(&wanted, &path)?;
+                }
+                !same
+            }
+            ItemKind::File | ItemKind::Folder => false,
+        };
+        if !known {
+            let base = Synced {
+                rel_path: rel.into(),
+                item_id: item.id.clone(),
+                is_dir: false,
+                size: 0,
+                mtime_ns: 0,
+                inode: 0,
+                md5: Some(LINK_MARK.into()),
+            };
+            self.store.put_synced(self.pair.id, &[base])?;
+        }
+        Ok(changed)
+    }
 }
 
 /// Os três lados de uma passada, mais o que ela já fez.
@@ -640,6 +764,9 @@ struct View {
     locals: BTreeMap<String, Local>,
     remotes: BTreeMap<String, Item>,
     bases: BTreeMap<String, Synced>,
+    /// Documentos Google e atalhos do Drive (só no Espelho), e as bases dos já gravados.
+    links: BTreeMap<String, Item>,
+    link_bases: BTreeMap<String, Synced>,
     /// IDs das pastas do Drive pelo caminho (`""` é a do par), inclusive as criadas agora.
     dirs: HashMap<String, String>,
     /// O último caminho resolvido por inteiro (pasta na lixeira, base esquecida): os caminhos
@@ -779,6 +906,23 @@ fn scan(root: &Path) -> io::Result<BTreeMap<String, Local>> {
     Ok(out)
 }
 
+/// O que um par tem no Drive, pelo caminho relativo: tudo abaixo de `root` menos os nomes que
+/// ficam só no computador e, no Espelho, a pasta de apoio "Computadores" (que fica na montagem).
+pub fn remote_tree(store: &Store, root: &ItemId, kind: PairKind) -> Result<Vec<(String, Item)>> {
+    let all = store.descendants(root)?;
+    let support = match kind {
+        PairKind::Mirror => store.computers_folder()?,
+        _ => None,
+    };
+    let support = support.and_then(|s| all.iter().find(|(_, i)| i.id == s).map(|(r, _)| r.clone()));
+    Ok(all
+        .into_iter()
+        .filter(|(rel, _)| {
+            !ignored(last(rel)) && support.as_deref().is_none_or(|s| !inside(rel, s))
+        })
+        .collect())
+}
+
 /// Nomes que ficam só no computador: travas e temporários, os downloads em curso e lixeiras.
 fn ignored(name: &str) -> bool {
     is_local_only(name) || name.ends_with(PART_SUFFIX) || name.starts_with(".Trash-")
@@ -913,6 +1057,24 @@ mod tests {
             }
         }
 
+        /// O Espelho do Meu Drive inteiro (a raiz do Drive simulado) em `Local`.
+        async fn mirror() -> World {
+            let mut w = World::new().await;
+            w.store.remove_pair(w.pair.id).unwrap();
+            let root = w
+                .store
+                .by_inode(gdl_store::Inode::ROOT)
+                .unwrap()
+                .unwrap()
+                .id;
+            let id = w
+                .store
+                .add_pair(&w.local, &root, PairKind::Mirror, Direction::TwoWay)
+                .unwrap();
+            w.pair = w.store.pair(id).unwrap().unwrap();
+            w
+        }
+
         fn sync_with(&self, tries: u32) -> FolderSync {
             FolderSync::new(
                 self.store.clone(),
@@ -921,6 +1083,10 @@ mod tests {
                 Trash::new(self.trash_dir.clone()),
                 "conflito".into(),
             )
+            .with_links(Links {
+                email: "eu@exemplo.com".into(),
+                shortcut_targets: PathBuf::from("/montagem/.shortcut-targets-by-id"),
+            })
         }
 
         /// Traz as mudanças do Drive para o banco, como o motor da conta faz.
@@ -1341,5 +1507,52 @@ mod tests {
             1,
             "a segunda tentativa continuou a mesma sessão"
         );
+    }
+
+    #[tokio::test]
+    async fn mirror_writes_pointers_and_links_and_leaves_computers_out() {
+        let w = World::mirror().await;
+        let root = w.fake.root_id();
+        let doc = w
+            .fake
+            .add_gdoc(&root, "Plano", "application/vnd.google-apps.document");
+        let target = w.fake.add_file(&root, "alvo.txt", b"alvo".to_vec());
+        w.fake.add_shortcut(&root, "atalho", &target);
+        let support = w.fake.add_folder(&root, "Computadores");
+        w.fake.add_file(&support, "backup.txt", b"b".to_vec());
+        w.refresh().await;
+        w.store.set_computers_folder(&ItemId(support)).unwrap();
+
+        w.reconcile().await;
+
+        assert_eq!(
+            w.local_names(),
+            ["Pasta", "Plano.gdoc", "alvo.txt", "atalho"]
+        );
+        let pointer = w.read("Plano.gdoc");
+        assert_eq!(
+            gdl_engine::gdocs::pointer_doc_id(&pointer).as_deref(),
+            Some(doc.as_str())
+        );
+        assert_eq!(
+            std::fs::read_link(w.local.join("atalho")).unwrap(),
+            PathBuf::from(format!(
+                "/montagem/.shortcut-targets-by-id/{target}/alvo.txt"
+            ))
+        );
+        assert_eq!(w.reconcile().await.applied, 0, "nada a refazer");
+        assert!(
+            w.fake.find_live("Plano.gdoc").is_empty(),
+            "o ponteiro não sobe"
+        );
+
+        w.fake.trash_remote(&doc);
+        w.reconcile().await;
+        assert!(!w.local.join("Plano.gdoc").exists());
+        assert!(
+            w.trash_dir.join("files/Plano.gdoc").exists(),
+            "vai para a lixeira"
+        );
+        assert!(w.fake.find_live("Plano.gdoc").is_empty());
     }
 }

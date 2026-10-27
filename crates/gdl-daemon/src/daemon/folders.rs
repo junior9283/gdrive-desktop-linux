@@ -9,7 +9,7 @@ use gdl_drive::client::RemoteFile;
 use gdl_drive::model::Change;
 use gdl_engine::engine::Engine;
 use gdl_folders::guard::{self, Refusal};
-use gdl_folders::sync::FolderSync;
+use gdl_folders::sync::{FolderSync, Links};
 use gdl_folders::trash::Trash;
 use gdl_ipc::{FolderCheck, LocalFolder, ServiceError};
 use gdl_store::ItemId;
@@ -85,6 +85,8 @@ pub(super) struct FolderAccount {
     pub engine: Arc<Engine>,
     pub runners: Arc<Runners>,
     pub shutdown: CancellationToken,
+    /// A montagem: os atalhos do Espelho apontam para ela.
+    pub mount: PathBuf,
 }
 
 type RunnerMap = HashMap<i64, (Arc<FolderSync>, CancellationToken)>;
@@ -100,7 +102,7 @@ impl Runners {
         }
     }
 
-    fn get(&self, id: i64) -> Option<Arc<FolderSync>> {
+    pub(super) fn get(&self, id: i64) -> Option<Arc<FolderSync>> {
         self.lock().get(&id).map(|(sync, _)| sync.clone())
     }
 }
@@ -108,13 +110,15 @@ impl Runners {
 impl Daemon {
     /// Sobe os pares guardados da conta (na partida dela); param com `shutdown`.
     pub(super) fn start_folders(self: &Arc<Self>, account: &FolderAccount) {
-        // Com a política, os pares ficam guardados mas não rodam.
-        if self.folders_refused().is_err() {
-            return;
-        }
         match account.engine.store().pairs() {
             Ok(pairs) => {
-                for pair in pairs.into_iter().filter(|p| p.kind == PairKind::Folder) {
+                // Com a política, os pares ficam guardados mas não rodam.
+                let allowed = |kind| match kind {
+                    PairKind::Folder => self.folders_refused().is_ok(),
+                    PairKind::Mirror => self.mirror_refused().is_ok(),
+                    PairKind::Device => false,
+                };
+                for pair in pairs.into_iter().filter(|p| allowed(p.kind)) {
                     self.start_folder(account, pair);
                 }
             }
@@ -127,16 +131,24 @@ impl Daemon {
             engine,
             runners,
             shutdown,
+            mount,
             ..
         } = account;
-        let (id, name) = (pair.id, file_name(&pair.local));
-        let sync = Arc::new(FolderSync::new(
+        let (id, name, kind) = (pair.id, file_name(&pair.local), pair.kind);
+        let mut sync = FolderSync::new(
             engine.store().clone(),
             engine.client().clone(),
             pair,
-            Trash::new(self.config.paths.data_home.join("Trash")),
+            self.system_trash(),
             self.i18n.tr("conflict-word", &[]),
-        ));
+        );
+        if kind == PairKind::Mirror {
+            sync = sync.with_links(Links {
+                email: account.email.clone(),
+                shortcut_targets: mount.join(&self.layout.shortcut_targets),
+            });
+        }
+        let sync = Arc::new(sync);
         let stop = shutdown.child_token();
         tokio::spawn({
             let (sync, stop, events) = (sync.clone(), stop.clone(), engine.subscribe());
@@ -250,6 +262,15 @@ impl Daemon {
 
     pub async fn remove_local_folder(&self, account: &str, id: i64) -> Result<(), ServiceError> {
         let account = self.folder_account(account).await?;
+        self.drop_pair(&account, id).await
+    }
+
+    /// Para o laço do par e o desfaz (os arquivos ficam nos dois lados).
+    pub(super) async fn drop_pair(
+        &self,
+        account: &FolderAccount,
+        id: i64,
+    ) -> Result<(), ServiceError> {
         account.runners.stop(id);
         account.engine.store().remove_pair(id).map_err(failed)?;
         self.emit_local_folders_changed().await;
@@ -274,8 +295,13 @@ impl Daemon {
         self.restart_folder(&account, id).await
     }
 
+    /// A lixeira do usuário, para onde vai o que sai do Drive.
+    pub(super) fn system_trash(&self) -> Trash {
+        Trash::new(self.config.paths.data_home.join("Trash"))
+    }
+
     /// Sobe (de novo) o laço do par `id` como está no banco e avisa a interface.
-    async fn restart_folder(
+    pub(super) async fn restart_folder(
         self: &Arc<Self>,
         account: &FolderAccount,
         id: i64,
@@ -405,7 +431,7 @@ impl Daemon {
 
     /// As pastas que outra não pode conter nem estar dentro: os dados do app, as montagens e as
     /// pastas de todas as contas (menos `except`, que está mudando de lugar).
-    async fn taken(&self, except: Option<i64>) -> Vec<PathBuf> {
+    pub(super) async fn taken(&self, except: Option<i64>) -> Vec<PathBuf> {
         let mut taken = vec![self.config.paths.data_dir.clone()];
         for (_, engine, mount) in self.folder_accounts().await {
             taken.push(mount);
@@ -511,12 +537,16 @@ impl Daemon {
             .collect()
     }
 
-    async fn folder_account(&self, account: &str) -> Result<FolderAccount, ServiceError> {
+    pub(super) async fn folder_account(
+        &self,
+        account: &str,
+    ) -> Result<FolderAccount, ServiceError> {
         self.with_account(account, |a| FolderAccount {
             email: a.email.clone(),
             engine: a.engine.clone(),
             runners: a.folders.clone(),
             shutdown: a.shutdown.clone(),
+            mount: a.mount_point.clone(),
         })
         .await
     }
@@ -600,7 +630,7 @@ fn file_name(path: &Path) -> String {
         .into_owned()
 }
 
-fn refusal_text(refusal: Refusal) -> &'static str {
+pub(super) fn refusal_text(refusal: Refusal) -> &'static str {
     match refusal {
         Refusal::Missing => "missing",
         Refusal::Unreadable => "unreadable",

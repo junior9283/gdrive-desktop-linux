@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
-    AccountInfo, ActivityItem, FolderCheck, FolderItem, LocalFolder, MenuEntry, NotificationItem,
-    NotificationSetting, OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError,
-    SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem, Versions,
+    AccountInfo, ActivityItem, FolderCheck, FolderItem, LocalFolder, MenuEntry, MirrorCheck,
+    NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary, Pref, SearchResult,
+    ServiceError, SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem, Versions,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -240,6 +240,22 @@ impl Service {
 
     async fn local_folders(&self) -> Result<Vec<LocalFolder>, ServiceError> {
         self.daemon.local_folders().await
+    }
+
+    async fn mirror(&self, account: &str) -> Result<String, ServiceError> {
+        self.daemon.mirror(account).await
+    }
+
+    async fn mirror_check(&self, account: &str, path: &str) -> Result<MirrorCheck, ServiceError> {
+        self.daemon.mirror_check(account, path).await
+    }
+
+    async fn set_mirror(&self, account: &str, path: &str) -> Result<(), ServiceError> {
+        self.daemon.set_mirror(account, path).await
+    }
+
+    async fn set_stream(&self, account: &str, remove_old: bool) -> Result<(), ServiceError> {
+        self.daemon.set_stream(account, remove_old).await
     }
 
     async fn check_local_folder(

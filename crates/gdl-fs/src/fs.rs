@@ -428,6 +428,10 @@ impl Inner {
             Node::MountRoot if name == OsStr::new(&self.layout.computers) => self.computers()?,
             Node::MountRoot => {
                 let node = self.layout.lookup_root(name).ok_or(Errno::ENOENT)?;
+                // Só "Meu Drive" depende do modo: o banco não é lido para as outras.
+                if node == Node::Item(Inode::ROOT) && self.mirrored()? {
+                    return Err(Errno::ENOENT);
+                }
                 return self.node_attr(&node);
             }
             Node::Kept(folder) => return self.local_attr(&Node::KeptFile(*folder, name.into())),
@@ -482,6 +486,11 @@ impl Inner {
         }
     }
 
+    /// A conta está no modo Espelho: o Meu Drive fica numa pasta do computador.
+    fn mirrored(&self) -> Res<bool> {
+        Ok(self.engine.store().mirror().map_err(errno)?.is_some())
+    }
+
     fn trashed(&self) -> Res<Vec<Item>> {
         self.engine.store().trashed().map_err(errno)
     }
@@ -514,7 +523,7 @@ impl Inner {
         Ok(match node {
             Node::MountRoot => self
                 .layout
-                .root_entries()
+                .root_entries(self.mirrored()?)
                 .into_iter()
                 .map(|(name, node)| Entry {
                     ino: self.inodes.ino(&node),

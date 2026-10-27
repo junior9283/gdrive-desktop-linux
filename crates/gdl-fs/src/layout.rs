@@ -44,22 +44,28 @@ impl Layout {
         }
     }
 
-    pub(crate) fn root_entries(&self) -> [(&str, Node); 6] {
-        [
-            (&self.my_drive, Node::Item(Inode::ROOT)),
-            (&self.shared_drives, Node::SharedDrives),
-            (&self.trash, Node::Trash),
-            (&self.lost_found, Node::Kept(KeptFolder::LostAndFound)),
-            (
-                &self.canceled_uploads,
-                Node::Kept(KeptFolder::CanceledUploads),
-            ),
-            (&self.shortcut_targets, Node::ShortcutTargets),
-        ]
+    /// As pastas da raiz; sem "Meu Drive" no modo Espelho (`mirrored`), quando ele fica numa
+    /// pasta do computador.
+    pub(crate) fn root_entries(&self, mirrored: bool) -> Vec<(&str, Node)> {
+        let my_drive = (!mirrored).then_some((self.my_drive.as_str(), Node::Item(Inode::ROOT)));
+        my_drive
+            .into_iter()
+            .chain([
+                (self.shared_drives.as_str(), Node::SharedDrives),
+                (&self.trash, Node::Trash),
+                (&self.lost_found, Node::Kept(KeptFolder::LostAndFound)),
+                (
+                    &self.canceled_uploads,
+                    Node::Kept(KeptFolder::CanceledUploads),
+                ),
+                (&self.shortcut_targets, Node::ShortcutTargets),
+            ])
+            .collect()
     }
 
+    /// A pasta da raiz chamada `name`, com "Meu Drive" (o chamador confere o modo Espelho).
     pub(crate) fn lookup_root(&self, name: &OsStr) -> Option<Node> {
-        self.root_entries()
+        self.root_entries(false)
             .into_iter()
             .find(|(n, _)| OsStr::new(n) == name)
             .map(|(_, node)| node)

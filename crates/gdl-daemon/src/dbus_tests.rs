@@ -2813,3 +2813,218 @@ async fn states_inside_a_pair() {
     }
     panic!("a pasta parada não mostra o emblema de erro");
 }
+
+// ---- Espelho do Meu Drive ----
+
+/// Os nomes na pasta `dir`, em ordem.
+fn names_in(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<_> = std::fs::read_dir(dir)
+        .map(|d| {
+            d.map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mirror_into_a_folder_with_files_merges_safely() {
+    let h = Harness::new().await;
+    let root = h.fake.root_id();
+    h.fake.add_file(&root, "igual.txt", b"mesmo".to_vec());
+    h.fake.add_file(&root, "diferente.txt", b"nuvem".to_vec());
+    h.fake
+        .add_file(&root, "da-nuvem.txt", b"so na nuvem".to_vec());
+    h.logged_in().await;
+    let mirror = local_folder(&h, "Espelho");
+    std::fs::write(mirror.join("igual.txt"), b"mesmo").unwrap();
+    std::fs::write(mirror.join("diferente.txt"), b"local").unwrap();
+    std::fs::write(mirror.join("so-local.txt"), b"daqui").unwrap();
+    let path = mirror.to_str().unwrap();
+
+    let check = h.proxy.mirror_check("", path).await.unwrap();
+    assert_eq!(check.refusal, "");
+    assert_eq!(check.size, 5 + 5 + 11, "o que vai ser baixado");
+    assert!(check.free > 0);
+    h.proxy.set_mirror("", path).await.unwrap();
+    assert_eq!(h.proxy.mirror("").await.unwrap(), path);
+
+    wait_until("só-local no Drive e a cópia em conflito", || {
+        h.fake.find_live("so-local.txt").len() == 1
+            && mirror.join("da-nuvem.txt").exists()
+            && mirror.join("diferente.txt").exists()
+            && names_in(&mirror)
+                .iter()
+                .any(|n| n.starts_with("diferente (conflito"))
+    })
+    .await;
+    assert_eq!(
+        std::fs::read(mirror.join("da-nuvem.txt")).unwrap(),
+        b"so na nuvem"
+    );
+    assert_eq!(
+        h.fake.find_live("igual.txt").len(),
+        1,
+        "iguais não duplicam"
+    );
+    assert_eq!(
+        std::fs::read(mirror.join("diferente.txt")).unwrap(),
+        b"nuvem"
+    );
+    let conflict = names_in(&mirror)
+        .into_iter()
+        .find(|n| n.starts_with("diferente (conflito"))
+        .unwrap();
+    assert_eq!(std::fs::read(mirror.join(&conflict)).unwrap(), b"local");
+    wait_until("a versão local também no Drive", || {
+        h.fake.find_live(&conflict).len() == 1
+    })
+    .await;
+    assert_eq!(h.fake.find_live("diferente.txt").len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn my_drive_leaves_the_mount_in_mirror_mode() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    assert!(h.drive().exists());
+    let mirror = local_folder(&h, "Espelho");
+
+    h.proxy
+        .set_mirror("", mirror.to_str().unwrap())
+        .await
+        .unwrap();
+
+    wait_until("Meu Drive fora da montagem", || !h.drive().exists()).await;
+    let mount = h.drive().parent().unwrap().to_path_buf();
+    assert!(names_in(&mount).contains(&"Drives compartilhados".to_string()));
+    assert!(
+        h.proxy
+            .set_mirror("", mirror.to_str().unwrap())
+            .await
+            .is_err(),
+        "um Espelho por conta"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mirror_resumes_the_first_download() {
+    let mut h = Harness::new().await;
+    let root = h.fake.root_id();
+    for n in 0..30 {
+        h.fake
+            .add_file(&root, &format!("f{n:02}.txt"), vec![b'x'; 20_000]);
+    }
+    h.logged_in().await;
+    let mirror = local_folder(&h, "Espelho");
+    h.proxy
+        .set_mirror("", mirror.to_str().unwrap())
+        .await
+        .unwrap();
+    wait_until("o download começou", || !names_in(&mirror).is_empty()).await;
+
+    h.restart(None).await;
+
+    wait_until("os 30 arquivos", || {
+        names_in(&mirror)
+            .iter()
+            .filter(|n| n.ends_with(".txt"))
+            .count()
+            == 30
+    })
+    .await;
+    let names = names_in(&mirror);
+    assert!(
+        names
+            .iter()
+            .all(|n| !n.contains("conflito") && !n.ends_with(".gdl-part")),
+        "{names:?}"
+    );
+    for n in 0..30 {
+        assert_eq!(h.fake.find_live(&format!("f{n:02}.txt")).len(), 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn switching_back_to_stream_keeps_the_old_folder() {
+    let h = Harness::new().await;
+    h.fake.add_file(&h.fake.root_id(), "a.txt", b"a".to_vec());
+    h.logged_in().await;
+    let mirror = local_folder(&h, "Espelho");
+    let path = mirror.to_str().unwrap();
+    h.proxy.set_mirror("", path).await.unwrap();
+    wait_until("a.txt no Espelho", || mirror.join("a.txt").exists()).await;
+
+    h.proxy.set_stream("", false).await.unwrap();
+    assert_eq!(h.proxy.mirror("").await.unwrap(), "");
+    assert!(mirror.join("a.txt").exists(), "a pasta antiga fica");
+    wait_until("Meu Drive de volta", || h.drive().join("a.txt").exists()).await;
+
+    h.proxy.set_mirror("", path).await.unwrap();
+    let a = mirror.join("a.txt").display().to_string();
+    for _ in 0..100 {
+        if h.proxy.folder_states(&[&a]).await.unwrap() == ["offline"] {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    h.proxy.set_stream("", true).await.unwrap();
+    assert!(
+        !mirror.exists(),
+        "remover a pasta antiga a manda para a lixeira"
+    );
+    let trashed = h.paths().data_home.join("Trash/files/Espelho/a.txt");
+    assert!(trashed.exists(), "na lixeira do sistema: {trashed:?}");
+    assert_eq!(h.fake.find_live("a.txt").len(), 1, "nada sai do Drive");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stream_switch_waits_for_pending_uploads() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let mirror = local_folder(&h, "Espelho");
+    h.proxy
+        .set_mirror("", mirror.to_str().unwrap())
+        .await
+        .unwrap();
+    h.fake.inject(gdl_fake_drive::Fault::Offline);
+    std::fs::write(mirror.join("novo.txt"), b"ainda aqui").unwrap();
+
+    let err = h.proxy.set_stream("", false).await.unwrap_err();
+    assert!(
+        matches!(&err, ServiceError::Refused(r) if r == "mirror-pending"),
+        "{err:?}"
+    );
+    assert_eq!(h.proxy.mirror("").await.unwrap(), mirror.to_str().unwrap());
+
+    h.fake.clear_faults();
+    wait_until("novo.txt no Drive", || {
+        h.fake.find_live("novo.txt").len() == 1
+    })
+    .await;
+    for _ in 0..100 {
+        if h.proxy.set_stream("", false).await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("sem pendências, volta para o Stream");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disable_mirrored_my_drive_refuses() {
+    let h = Harness::with_policy("DisableMirroredMyDrive = true").await;
+    h.logged_in().await;
+    let mirror = local_folder(&h, "Espelho");
+    let path = mirror.to_str().unwrap();
+
+    let check = h.proxy.mirror_check("", path).await.unwrap();
+    assert_eq!(check.refusal, "mirror-disabled");
+    let err = h.proxy.set_mirror("", path).await.unwrap_err();
+    assert!(
+        matches!(&err, ServiceError::Refused(r) if r == "mirror-disabled"),
+        "{err:?}"
+    );
+    assert!(h.drive().exists());
+}

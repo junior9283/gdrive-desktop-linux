@@ -326,6 +326,19 @@ pub struct FolderCheck {
     pub exists: bool,
 }
 
+/// O que `MirrorCheck` acha de levar o Meu Drive para uma pasta do computador (Espelho).
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct MirrorCheck {
+    /// Vazio se serve; senão `mirror-disabled` ou um motivo de `CheckLocalFolder`.
+    pub refusal: String,
+    /// O que será baixado: o Meu Drive sem os documentos Google.
+    pub size: u64,
+    /// Espaço livre no disco da pasta.
+    pub free: u64,
+    /// Itens da montagem que ainda não foram para o Drive.
+    pub pending: u64,
+}
+
 /// Uma pasta de destino de "Adicionar atalho ao Drive" (`Folders`).
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FolderItem {
@@ -507,6 +520,15 @@ pub trait Service {
     /// As pastas do computador sincronizadas, de todas as contas.
     fn local_folders(&self) -> Result<Vec<LocalFolder>, ServiceError>;
     fn check_local_folder(&self, account: &str, path: &str) -> Result<FolderCheck, ServiceError>;
+    /// A pasta do Espelho do Meu Drive da conta; vazio no modo Stream.
+    fn mirror(&self, account: &str) -> Result<String, ServiceError>;
+    fn mirror_check(&self, account: &str, path: &str) -> Result<MirrorCheck, ServiceError>;
+    /// Passa a conta para o Espelho em `path` (criada se faltar): o Meu Drive sai da montagem e
+    /// é sincronizado ali. Recusa com `Refused` (`mirror-disabled` ou o motivo de `MirrorCheck`).
+    fn set_mirror(&self, account: &str, path: &str) -> Result<(), ServiceError>;
+    /// Volta para o Stream. Com envios do Espelho pendentes, recusa `mirror-pending`; a pasta
+    /// antiga fica, e `remove_old` a manda para a lixeira do sistema.
+    fn set_stream(&self, account: &str, remove_old: bool) -> Result<(), ServiceError>;
     /// Liga a pasta a "Computadores/<este computador>/<nome>" no Drive; `merge` junta com a pasta
     /// de mesmo nome que já esteja lá. Recusa com `Refused` (`folders-disabled` ou o motivo de
     /// `CheckLocalFolder`). Devolve o ID da pasta.

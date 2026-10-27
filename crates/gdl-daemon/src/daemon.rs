@@ -132,6 +132,7 @@ struct Account {
 }
 
 mod folders;
+mod mirror;
 mod sharing;
 
 pub use folders::Computer;
@@ -1154,6 +1155,7 @@ impl Daemon {
             engine: engine.clone(),
             runners: folders.clone(),
             shutdown: shutdown.clone(),
+            mount: mount_point.clone(),
         });
         let moved = mount_point != preferred;
         let account = Account {

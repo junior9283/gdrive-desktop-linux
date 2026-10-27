@@ -838,10 +838,11 @@ impl Store {
         self.modify(|b| b.forget_drive_items(drive))
     }
 
-    /// Envios na fila, quantos deles já falharam ao menos uma vez e os bytes dos itens deles.
+    /// Itens com envio na fila (um item pode ter mais de um), quantos deles já falharam ao menos
+    /// uma vez e os bytes deles.
     pub fn queue_stats(&self) -> Result<QueueStats> {
         Ok(self.conn().query_row(
-            "SELECT COUNT(*), COUNT(DISTINCT item_id) FILTER (WHERE error_category IS NOT NULL), \
+            "SELECT COUNT(DISTINCT item_id), COUNT(DISTINCT item_id) FILTER (WHERE error_category IS NOT NULL), \
              (SELECT COALESCE(SUM(size), 0) FROM items \
               WHERE id IN (SELECT item_id FROM upload_queue)) \
              FROM upload_queue",
@@ -1768,6 +1769,24 @@ mod tests {
 
         assert_eq!(store.wake_network_waiters(0).unwrap(), 0);
         assert!(store.next_job(499).unwrap().is_none());
+    }
+
+    /// Cada gravação fechada enfileira um envio: o mesmo arquivo com dois na fila conta um só.
+    #[test]
+    fn pending_counts_files_not_jobs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        for item_id in ["a", "a", "b"] {
+            store
+                .enqueue(NewUploadJob {
+                    item: id(item_id),
+                    kind: UploadKind::Update,
+                    next_try_ms: 0,
+                    file_id: None,
+                })
+                .unwrap();
+        }
+        assert_eq!(store.queue_stats().unwrap().pending, 2);
     }
 
     #[test]

@@ -7,6 +7,33 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.7.0] - 2026-10-27
+
+### Adicionado
+- Ícones de status no Dolphin: na nuvem, disponível off-line, sincronizando e em conflito (plugin
+  KF6 de emblemas, nos pacotes `.deb`, `.rpm` e Arch). O serviço avisa pelo D-Bus
+  (`StatesChanged`) quais arquivos mudaram, e o Dolphin redesenha só esses.
+- Janela "Compartilhar", aberta pelo menu do botão direito: adicionar pessoas com papel
+  (leitor, comentarista, editor), com ou sem aviso por e-mail e mensagem; mudar o papel ou tirar
+  o acesso de quem já tem; acesso geral (restrito, domínio da conta Workspace ou qualquer pessoa
+  com o link) e copiar o link.
+- Janela "Gerenciar versões", aberta pelo menu: as versões guardadas do arquivo, da atual para a
+  mais antiga, com baixar (na pasta de downloads, sem sobrescrever nada), restaurar (vira uma
+  versão nova; recusa se houver edição local ainda não enviada) e manter para sempre.
+- Menu do botão direito: arquivos do Word, Excel e PowerPoint ganham "Abrir no Documentos /
+  Planilhas / Apresentações Google" (o editor on-line), respeitando a política
+  `OpenOfficeFilesInDocs`.
+- Copiar link avisa quem pode abrir: só quem tem acesso, pessoas do domínio ou qualquer pessoa
+  com o link, e com que papel.
+- A pasta do Drive entra nas pastas que o indexador do KDE (Baloo) não lê, preservando as outras
+  exclusões; sem isso ele baixaria o Drive inteiro. Desinstalar desfaz.
+
+### Corrigido
+- Cancelar um envio logo depois de reabrir o arquivo para escrita podia tirar o conteúdo de baixo
+  do programa que grava: o fechamento atrasado da abertura anterior apagava a marca de "aberto".
+- Com a máquina ocupada, a leitura sequencial fazia um pedido a mais ao Drive (a leitura seguinte
+  chegava antes da antecipada e pedia o bloco à parte).
+
 ## [0.6.0] - 2026-10-26
 
 ### Mudado
@@ -331,7 +358,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.6.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.3.2...v0.4.0

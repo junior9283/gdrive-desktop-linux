@@ -150,6 +150,10 @@ o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$G
   sinal chega, mas a falha só vale quando o serviço a aplicou.
 - **Instância única e ativação pelo D-Bus:** a janela ativada com `--dbus` só reserva o nome e
   espera o pedido de tela; sem isso, a ativação abriria uma tela sozinha.
+- **Plugins do Dolphin nos testes:** as sondas rodam com Qt `offscreen` num barramento próprio; o
+  serviço falso (`integrations/testing/fake_service.py`) emite sinais pelo PyGObject, porque o
+  `gdbus` não existe no contêiner Debian da CI. A espera da sonda é de 3 s (1 s falhava com a
+  máquina ocupada).
 - **`purge_during_seeding_leaves_nothing` é probabilístico:** ele corre o apagamento contra uma
   semeadura em andamento, então um verde não prova a ausência da corrida; falha intermitente nele
   é bug real, não azar.
@@ -198,6 +202,11 @@ o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$G
 | CPU parada em ~2,5 % com um Drive de 610 mil itens | consulta periódica com `ORDER BY` e parâmetro no lugar do literal (`pin != ?1`) não usava o índice parcial | literais nas condições dos índices parciais, ordenação em Rust, `UNION` no lugar de `OR`; índice `items_edited` | `periodic_queries_do_not_scan_every_item` (passos de varredura e plano) | desempenho se prova contando passos, não medindo tempo |
 | Download cancelado no meio poderia prender o trecho reservado | a reserva de trecho em download precisa sair também no cancelamento | `Fetching` solta a reserva no `Drop` | `canceled_download_releases_its_range` (falha com a liberação desligada) | toda reserva em memória precisa de dono que a solte em qualquer saída |
 | 8 saltos de 256 KiB num vídeo baixavam 62 MiB (eram 32 MiB) | o kernel transforma cada salto em 3 leituras seguidas; a 2ª já disparava 8 MiB adiante, e a janela dobrada disparava mais 16 MiB na 3ª | leitura antecipada só depois de 1 MiB lido em sequência; a próxima janela sai na metade da última pedida | `seeks_download_little_more_than_what_is_read` (montagem real), `sequential_read_prefetches_8_mib_after_a_block` | medir saltos junto com a velocidade sequencial: otimizar um piora o outro |
+| Cancelar o envio às vezes tirava o conteúdo de um arquivo aberto para escrita | a marca "aberto para escrita" era um conjunto: o último fechamento de uma abertura anterior (o `RELEASE`, que o kernel manda sem esperar) chegava depois da nova abertura e apagava a marca dela | marcas contadas por inode (`WritingMark`) | `late_release_keeps_the_mark_of_a_new_open`; achado por `cancel_waits_for_the_file_to_close`, que falhava ~1 em 6 rodadas da suíte inteira | marca compartilhada por várias aberturas precisa de contagem, não de presença |
+| Leitura sequencial fazia um pedido a mais ao Drive com a máquina ocupada (8 em vez de 7 para 64 MiB) | a leitura antecipada reservava o trecho dentro da tarefa (`tokio::spawn`); a leitura seguinte chegava antes e pedia o bloco à parte | o primeiro trecho é reservado na hora, antes da tarefa | `sequential_read_uses_growing_windows` (0 falhas em 4 rodadas da suíte inteira; antes, 1 em 2) | o que precisa estar valendo quando a função volta não pode ficar para uma tarefa |
+| `disabled_kind_is_neither_shown_nor_listed` falhava às vezes (aviso da Copia1 aparecia) | o aviso desligado é decidido quando o serviço trata o evento; religar logo depois da cópia chegava antes do tratamento | barreira no teste: um aviso ligado gerado depois (gravação com a sincronização pausada), tratado em ordem | o mesmo (15 de 15 isolado) | "a operação voltou" não quer dizer "o evento dela foi tratado": espere um sinal que venha depois |
+| Trocar o acesso geral podia deixar o de outro tipo (domínio e link juntos) | a troca saía cedo ao achar o primeiro acesso geral | tira todos os de outro tipo antes; o Drive simulado aceita os dois, como o real | `changing_general_access_removes_every_other_kind` | o simulado não pode simplificar o que o Drive real permite |
+| `UNIQUE constraint failed` ao mudar o estado de um item | `INSERT OR IGNORE` no gatilho herda a política de conflito do comando de fora (o upsert) | `ON CONFLICT DO NOTHING` no gatilho | testes de `take_state_changes` | em gatilho do SQLite, `OR IGNORE` não vale: a cláusula de conflito de fora prevalece |
 
 ## Teste manual com conta real
 

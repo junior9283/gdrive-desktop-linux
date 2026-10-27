@@ -1,7 +1,7 @@
 # Matriz de paridade
 
 Situação de cada item do catálogo da [especificação](superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md)
-(seção 6) no código, conferida na versão 0.6.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
+(seção 6) no código, conferida na versão 0.7.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
 **FEITO** ou registrados em "Diferenças conhecidas" no README como risco aceito.
 
 Legenda: **FEITO**, **PARCIAL** (existe, mas incompleto), **FALTA**.
@@ -10,7 +10,7 @@ Legenda: **FEITO**, **PARCIAL** (existe, mas incompleto), **FALTA**.
 |---|---|---|---|
 | 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 35 | 9 | 27 |
 | 6.7–6.11 (janela principal, bandeja, pesquisa, Preferências, primeiro uso) | 57 | 4 | 18 |
-| 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 30 | 8 | 37 |
+| 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 40 | 6 | 29 |
 
 Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packaging/nfpm.yaml`,
 `.github/workflows/release.yml`).
@@ -19,8 +19,8 @@ Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packagin
 
 | Versão | Entrega |
 |---|---|
-| 0.7 | Dolphin completo: ícones de status, submenu completo (abrir no Docs/Planilhas/Apresentações, adicionar atalho, copiar link dizendo o tipo de acesso), janelas nativas "Compartilhar" e "Gerenciar versões", exclusão do Baloo |
-| 0.8 | Várias contas (até 4), uma montagem por conta, `DisableAddAccount`; Drives compartilhados na montagem, "Gerenciar drives compartilhados" e criar drive |
+| 0.7 | Dolphin completo: ícones de status, submenu completo (abrir no Docs/Planilhas/Apresentações, copiar link dizendo o tipo de acesso), janelas "Compartilhar" e "Gerenciar versões", exclusão do Baloo ✅ |
+| 0.8 | Várias contas (até 4), uma montagem por conta, `DisableAddAccount`; Drives compartilhados na montagem, "Gerenciar drives compartilhados" e criar drive; "Adicionar atalho" no menu, escolhendo o local |
 | 0.9 | Backup de pastas ("Meu computador"), pastas conectadas e "Computadores", modo Espelho com troca entre modos, dispositivos removíveis e NAS |
 | 0.10 | Diagnóstico, registro detalhado e feedback; notificações restantes e aviso de nova versão; servidor MCP; políticas restantes; ransomware e recuperação do banco |
 | 1.0 | Matriz toda conferida, "Diferenças conhecidas" no README |
@@ -243,14 +243,14 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Ícones de status (KOverlayIconPlugin) | FALTA | Só existe `integrations/dolphin/gdrivemenu.cpp` (menu); nenhum overlay plugin. README: "🔜 Ícones de status". |
+| Ícones de status (KOverlayIconPlugin) | FEITO | `integrations/dolphin/gdriveoverlay.cpp` (emblemas `gdl-emblem-{cloud,offline,syncing,conflict}` pelo xattr `user.gdl.state`, atualizados pelo sinal D-Bus `StatesChanged`). Outros gerenciadores seguem sem ícones. |
 | Abrir com Drive web | FEITO | `Action::OpenWeb`, `crates/gdl-daemon/src/menu.rs:43`. |
-| Abrir com Docs / Planilhas / Apresentações | PARCIAL | Só "abrir no navegador" genérico; sem itens por app. |
-| Compartilhar | FALTA | Sem ação no `menu.rs`; sem `permissions` em `gdl-drive/src/client.rs`. |
-| Copiar link (com aviso público/domínio/restrito) | PARCIAL | `Action::CopyLink` copia o link; sem classificação do acesso na notificação. |
+| Abrir com Docs / Planilhas / Apresentações | FEITO | `Action::OpenDocs/OpenSheets/OpenSlides` para arquivos do Office (`menu.rs`, `gdl-engine/src/gdocs.rs` `OfficeEditor`). |
+| Compartilhar | FEITO | `Action::Share` abre a janela `share:<id>` (`ui/screens/share.js`). |
+| Copiar link (com aviso público/domínio/restrito) | FEITO | `Action::CopyLink` + `notify_link_copied` (`daemon/sharing.rs`, textos `notify-link-*`). |
 | Acesso off-line / Somente on-line (marca mista) | FEITO | `menu.rs:44-46,103-111` (`Offline::Mixed`), plugin Dolphin `gdrivemenu.cpp:93`. |
 | Adicionar atalho ao Google Drive | PARCIAL | Método D-Bus `add_shortcut` existe (`dbus.rs:161`, tela "Compartilhados"), mas não está no menu do botão direito. |
-| Gerenciar versões | FALTA | Sem `revisions` no cliente nem ação no menu. |
+| Gerenciar versões | FEITO | `Action::Versions` abre a janela `versions:<id>` (só arquivos com versões). |
 | Ver lixeira | FEITO | `Action::Trash` (`menu.rs:51,153`). |
 | Atualizar pasta | FEITO | `Action::Refresh`. |
 | Enviar ou sincronizar esta pasta (fora da montagem) | FALTA | Sem ação; backup/sincronização de pastas é 🔜 no README. |
@@ -259,18 +259,18 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Criar novo documento, planilha, apresentação | FEITO | `Action::NewDocument/NewSpreadsheet/NewPresentation`, `menu.rs:47-49,67-77`. |
 | Perguntar ao Gemini (web) | FALTA | Nenhuma ação no menu (só cartão Gemini na janela principal). |
 | Miniaturas sem baixar (thumbnailLink) | FEITO | `crates/gdl-engine/src/thumbs/{seeder,freedesktop}.rs` (semeia o cache freedesktop com o `thumbnailLink`; não é um thumbnailer KIO próprio). |
-| Excluir montagens do Baloo no primeiro uso | FALTA | `gdl-fs/src/fs.rs:47` só reconhece o processo `baloo_file` para não semear miniaturas; nada configura exclusão. |
+| Excluir montagens do Baloo no primeiro uso | FEITO | `desktop.rs` `set_baloo_exclusion` (a cada montagem, numa sessão KDE; desfeito ao desinstalar). |
 | Outros gerenciadores: ações básicas, sem ícones | FEITO | `integrations/gtk/gdrive_desktop_linux_menu.py` (Nautilus/Nemo/Caja/Thunar), `crates/gdl-daemon/src/cosmic.rs`. |
 
 ### 6.13 Compartilhamento, versões, lixeira e criação
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Janela "Compartilhar": adicionar pessoas com papel e mensagem | FALTA | Sem tela, D-Bus ou chamada `permissions`. |
-| Janela "Compartilhar": acesso geral (restrito/domínio/link) | FALTA | Idem. |
-| Janela "Compartilhar": copiar link | FEITO | Pelo menu (`CopyLink`), não dentro da janela. |
+| Janela "Compartilhar": adicionar pessoas com papel e mensagem | FEITO | `ui/screens/share.js`, D-Bus `share_add`/`share_set_role`, `gdl-drive/src/client/sharing.rs`. |
+| Janela "Compartilhar": acesso geral (restrito/domínio/link) | FEITO | `share_set_general` → `Engine::set_general_access` (troca tira os de outro tipo). |
+| Janela "Compartilhar": copiar link | FEITO | Pelo menu (`CopyLink`) e pelo botão da janela. |
 | Abrir a janela pela MCP (corrigir permissão de um e-mail) | FALTA | Não há servidor MCP. |
-| Gerenciar versões (baixar, restaurar, manter para sempre; mensagens) | FALTA | Sem `revisions`. |
+| Gerenciar versões (baixar, restaurar, manter para sempre; mensagens) | FEITO | `ui/screens/versions.js`, D-Bus `version_download/restore/keep`, `gdl-engine/src/sharing.rs` (restaurar vira edição local que sobe como versão nova). |
 | Lixeira: pasta somente leitura + Restaurar | FEITO (variante) | Lixeira KIO `.Trash-<uid>` na montagem (`gdl-fs/src/trash.rs`); restaurar = `engine.untrash` (`gdl-fs/src/write.rs:417-421`); 30 dias fica por conta do Drive. Não é uma pasta virtual própria com ação "Restaurar" do app. |
 | Criar Docs/Planilhas/Apresentações na pasta e abrir no navegador | FEITO | `menu.rs:67-77` + `MenuAction`; `menu_action` em `gdl-cli/src/menu_action.rs`. |
 
@@ -319,7 +319,7 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | DisableMirroredFolders | FALTA | Sem consumidor. |
 | DisableOnboardingDialog | FEITO | `gdl-tray/src/main.rs:148`. |
 | MinFreeDiskSpaceKBytes | FEITO | `engine.rs:169`. |
-| OpenOfficeFilesInDocs | FALTA | Sem consumidor. |
+| OpenOfficeFilesInDocs | FEITO | Esconde os itens "Abrir no Docs/Planilhas/Apresentações" do menu quando desligada. |
 | DirectConnection | FEITO | `daemon.rs:262-264`. |
 | TrustedRootCertsFile | FALTA | Sem consumidor (nenhum `add_root_certificate`). |
 | TrustSystemRootCerts | FALTA | Sem consumidor. |

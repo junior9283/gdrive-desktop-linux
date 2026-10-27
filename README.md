@@ -4,7 +4,7 @@
 
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.6.0-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.7.0-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-pr%C3%A9via-orange)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
@@ -42,9 +42,10 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 | **Bandeja e janela** | ✅ Ícone na bandeja, janela principal, atividade com progresso, pesquisa rápida, erros, arquivos off-line, preferências, notificações e menu da conta com foto e uso do espaço. |
 | **Primeiro uso** | ✅ Guia do Client ID dentro do app, com botões que abrem cada página do Google Cloud. |
 | **Miniaturas** | ✅ As imagens aparecem com miniatura no Dolphin e em outros gerenciadores, usando as miniaturas do próprio Google, sem baixar os arquivos. |
-| **Menu do botão direito** | ✅ Abrir no navegador, copiar link, off-line / só on-line, novo Documento, Planilha ou Apresentação, atualizar e lixeira, no Dolphin, Nautilus, Nemo, Caja, Thunar e COSMIC Files. |
+| **Menu do botão direito** | ✅ Abrir no navegador, copiar link (com o aviso de quem pode abrir), off-line / só on-line, novo Documento, Planilha ou Apresentação, atualizar e lixeira, no Dolphin, Nautilus, Nemo, Caja, Thunar e COSMIC Files. |
+| **Compartilhar e versões** | ✅ Pelo menu do botão direito: janela Compartilhar (pessoas, papéis, acesso geral e link), Gerenciar versões (baixar, restaurar, manter para sempre) e arquivos do Office abertos no Docs, Planilhas ou Apresentações. |
 | **Instalação e remoção** | ✅ Pacotes `.deb`, `.rpm`, Arch e `.tar.gz`, e um desinstalador com a opção de apagar também os dados do computador. |
-| **Ícones de status** | 🔜 Na nuvem, off-line e sincronizando, nos gerenciadores de arquivos. |
+| **Ícones de status** | ✅ Na nuvem, off-line, sincronizando e em conflito, no Dolphin. A pasta do Drive fica fora do indexador do KDE (Baloo), que baixaria tudo para ler. |
 | **Backup e espelho** | 🔜 Backup de pastas do computador para o Drive e o modo espelho (cópia completa no computador). |
 | **Contas** | 🔜 Várias contas Google ao mesmo tempo e Drives compartilhados. |
 
@@ -61,6 +62,8 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 | ![Uso do disco e itens off-line](docs/imagens/arquivos-off-line.png) | ![Aba Google Drive das preferências](docs/imagens/preferencias.png) |
 | **Sobre** | **Desinstalar** |
 | ![Tela Sobre com a versão e a licença](docs/imagens/sobre.png) | ![Janela que pergunta se apaga também os dados do computador](docs/imagens/desinstalar.png) |
+| **Compartilhar** | **Gerenciar versões** |
+| ![Janela Compartilhar com as pessoas, os papéis e o acesso geral](docs/imagens/compartilhar.png) | ![Versões guardadas de um arquivo, da atual para a mais antiga](docs/imagens/versoes.png) |
 
 ## Como funciona
 
@@ -211,8 +214,8 @@ Cada etapa sai funcionando antes da próxima.
 | 0.3 | Miniaturas do Google no gerenciador de arquivos |
 | 0.4 | Instaladores para as distribuições e desinstalador |
 | 0.5 | Menu do botão direito em todos os gerenciadores |
-| 0.6 | Desempenho: CPU parada, pastas grandes, download e envios em paralelo ← **estamos aqui** |
-| 0.7 | Dolphin completo: ícones de status, janelas de compartilhar e de versões |
+| 0.6 | Desempenho: CPU parada, pastas grandes, download e envios em paralelo |
+| 0.7 | Dolphin completo: ícones de status, janelas de compartilhar e de versões ← **estamos aqui** |
 | 0.8 | Várias contas e Drives compartilhados |
 | 0.9 | Backup de pastas, pastas conectadas e modo espelho |
 | 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes |

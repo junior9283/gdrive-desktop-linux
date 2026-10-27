@@ -187,7 +187,8 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
         ),
         EngineEvent::Offline(false)
         | EngineEvent::NeedsSignIn(false)
-        | EngineEvent::SyncStateChanged(_) => return None,
+        | EngineEvent::SyncStateChanged(_)
+        | EngineEvent::ItemsChanged { .. } => return None,
     })
 }
 

@@ -14,10 +14,12 @@ gdl-drive.workspace = true
 gdl-engine.workspace = true
 gdl-store.workspace = true
 md-5.workspace = true
+notify.workspace = true
 percent-encoding.workspace = true
-rustix = { workspace = true, features = ["process"] }
+rustix = { workspace = true, features = ["fs", "process"] }
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
 

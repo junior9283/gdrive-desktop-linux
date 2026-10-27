@@ -218,7 +218,21 @@ impl ChangePoller {
             .ok_or(EngineError::NotIndexed)?;
         let (changes, next) = self.client.changes(&token).await?;
         self.register_new_drives(&changes).await?;
+        // Os ids só são juntados se alguém ouve (a indexação traz milhares de mudanças).
+        let ids: Vec<ItemId> = changes
+            .iter()
+            .filter(|_| self.events.receiver_count() > 0)
+            .filter_map(|c| match c {
+                Change::Upsert(r) => Some(ItemId(r.id.clone())),
+                Change::Removed(id) => Some(ItemId(id.clone())),
+                Change::Drive(_) => None,
+            })
+            .collect();
         let (applied, removed) = apply_changes(&self.store, changes)?;
+        if applied > 0 {
+            // Sem ninguém ouvindo, o aviso pode se perder.
+            let _ = self.events.send(EngineEvent::ItemsChanged { ids });
+        }
         for id in &removed {
             self.cache.discard(id).await?;
         }
@@ -309,6 +323,28 @@ mod tests {
         let env = Env::new().await;
         let (poller, _) = env.poller();
         (env, poller)
+    }
+
+    #[tokio::test]
+    async fn applied_changes_are_announced_with_their_ids() {
+        let env = Env::new().await;
+        let (poller, mut events) = env.poller();
+        initial_index(&env.store, &env.client).await.unwrap();
+        let id = env
+            .fake
+            .add_file(&env.fake.root_id(), "a.txt", b"um".to_vec());
+
+        poller.run_once().await.unwrap();
+
+        let mut announced = vec![];
+        while let Ok(event) = events.try_recv() {
+            if let EngineEvent::ItemsChanged { ids } = event {
+                announced.extend(ids);
+            }
+        }
+        assert!(announced.contains(&ItemId(id)), "{announced:?}");
+        poller.run_once().await.unwrap();
+        assert!(events.try_recv().is_err(), "nada mudou, nada é anunciado");
     }
 
     #[tokio::test]

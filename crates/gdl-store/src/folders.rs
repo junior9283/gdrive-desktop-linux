@@ -136,6 +136,15 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// O item `item` está na base do par (sincronizado por ele).
+    pub fn synced_has(&self, pair: i64, item: &ItemId) -> Result<bool> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT EXISTS (SELECT 1 FROM synced WHERE pair_id = ?1 AND item_id = ?2)",
+        )?;
+        Ok(stmt.query_row(params![pair, &item.0], |r| r.get(0))?)
+    }
+
     /// Grava vários caminhos numa transação só (uma sincronização grava milhares de uma vez).
     pub fn put_synced(&self, pair: i64, synced: &[Synced]) -> Result<()> {
         self.modify(|batch| {

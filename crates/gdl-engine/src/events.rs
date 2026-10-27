@@ -121,6 +121,11 @@ pub enum EngineEvent {
     MovedToSharedDrive {
         name: String,
     },
+    /// Itens do banco mudaram pelo Drive (consulta de mudanças): as pastas sincronizadas que os
+    /// contêm comparam de novo.
+    ItemsChanged {
+        ids: Vec<gdl_store::ItemId>,
+    },
     /// Uma pasta não pôde mudar de Meu Drive para um Drive compartilhado (ou o contrário): a API
     /// não move pastas assim, só a web.
     FolderMoveUnsupported {

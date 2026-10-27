@@ -6,19 +6,21 @@ use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use gdl_common::names::{fit, split_ext, to_remote};
 use gdl_common::temp_files::is_local_only;
 use gdl_drive::client::{DriveClient, RemoteFile, SessionSlot};
 use gdl_drive::model::Change;
-use gdl_store::folders::{Pair, Synced};
+use gdl_store::folders::{Pair, PairState, Synced};
 use gdl_store::{Item, ItemId, ItemKind, Store};
 use md5::{Digest, Md5};
 use rustix::fs::{CWD, RenameFlags, renameat_with};
 use tokio::io::AsyncWriteExt;
 
 use crate::decide::{Action, Base, Side, decide};
+use crate::guard;
 use crate::trash::Trash;
 
 #[derive(Debug, thiserror::Error)]
@@ -60,6 +62,8 @@ pub struct FolderSync {
     trash: Trash,
     /// A palavra do sufixo de conflito, no idioma do sistema.
     conflict_word: String,
+    /// Quantas exclusões o usuário confirmou: a próxima comparação aplica até esse tanto.
+    deletes_confirmed: AtomicU64,
 }
 
 impl FolderSync {
@@ -76,11 +80,49 @@ impl FolderSync {
             pair,
             trash,
             conflict_word,
+            deletes_confirmed: AtomicU64::new(0),
         }
     }
 
-    /// Compara os dois lados e aplica o que mudou.
+    pub fn pair(&self) -> &Pair {
+        &self.pair
+    }
+
+    pub(crate) fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// O usuário confirmou as exclusões que a comparação segurou (`PairState::ConfirmDeletes`).
+    pub fn confirm_deletes(&self) -> Result<()> {
+        if let PairState::ConfirmDeletes(n) = self.state()? {
+            self.deletes_confirmed.store(n, Ordering::Relaxed);
+            self.set_state(PairState::Active)?;
+        }
+        Ok(())
+    }
+
+    fn state(&self) -> Result<PairState> {
+        let pairs = self.store.pairs()?;
+        let this = pairs.into_iter().find(|p| p.id == self.pair.id);
+        Ok(this.map_or(PairState::Active, |p| p.state))
+    }
+
+    /// Grava o estado só quando ele muda.
+    fn set_state(&self, state: PairState) -> Result<()> {
+        if self.state()? != state {
+            self.store.set_pair_state(self.pair.id, state)?;
+        }
+        Ok(())
+    }
+
+    /// Compara os dois lados e aplica o que mudou. Com a pasta do computador inacessível, o par
+    /// para (`PairState::Stopped`) sem tocar em nada: nunca é tratado como "tudo excluído".
     pub async fn reconcile(&self) -> Result<Report> {
+        if let Some(reason) = guard::root_problem(&self.pair.local) {
+            tracing::warn!(pair = self.pair.id, ?reason, "pasta do par inacessível");
+            self.set_state(PairState::Stopped(reason))?;
+            return Ok(Report::default());
+        }
         let mut report = Report::default();
         for _ in 0..MAX_PASSES {
             report.failed.clear();
@@ -105,20 +147,42 @@ impl FolderSync {
             .chain(v.bases.keys())
             .cloned()
             .collect();
-        for rel in &paths {
-            if v.gone.as_deref().is_some_and(|g| inside(rel, g)) {
+        let mut plan = vec![];
+        for rel in paths {
+            match self.plan(&v, &rel).await {
+                Ok(Action::Nothing) => {}
+                Ok(action) => plan.push((rel, action)),
+                Err(e) => self.failed(report, rel, e),
+            }
+        }
+        let is_delete = |a: &Action| matches!(a, Action::TrashLocal | Action::TrashRemote);
+        let deletes = plan.iter().filter(|(_, a)| is_delete(a)).count();
+        // A confirmação vale para o tanto que o usuário viu, e só uma vez.
+        let confirmed = self.deletes_confirmed.swap(0, Ordering::Relaxed);
+        let held = guard::is_mass_delete(deletes, v.bases.len()) && deletes as u64 > confirmed;
+        if held {
+            // O resto segue; as exclusões esperam o usuário.
+            plan.retain(|(_, a)| !is_delete(a));
+        }
+        self.set_state(match held {
+            true => PairState::ConfirmDeletes(deletes as u64),
+            false => PairState::Active,
+        })?;
+        for (rel, action) in plan {
+            if v.gone.as_deref().is_some_and(|g| inside(&rel, g)) {
                 continue;
             }
-            match self.step(&mut v, rel).await {
-                Ok(Action::Nothing) => {}
-                Ok(_) => report.applied += 1,
-                Err(e) => {
-                    tracing::warn!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
-                    report.failed.push((rel.clone(), e.to_string()));
-                }
+            match self.apply(&mut v, &rel, action).await {
+                Ok(()) => report.applied += 1,
+                Err(e) => self.failed(report, rel, e),
             }
         }
         Ok(v.again)
+    }
+
+    fn failed(&self, report: &mut Report, rel: String, e: SyncError) {
+        tracing::warn!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
+        report.failed.push((rel, e.to_string()));
     }
 
     async fn view(&self) -> Result<View> {
@@ -255,17 +319,17 @@ impl FolderSync {
         Ok(moved)
     }
 
-    /// Decide e aplica um caminho; devolve o que fez.
-    async fn step(&self, v: &mut View, rel: &str) -> Result<Action> {
+    /// O que fazer com um caminho.
+    async fn plan(&self, v: &View, rel: &str) -> Result<Action> {
         let local = v.locals.get(rel).copied();
-        let remote = v.remotes.get(rel).cloned();
-        let base = v.bases.get(rel).cloned();
+        let remote = v.remotes.get(rel);
+        let base = v.bases.get(rel);
         // O md5 local só é lido quando a decisão depende dele (ver `Side::File`).
         let need_md5 = local.is_some_and(|l| {
             !l.is_dir
-                && match &base {
+                && match base {
                     Some(b) => !l.matches(b),
-                    None => remote.as_ref().is_some_and(|r| r.kind == ItemKind::File),
+                    None => remote.is_some_and(|r| r.kind == ItemKind::File),
                 }
         });
         let md5 = match need_md5 {
@@ -273,17 +337,21 @@ impl FolderSync {
             false => None,
         };
         let local_side = local.map_or(Side::Absent, |l| l.side(md5));
-        let remote_side = remote.as_ref().map_or(Side::Absent, remote_side);
-        let base_side = base.as_ref().map(Base::from);
-        let action = v.keep_dirs(
-            rel,
-            decide(
-                &local_side,
-                &remote_side,
-                base_side.as_ref(),
-                self.pair.direction,
-            ),
+        let remote_side = remote.map_or(Side::Absent, remote_side);
+        let base_side = base.map(Base::from);
+        let action = decide(
+            &local_side,
+            &remote_side,
+            base_side.as_ref(),
+            self.pair.direction,
         );
+        Ok(v.keep_dirs(rel, action))
+    }
+
+    /// Aplica `action` a um caminho.
+    async fn apply(&self, v: &mut View, rel: &str, action: Action) -> Result<()> {
+        let local = v.locals.get(rel).copied();
+        let remote = v.remotes.get(rel).cloned();
         let path = self.path(rel);
         if matches!(
             action,
@@ -355,7 +423,7 @@ impl FolderSync {
                 v.again = true;
             }
         }
-        Ok(action)
+        Ok(())
     }
 
     async fn upload(
@@ -730,6 +798,7 @@ mod tests {
     use gdl_drive::oauth::{AccessTokenProvider, AuthError};
     use gdl_drive::retry::Backoff;
     use gdl_fake_drive::{FakeDrive, Fault, TEST_ACCESS_TOKEN};
+    use gdl_store::ItemId;
     use gdl_store::folders::{Direction, PairKind};
 
     use super::*;
@@ -1073,6 +1142,147 @@ mod tests {
             "{report:?}"
         );
         assert_eq!(w.read("y.txt"), b"nuvem");
+    }
+
+    fn state(w: &World) -> PairState {
+        let pairs = w.store.pairs().unwrap();
+        pairs.into_iter().find(|p| p.id == w.pair.id).unwrap().state
+    }
+
+    #[tokio::test]
+    async fn missing_root_stops_the_pair_without_trashing() {
+        let w = World::new().await;
+        w.write("a.txt", b"um");
+        w.reconcile().await;
+        let id = w.remote("a.txt");
+
+        std::fs::rename(&w.local, w._tmp.path().join("Renomeada")).unwrap();
+        w.reconcile().await;
+
+        assert_eq!(
+            state(&w),
+            PairState::Stopped(gdl_store::folders::StopReason::Missing)
+        );
+        assert_eq!(
+            w.fake.meta(&id)["trashed"],
+            false,
+            "nada foi para a lixeira do Drive"
+        );
+        assert_eq!(
+            w.store.synced_of(w.pair.id).unwrap().len(),
+            1,
+            "a base fica"
+        );
+
+        std::fs::rename(w._tmp.path().join("Renomeada"), &w.local).unwrap();
+        w.reconcile().await;
+        assert_eq!(state(&w), PairState::Active, "a pasta voltou, o par volta");
+    }
+
+    #[tokio::test]
+    async fn mass_delete_asks_first() {
+        let w = World::new().await;
+        for n in 0..25 {
+            w.write(&format!("f{n}.txt"), b"x");
+        }
+        w.write("fica.txt", b"y");
+        w.reconcile().await;
+        for n in 0..25 {
+            std::fs::remove_file(w.local.join(format!("f{n}.txt"))).unwrap();
+        }
+        w.write("novo.txt", b"z");
+
+        w.reconcile().await;
+        assert_eq!(state(&w), PairState::ConfirmDeletes(25));
+        assert_eq!(
+            w.fake.find_live("f0.txt").len(),
+            1,
+            "nada excluído antes de confirmar"
+        );
+        w.remote("novo.txt");
+
+        let sync = w.sync_with(8);
+        sync.confirm_deletes().unwrap();
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+        assert!(w.fake.find_live("f0.txt").is_empty());
+        assert_eq!(state(&w), PairState::Active);
+        w.remote("fica.txt");
+    }
+
+    /// Espera `done` virar verdade (até 10 s).
+    async fn eventually(mut done: impl FnMut() -> bool) {
+        for _ in 0..200 {
+            if done() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("não aconteceu a tempo");
+    }
+
+    fn quick() -> crate::watch::Timing {
+        crate::watch::Timing {
+            quiet: Duration::from_millis(300),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn file_still_being_written_waits_until_stable() {
+        use std::io::Write;
+        let w = World::new().await;
+        let (_events, rx) = tokio::sync::broadcast::channel(16);
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let sync = Arc::new(w.sync_with(8));
+        let running = tokio::spawn({
+            let (sync, shutdown) = (sync.clone(), shutdown.clone());
+            async move { sync.run(rx, quick(), shutdown).await }
+        });
+
+        let mut file = std::fs::File::create(w.local.join("gravando.txt")).unwrap();
+        for _ in 0..10 {
+            file.write_all(&[b'x'; 1000]).unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        drop(file);
+
+        eventually(|| w.fake.find_live("gravando.txt").len() == 1).await;
+        assert_eq!(w.fake.content(&w.remote("gravando.txt")).len(), 10_000);
+        assert_eq!(
+            w.fake.requests("/upload/drive/v3/files"),
+            1,
+            "subiu uma vez, inteiro"
+        );
+        shutdown.cancel();
+        running.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_change_in_the_drive_is_brought_when_the_engine_says_so() {
+        let w = World::new().await;
+        let id = w.fake.add_file(&w.folder, "a.txt", b"um".to_vec());
+        w.reconcile().await;
+        let (events, rx) = tokio::sync::broadcast::channel(16);
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let sync = Arc::new(w.sync_with(8));
+        let running = tokio::spawn({
+            let (sync, shutdown) = (sync.clone(), shutdown.clone());
+            async move { sync.run(rx, quick(), shutdown).await }
+        });
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        w.fake.modify_remote(&id, b"da web".to_vec());
+        w.refresh().await;
+        events
+            .send(gdl_engine::events::EngineEvent::ItemsChanged {
+                ids: vec![ItemId(id)],
+            })
+            .unwrap();
+
+        eventually(|| std::fs::read(w.local.join("a.txt")).unwrap() == b"da web").await;
+        shutdown.cancel();
+        running.await.unwrap();
     }
 
     #[tokio::test]

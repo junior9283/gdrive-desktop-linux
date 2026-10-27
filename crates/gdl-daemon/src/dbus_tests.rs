@@ -1,6 +1,10 @@
 //! Testes da interface D-Bus do serviço, contra o Drive simulado e uma montagem real.
 
 use gdl_drive::token_store::TokenStore;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use gdl_ipc::ServiceError;
 use gdl_store::PinState;
 
 use crate::testutil::{Harness, blocking, status_until, wait_until};
@@ -2460,4 +2464,169 @@ async fn shared_drives_folder_menu_opens_the_screens_of_its_account() {
         .await
         .unwrap_err();
     assert_eq!(err.short_name(), "NotFound", "{err}");
+}
+
+// ---- Pastas do computador ----
+
+/// A pasta "Computadores/<este computador>" no Drive simulado, como o app a cria.
+fn computer_folder(h: &Harness) -> String {
+    let found = h.fake.find_live(crate::testutil::COMPUTER_NAME);
+    assert_eq!(found.len(), 1, "pasta do computador: {found:?}");
+    found[0].clone()
+}
+
+fn local_folder(h: &Harness, name: &str) -> PathBuf {
+    let path = h.home.join(name);
+    std::fs::create_dir_all(&path).unwrap();
+    path
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn added_folder_syncs_to_computers() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    let path = docs.to_str().unwrap();
+
+    let check = h.proxy.check_local_folder("", path).await.unwrap();
+    assert_eq!(
+        (
+            check.refusal.as_str(),
+            check.files,
+            check.size,
+            check.exists
+        ),
+        ("", 1, 2, false)
+    );
+    h.proxy.add_local_folder("", path, false).await.unwrap();
+
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+    let file = h.fake.meta(&h.fake.find_live("a.txt")[0]);
+    let folder = h.fake.meta(file["parents"][0].as_str().unwrap());
+    assert_eq!(folder["name"], "Documentos");
+    let computer = h.fake.meta(folder["parents"][0].as_str().unwrap());
+    assert_eq!(computer["id"], computer_folder(&h).as_str());
+    assert_eq!(
+        computer["appProperties"]["gdl.computer"],
+        crate::testutil::COMPUTER_ID
+    );
+    let computers = h.fake.meta(computer["parents"][0].as_str().unwrap());
+    assert_eq!(computers["appProperties"]["gdl.role"], "computers");
+    let listed = h.proxy.local_folders().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        (listed[0].path.as_str(), listed[0].state.as_str()),
+        (path, "active")
+    );
+    let again = h.proxy.check_local_folder("", path).await.unwrap();
+    assert_eq!(
+        again.refusal, "nested",
+        "a mesma pasta não entra duas vezes"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn folders_resume_after_restart() {
+    let mut h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    h.proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("pasta no Drive", || {
+        h.fake.find_live("Documentos").len() == 1
+    })
+    .await;
+
+    h.restart(None).await;
+    std::fs::write(docs.join("depois.txt"), b"dois").unwrap();
+
+    wait_until("depois.txt no Drive", || {
+        h.fake.find_live("depois.txt").len() == 1
+    })
+    .await;
+    assert_eq!(h.proxy.local_folders().await.unwrap().len(), 1);
+    assert_eq!(
+        h.fake.find_live(crate::testutil::COMPUTER_NAME).len(),
+        1,
+        "a mesma pasta de apoio"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn merge_joins_an_existing_folder() {
+    let h = Harness::new().await;
+    // Uma instalação anterior deste computador deixou a pasta no Drive.
+    let root = h.fake.root_id();
+    let computers = h.fake.add_folder(&root, "Computadores");
+    h.fake
+        .set_app_properties(&computers, &[("gdl.role", "computers")]);
+    let computer = h
+        .fake
+        .add_folder(&computers, crate::testutil::COMPUTER_NAME);
+    h.fake
+        .set_app_properties(&computer, &[("gdl.computer", crate::testutil::COMPUTER_ID)]);
+    let old = h.fake.add_folder(&computer, "Documentos");
+    h.fake.add_file(&old, "nuvem.txt", b"guardado".to_vec());
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    let path = docs.to_str().unwrap();
+
+    let check = h.proxy.check_local_folder("", path).await.unwrap();
+    assert!(check.exists, "o configurador pergunta se junta");
+    h.proxy.add_local_folder("", path, true).await.unwrap();
+
+    wait_until("nuvem.txt no computador", || {
+        docs.join("nuvem.txt").exists()
+    })
+    .await;
+    assert_eq!(h.fake.find_live("Documentos"), [old]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disable_mirrored_folders_refuses() {
+    let h = Harness::with_policy("DisableMirroredFolders = true").await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+
+    let err = h
+        .proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, ServiceError::Refused(r) if r == "folders-disabled"),
+        "{err:?}"
+    );
+    assert!(h.proxy.local_folders().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn signing_out_stops_the_folders_and_keeps_the_files() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    h.proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+
+    h.proxy.logout("", "discard", "").await.unwrap();
+    std::fs::write(docs.join("depois.txt"), b"dois").unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    assert!(
+        h.fake.find_live("depois.txt").is_empty(),
+        "o par parou com a conta"
+    );
+    assert_eq!(
+        std::fs::read(docs.join("a.txt")).unwrap(),
+        b"um",
+        "os arquivos ficam"
+    );
+    assert!(h.proxy.local_folders().await.unwrap().is_empty());
 }

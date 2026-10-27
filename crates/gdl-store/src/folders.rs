@@ -99,6 +99,15 @@ impl Store {
         rows.collect()
     }
 
+    pub fn pair(&self, id: i64) -> Result<Option<Pair>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, local, remote_id, kind, direction, state FROM folder_pairs WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_and_then([id], pair_from_row)?;
+        rows.next().transpose()
+    }
+
     /// Desfaz o par e esquece o estado sincronizado dele (os arquivos ficam onde estão).
     pub fn remove_pair(&self, id: i64) -> Result<()> {
         self.modify(|batch| {

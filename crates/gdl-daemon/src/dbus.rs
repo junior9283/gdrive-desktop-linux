@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
-    AccountInfo, ActivityItem, FolderItem, MenuEntry, NotificationItem, NotificationSetting,
-    OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError, SharedDriveItem, SharedItem,
-    Sharing, Status, SyncErrorItem, Versions,
+    AccountInfo, ActivityItem, FolderCheck, FolderItem, LocalFolder, MenuEntry, NotificationItem,
+    NotificationSetting, OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError,
+    SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem, Versions,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -238,6 +238,44 @@ impl Service {
         self.daemon.shared_drives(account).await
     }
 
+    async fn local_folders(&self) -> Result<Vec<LocalFolder>, ServiceError> {
+        self.daemon.local_folders().await
+    }
+
+    async fn check_local_folder(
+        &self,
+        account: &str,
+        path: &str,
+    ) -> Result<FolderCheck, ServiceError> {
+        self.daemon.check_local_folder(account, path).await
+    }
+
+    async fn add_local_folder(
+        &self,
+        account: &str,
+        path: &str,
+        merge: bool,
+    ) -> Result<i64, ServiceError> {
+        self.daemon.add_local_folder(account, path, merge).await
+    }
+
+    async fn remove_local_folder(&self, account: &str, id: i64) -> Result<(), ServiceError> {
+        self.daemon.remove_local_folder(account, id).await
+    }
+
+    async fn relocate_local_folder(
+        &self,
+        account: &str,
+        id: i64,
+        path: &str,
+    ) -> Result<(), ServiceError> {
+        self.daemon.relocate_local_folder(account, id, path).await
+    }
+
+    async fn confirm_folder_deletes(&self, account: &str, id: i64) -> Result<(), ServiceError> {
+        self.daemon.confirm_folder_deletes(account, id).await
+    }
+
     /// Liga exatamente os Drives de `enabled` e desliga os outros. Com envio pendente num que seria
     /// desligado, recusa com `PendingUploads` e nada muda.
     async fn set_shared_drives(
@@ -367,6 +405,9 @@ impl Service {
 
     #[zbus(signal)]
     pub async fn preferences_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn local_folders_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 
     #[zbus(signal)]
     pub async fn quitting(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;

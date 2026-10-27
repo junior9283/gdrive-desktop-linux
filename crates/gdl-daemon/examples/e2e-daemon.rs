@@ -80,6 +80,12 @@ async fn main() -> Result<(), Error> {
         ui: browser,
         backoff: Backoff::default(),
         intervals: Intervals::default(),
+        // Fixo: o e2e não pergunta nada ao barramento do sistema.
+        computer: gdl_daemon::daemon::Computer {
+            id: "e2e0000000000000".into(),
+            name: "Computador e2e".into(),
+        },
+        folder_timing: Default::default(),
     })?;
     let conn = zbus::connection::Builder::session()?
         .serve_at(OBJECT_PATH, Service::new(daemon.clone()))?

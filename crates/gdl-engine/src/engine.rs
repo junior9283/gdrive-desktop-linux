@@ -234,6 +234,10 @@ impl Engine {
         &self.cache
     }
 
+    pub fn client(&self) -> &Arc<DriveClient> {
+        &self.client
+    }
+
     pub fn store(&self) -> &Arc<Store> {
         &self.store
     }

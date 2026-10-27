@@ -300,6 +300,32 @@ pub struct SharedDriveItem {
     pub enabled: bool,
 }
 
+/// Uma pasta do computador sincronizada com o Drive (`LocalFolders`).
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct LocalFolder {
+    /// O e-mail da conta.
+    pub account: String,
+    /// Identifica a pasta dentro da conta.
+    pub id: i64,
+    pub path: String,
+    /// `active`; `stopped-missing`, `stopped-no-permission`, `stopped-moved`; ou
+    /// `confirm-deletes` (as exclusões em `deletes` esperam `ConfirmFolderDeletes`).
+    pub state: String,
+    pub deletes: u64,
+}
+
+/// O que `CheckLocalFolder` acha de uma pasta antes de adicioná-la.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct FolderCheck {
+    /// Vazio se a pasta serve; senão `missing`, `unreadable`, `nested`, `contains` ou `network`.
+    pub refusal: String,
+    pub size: u64,
+    pub files: u64,
+    /// O Drive já tem, neste computador, uma pasta com o mesmo nome (reinstalação): a interface
+    /// pergunta se junta as duas.
+    pub exists: bool,
+}
+
 /// Uma pasta de destino de "Adicionar atalho ao Drive" (`Folders`).
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FolderItem {
@@ -478,6 +504,21 @@ pub trait Service {
     ) -> Result<(), ServiceError>;
     /// Os Drives compartilhados da conta, por nome, com o estado de ligado de cada um.
     fn shared_drives(&self, account: &str) -> Result<Vec<SharedDriveItem>, ServiceError>;
+    /// As pastas do computador sincronizadas, de todas as contas.
+    fn local_folders(&self) -> Result<Vec<LocalFolder>, ServiceError>;
+    fn check_local_folder(&self, account: &str, path: &str) -> Result<FolderCheck, ServiceError>;
+    /// Liga a pasta a "Computadores/<este computador>/<nome>" no Drive; `merge` junta com a pasta
+    /// de mesmo nome que já esteja lá. Recusa com `Refused` (`folders-disabled` ou o motivo de
+    /// `CheckLocalFolder`). Devolve o ID da pasta.
+    fn add_local_folder(&self, account: &str, path: &str, merge: bool)
+    -> Result<i64, ServiceError>;
+    /// Para de sincronizar (os arquivos ficam no computador e no Drive).
+    fn remove_local_folder(&self, account: &str, id: i64) -> Result<(), ServiceError>;
+    /// A pasta mudou de lugar no computador: o par continua do novo caminho.
+    fn relocate_local_folder(&self, account: &str, id: i64, path: &str)
+    -> Result<(), ServiceError>;
+    /// Aplica as exclusões em massa que a pasta segurou.
+    fn confirm_folder_deletes(&self, account: &str, id: i64) -> Result<(), ServiceError>;
     /// Liga exatamente os Drives de `enabled` e desliga os outros. Com envio pendente num que seria
     /// desligado, recusa com `PendingUploads` e nada muda.
     fn set_shared_drives(&self, account: &str, enabled: &[&str]) -> Result<(), ServiceError>;
@@ -550,6 +591,9 @@ pub trait Service {
     /// Alguma preferência mudou (por `SetPreferences` ou `ResetPreferences`).
     #[zbus(signal)]
     fn preferences_changed(&self) -> zbus::Result<()>;
+    /// A lista de pastas do computador ou o estado de uma delas mudou.
+    #[zbus(signal)]
+    fn local_folders_changed(&self) -> zbus::Result<()>;
     /// O serviço vai sair (`Quit`).
     #[zbus(signal)]
     fn quitting(&self) -> zbus::Result<()>;

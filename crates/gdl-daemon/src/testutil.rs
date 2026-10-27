@@ -81,6 +81,10 @@ impl FakeNetworkManager {
     }
 }
 
+/// Este computador nos testes (sem perguntar ao barramento do sistema).
+pub(crate) const COMPUTER_ID: &str = "0123456789abcdef";
+pub(crate) const COMPUTER_NAME: &str = "Computador de teste";
+
 pub(crate) struct Harness {
     pub fake: FakeDrive,
     pub daemon: Arc<Daemon>,
@@ -359,6 +363,14 @@ fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
             uploads_idle: Duration::from_millis(20),
             maintenance: Duration::from_millis(50),
             eviction: Duration::from_millis(200),
+        },
+        computer: crate::daemon::Computer {
+            id: COMPUTER_ID.into(),
+            name: COMPUTER_NAME.into(),
+        },
+        folder_timing: gdl_folders::watch::Timing {
+            quiet: Duration::from_millis(100),
+            ..Default::default()
         },
     }
 }

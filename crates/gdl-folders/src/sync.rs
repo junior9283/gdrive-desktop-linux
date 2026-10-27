@@ -64,6 +64,10 @@ pub struct FolderSync {
     conflict_word: String,
     /// Quantas exclusões o usuário confirmou: a próxima comparação aplica até esse tanto.
     deletes_confirmed: AtomicU64,
+    /// Pede uma comparação ao laço (`run`) agora.
+    pub(crate) wake: tokio::sync::Notify,
+    /// Muda a cada troca do estado do par (para a interface).
+    state_changed: tokio::sync::watch::Sender<()>,
 }
 
 impl FolderSync {
@@ -81,6 +85,8 @@ impl FolderSync {
             trash,
             conflict_word,
             deletes_confirmed: AtomicU64::new(0),
+            wake: tokio::sync::Notify::new(),
+            state_changed: tokio::sync::watch::Sender::new(()),
         }
     }
 
@@ -97,13 +103,18 @@ impl FolderSync {
         if let PairState::ConfirmDeletes(n) = self.state()? {
             self.deletes_confirmed.store(n, Ordering::Relaxed);
             self.set_state(PairState::Active)?;
+            self.wake.notify_one();
         }
         Ok(())
     }
 
+    /// Avisa a cada troca de estado do par.
+    pub fn state_changes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.state_changed.subscribe()
+    }
+
     fn state(&self) -> Result<PairState> {
-        let pairs = self.store.pairs()?;
-        let this = pairs.into_iter().find(|p| p.id == self.pair.id);
+        let this = self.store.pair(self.pair.id)?;
         Ok(this.map_or(PairState::Active, |p| p.state))
     }
 
@@ -111,6 +122,7 @@ impl FolderSync {
     fn set_state(&self, state: PairState) -> Result<()> {
         if self.state()? != state {
             self.store.set_pair_state(self.pair.id, state)?;
+            self.state_changed.send_replace(());
         }
         Ok(())
     }

@@ -109,6 +109,9 @@ pub struct Config {
     pub ui: PathBuf,
     pub backoff: Backoff,
     pub intervals: Intervals,
+    /// Este computador no Drive ("Computadores/<nome>").
+    pub computer: Computer,
+    pub folder_timing: gdl_folders::watch::Timing,
 }
 
 /// A conta conectada. Ao sair, desmonta e depois para o motor (os campos caem nessa ordem).
@@ -121,11 +124,16 @@ struct Account {
     /// Montada ao lado da pasta preferida, não nela: continua assim nas próximas partidas.
     beside: bool,
     shutdown: CancellationToken,
+    /// As pastas do computador da conta, cada uma com seu laço.
+    folders: Arc<folders::Runners>,
     _session: fuser::BackgroundSession,
     _stop: DropGuard,
 }
 
+mod folders;
 mod sharing;
+
+pub use folders::Computer;
 
 fn failed(e: impl std::fmt::Display) -> ServiceError {
     ServiceError::Failed(e.to_string())
@@ -1134,6 +1142,8 @@ impl Daemon {
         self.forward_events(email.into(), engine.subscribe(), shutdown.clone());
         self.forward_activity(engine.activity_changes(), shutdown.clone());
         self.forward_states(engine.clone(), mount_point.clone(), shutdown.clone());
+        let folders = Arc::new(folders::Runners::default());
+        self.start_folders(&engine, &folders, &shutdown);
         let moved = mount_point != preferred;
         let account = Account {
             email: email.into(),
@@ -1141,6 +1151,7 @@ impl Daemon {
             access,
             mount_point,
             beside: is_beside,
+            folders,
             _stop: shutdown.clone().drop_guard(),
             shutdown,
             _session: session,

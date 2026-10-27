@@ -7,6 +7,8 @@ folder-canceled-uploads = .Uploads cancelados
 folder-shortcut-targets = .shortcut-targets-by-id
 
 # Montagem
+conflict-word = conflito
+computers-folder = Computadores
 mount-moved = A pasta do Drive foi aberta em { $path }
 
 # Página mostrada no navegador ao fim do login

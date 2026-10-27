@@ -77,6 +77,8 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         ui: Launcher::default_program(),
         backoff: Backoff::default(),
         intervals: Intervals::default(),
+        computer: gdl_daemon::daemon::Computer::detect().await,
+        folder_timing: Default::default(),
     };
     let daemon = Daemon::new(config)?;
     let conn = zbus::connection::Builder::session()?

@@ -632,10 +632,12 @@ impl DriveClient {
         self.create(&meta).await
     }
 
-    /// Os itens fora da lixeira com a `appProperty` `key` = `value`.
+    /// Os itens da própria conta, fora da lixeira, com a `appProperty` `key` = `value`. Só os da
+    /// conta: uma pasta compartilhada por outra pessoa com as mesmas propriedades não é tomada
+    /// como pasta de apoio (e não recebe os arquivos).
     pub async fn find_by_app_property(&self, key: &str, value: &str) -> Result<Vec<RemoteFile>> {
         let q = format!(
-            "appProperties has {{ key={} and value={} }} and trashed = false",
+            "appProperties has {{ key={} and value={} }} and 'me' in owners and trashed = false",
             literal(key),
             literal(value)
         );

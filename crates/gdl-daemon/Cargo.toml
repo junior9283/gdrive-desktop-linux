@@ -17,12 +17,14 @@ fuser.workspace = true
 gdl-common.workspace = true
 gdl-drive.workspace = true
 gdl-engine.workspace = true
+gdl-folders.workspace = true
 gdl-fs.workspace = true
 gdl-ipc.workspace = true
 gdl-store.workspace = true
 regex.workspace = true
-rustix = { workspace = true, features = ["fs", "process"] }
+rustix = { workspace = true, features = ["fs", "process", "system"] }
 ron.workspace = true
+sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

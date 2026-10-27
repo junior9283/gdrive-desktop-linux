@@ -191,6 +191,16 @@ impl FakeDrive {
         state.record_change(id);
     }
 
+    /// Grava `appProperties` no item (como o app faria por outra instalação).
+    pub fn set_app_properties(&self, id: &str, props: &[(&str, &str)]) {
+        let mut state = self.shared.state();
+        let file = state.file_mut(id);
+        for (k, v) in props {
+            file.app_properties.insert((*k).into(), (*v).into());
+        }
+        state.record_change(id);
+    }
+
     /// Simula outra pessoa movendo o item para outra pasta.
     pub fn move_remote(&self, id: &str, new_parent: &str) {
         let mut state = self.shared.state();

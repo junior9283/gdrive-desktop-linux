@@ -7,6 +7,8 @@ folder-canceled-uploads = .Canceled uploads
 folder-shortcut-targets = .shortcut-targets-by-id
 
 # Mount
+conflict-word = conflict
+computers-folder = Computers
 mount-moved = The Drive folder was opened at { $path }
 
 # Page shown in the browser at the end of sign-in

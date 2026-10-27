@@ -93,12 +93,17 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         return Ok(Exit::Quit);
     }
     daemon.attach(conn.clone()).await?;
-    // A conexão limitada vem do NetworkManager, no barramento do sistema.
+    // A conexão limitada (NetworkManager) e os dispositivos (UDisks2) vêm do barramento do
+    // sistema.
     match zbus::Connection::system().await {
-        Ok(system) => daemon.watch_metered(system),
-        Err(e) => {
-            tracing::info!(erro = %e, "sem barramento do sistema: a conexão limitada não pausa")
+        Ok(system) => {
+            daemon.watch_metered(system.clone());
+            daemon.watch_devices(system);
         }
+        Err(e) => tracing::info!(
+            erro = %e,
+            "sem barramento do sistema: sem pausa na conexão limitada nem dispositivos"
+        ),
     }
     // A reconexão (que pode indexar o Drive inteiro) corre em paralelo à espera do SIGTERM.
     let mut term = signal(SignalKind::terminate())?;

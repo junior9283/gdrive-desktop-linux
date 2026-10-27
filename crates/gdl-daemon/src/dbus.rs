@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
-    AccountInfo, ActivityItem, FolderCheck, FolderItem, LocalFolder, MenuEntry, MirrorCheck,
-    NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary, Pref, SearchResult,
-    ServiceError, SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem, Versions,
+    AccountInfo, ActivityItem, DeviceItem, FolderCheck, FolderItem, LocalFolder, MenuEntry,
+    MirrorCheck, NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary, Pref,
+    SearchResult, ServiceError, SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem,
+    Versions,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -240,6 +241,22 @@ impl Service {
 
     async fn local_folders(&self) -> Result<Vec<LocalFolder>, ServiceError> {
         self.daemon.local_folders().await
+    }
+
+    async fn devices(&self) -> Vec<DeviceItem> {
+        self.daemon.devices()
+    }
+
+    async fn backup_device(&self, id: &str, remember: bool) -> Result<(), ServiceError> {
+        self.daemon.backup_device(id, remember).await
+    }
+
+    async fn ignore_device(&self, id: &str) -> Result<(), ServiceError> {
+        self.daemon.ignore_device(id).await
+    }
+
+    async fn forget_device(&self, id: &str) -> Result<(), ServiceError> {
+        self.daemon.forget_device(id).await
     }
 
     async fn mirror(&self, account: &str) -> Result<String, ServiceError> {

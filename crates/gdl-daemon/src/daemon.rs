@@ -131,6 +131,7 @@ struct Account {
     _stop: DropGuard,
 }
 
+mod devices;
 mod folders;
 mod mirror;
 mod sharing;
@@ -321,6 +322,8 @@ pub struct Daemon {
     metered: AtomicBool,
     /// O usuário pausou: vale também para a conta que entrar depois.
     paused: AtomicBool,
+    /// Dispositivos removíveis conectados e as escolhas para eles.
+    devices: devices::Devices,
     /// Contas guardadas que não subiram nesta partida (e se ficam ao lado): continuam no
     /// arquivo, para a próxima tentar de novo.
     not_started: Mutex<Vec<SavedAccount>>,
@@ -359,6 +362,7 @@ impl Daemon {
             bandwidth,
             metered: AtomicBool::new(false),
             paused: AtomicBool::new(false),
+            devices: devices::Devices::load(config.paths.data_dir.join("devices")),
             not_started: Mutex::default(),
             layout: Layout::new(&i18n),
             i18n,

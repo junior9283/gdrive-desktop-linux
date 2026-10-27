@@ -4,6 +4,7 @@ pub mod cosmic;
 pub mod daemon;
 pub mod dbus;
 pub mod desktop;
+pub mod devices;
 pub mod history;
 pub mod menu;
 pub mod metered;
@@ -11,6 +12,14 @@ pub mod mount;
 pub mod notify;
 
 pub use daemon::{Api, Config, Daemon};
+
+/// O último componente do caminho, como texto.
+pub(crate) fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
 
 /// Trava que não fica inutilizável se uma thread entrou em pânico com ela.
 pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -20,6 +29,8 @@ pub use dbus::Service;
 
 #[cfg(test)]
 mod dbus_tests;
+#[cfg(test)]
+mod devices_tests;
 #[cfg(test)]
 mod no_data_loss_tests;
 #[cfg(test)]

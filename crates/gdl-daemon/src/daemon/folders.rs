@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{Daemon, failed};
 use crate::dbus::Service;
+use crate::file_name;
 use crate::notify::{self, Notification};
 
 /// `appProperties` das pastas de apoio: achadas por elas, não pelo nome (que o usuário pode
@@ -241,16 +242,7 @@ impl Daemon {
         let local = self.validated(path, None).await?;
         let remote = match self.existing_folder(engine, &local).await? {
             Some(id) if merge => id,
-            _ => {
-                let computer = self.computer_folder(engine).await?;
-                let name = free_name(engine, &computer, &file_name(&local))?;
-                let made = engine
-                    .client()
-                    .create_folder(&computer, &name, None)
-                    .await
-                    .map_err(failed)?;
-                remember(engine, made)?
-            }
+            _ => self.new_computer_folder(engine, &file_name(&local)).await?,
         };
         let id = engine
             .store()
@@ -258,6 +250,22 @@ impl Daemon {
             .map_err(failed)?;
         self.restart_folder(&account, id).await?;
         Ok(id)
+    }
+
+    /// Uma pasta nova em "Computadores/<este computador>", chamada `name` (ou `name (2)`…).
+    pub(super) async fn new_computer_folder(
+        &self,
+        engine: &Arc<Engine>,
+        name: &str,
+    ) -> Result<String, ServiceError> {
+        let computer = self.computer_folder(engine).await?;
+        let name = free_name(engine, &computer, name)?;
+        let made = engine
+            .client()
+            .create_folder(&computer, &name, None)
+            .await
+            .map_err(failed)?;
+        remember(engine, made)
     }
 
     pub async fn remove_local_folder(&self, account: &str, id: i64) -> Result<(), ServiceError> {
@@ -423,7 +431,7 @@ impl Daemon {
         pairs
     }
 
-    async fn emit_local_folders_changed(&self) {
+    pub(super) async fn emit_local_folders_changed(&self) {
         if let Some(emitter) = self.emitter() {
             let _ = Service::local_folders_changed(&emitter).await;
         }
@@ -621,13 +629,6 @@ fn remember(engine: &Engine, r: RemoteFile) -> Result<String, ServiceError> {
     gdl_engine::changes::apply_changes(engine.store(), vec![Change::Upsert(Box::new(r))])
         .map_err(failed)?;
     Ok(id)
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned()
 }
 
 pub(super) fn refusal_text(refusal: Refusal) -> &'static str {

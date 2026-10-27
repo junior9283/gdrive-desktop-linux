@@ -21,7 +21,7 @@ pub const OPEN_LOST_FOUND: &str = "open-lost-found";
 pub const OPEN_CANCELED: &str = "open-canceled";
 /// Ação do aviso de gravação com a sincronização pausada que a retoma.
 pub const RESUME: &str = "resume";
-/// Ação dos avisos de pasta do computador que abre Preferências > Meu computador.
+/// Ação dos avisos de pasta do computador e de dispositivo que abre Preferências > Meu computador.
 pub const OPEN_FOLDERS: &str = "open-folders";
 /// Ação do aviso de conta sem login que abre a janela no login dela.
 pub const SIGN_IN: &str = "sign-in";
@@ -219,6 +219,64 @@ pub fn for_folder(pair: i64, name: &str, state: &PairState, i18n: &I18n) -> Opti
     })
 }
 
+/// A pergunta de um dispositivo que entrou: "Fazer backup" abre Preferências > Meu computador,
+/// onde ele aparece com a opção de lembrar; fechar é "Agora não".
+pub fn device_ask(id: &str, label: &str, i18n: &I18n) -> Notification {
+    let action = (OPEN_FOLDERS, i18n.tr("notify-device-ask-action", &[]));
+    let body = i18n.tr("notify-device-ask-body", &[("name", label)]);
+    device_note(
+        id,
+        "device-ask",
+        "notify-device-ask-title",
+        body,
+        Some(action),
+        i18n,
+    )
+}
+
+/// O fim do backup de um dispositivo (no lugar da pergunta): pode remover, ou o erro.
+pub fn device_done(id: &str, label: &str, error: Option<&str>, i18n: &I18n) -> Notification {
+    match error {
+        None => {
+            let body = i18n.tr("notify-device-done-body", &[("name", label)]);
+            device_note(
+                id,
+                "device-done",
+                "notify-device-done-title",
+                body,
+                None,
+                i18n,
+            )
+        }
+        Some(error) => {
+            let args = [("name", label), ("error", error)];
+            let body = i18n.tr("notify-device-error-body", &args);
+            let action = (OPEN_FOLDERS, i18n.tr("notify-folder-action", &[]));
+            let title = "notify-device-error-title";
+            device_note(id, "device-error", title, body, Some(action), i18n)
+        }
+    }
+}
+
+/// Um aviso por dispositivo: o novo substitui o anterior.
+fn device_note(
+    id: &str,
+    kind_id: &'static str,
+    title: &str,
+    body: String,
+    action: Option<(&'static str, String)>,
+    i18n: &I18n,
+) -> Notification {
+    Notification {
+        kind_id,
+        summary: i18n.tr(title, &[]),
+        body,
+        action,
+        replaces_key: Some(format!("device:{id}")),
+        account: String::new(),
+    }
+}
+
 /// Envia notificações pela conexão do serviço (no barramento de sessão, ao servidor de
 /// notificações da área de trabalho).
 pub struct Notifier {
@@ -384,6 +442,25 @@ mod tests {
                 let key = format!("notify-kind-{kind}");
                 assert_ne!(i18n.tr(&key, &[]), key, "{lang}: {kind} sem rótulo");
             }
+        }
+    }
+
+    #[test]
+    fn device_notes_replace_each_other_and_have_texts() {
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            let ask = device_ask("AAAA", "FOTOS", &i18n);
+            let done = device_done("AAAA", "FOTOS", None, &i18n);
+            let error = device_done("AAAA", "FOTOS", Some("sem espaço"), &i18n);
+            for note in [&ask, &done, &error] {
+                assert!(!note.summary.starts_with("notify-"), "{lang}: {note:?}");
+                assert!(note.body.contains("FOTOS"), "{lang}: {note:?}");
+                assert_eq!(note.slot(), ask.slot(), "um aviso por dispositivo");
+            }
+            assert!(error.body.contains("sem espaço"), "{error:?}");
+            assert_eq!(ask.action.map(|a| a.0), Some(OPEN_FOLDERS));
+            assert_eq!(done.action, None);
+            assert_eq!(error.action.map(|a| a.0), Some(OPEN_FOLDERS));
         }
     }
 

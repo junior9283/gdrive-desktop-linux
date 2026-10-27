@@ -314,6 +314,20 @@ pub struct LocalFolder {
     pub deletes: u64,
 }
 
+/// Um dispositivo removível (`Devices`): conectado agora ou com uma escolha guardada.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct DeviceItem {
+    /// O UUID do sistema de arquivos (senão rótulo e tamanho).
+    pub id: String,
+    pub label: String,
+    /// Onde está montado; vazio se desconectado.
+    pub path: String,
+    /// `backup` (sempre fazer backup), `ignored` ou vazio (perguntar).
+    pub choice: String,
+    /// Um backup dele está em andamento.
+    pub busy: bool,
+}
+
 /// O que `CheckLocalFolder` acha de uma pasta antes de adicioná-la.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FolderCheck {
@@ -534,6 +548,16 @@ pub trait Service {
     /// `CheckLocalFolder`). Devolve o ID da pasta.
     fn add_local_folder(&self, account: &str, path: &str, merge: bool)
     -> Result<i64, ServiceError>;
+    /// Os dispositivos removíveis conectados e os de escolha guardada.
+    fn devices(&self) -> Result<Vec<DeviceItem>, ServiceError>;
+    /// Faz backup do dispositivo conectado `id` em "Computadores/<este computador>/<rótulo>"
+    /// (só envio); `remember` faz backup sozinho sempre que ele for conectado. Recusa com
+    /// `Refused` (`devices-disabled`).
+    fn backup_device(&self, id: &str, remember: bool) -> Result<(), ServiceError>;
+    /// Não pergunta mais por este dispositivo.
+    fn ignore_device(&self, id: &str) -> Result<(), ServiceError>;
+    /// Esquece a escolha guardada (backup sempre ou ignorado): volta a perguntar.
+    fn forget_device(&self, id: &str) -> Result<(), ServiceError>;
     /// Para de sincronizar (os arquivos ficam no computador e no Drive).
     fn remove_local_folder(&self, account: &str, id: i64) -> Result<(), ServiceError>;
     /// A pasta mudou de lugar no computador: o par continua do novo caminho.
@@ -619,7 +643,7 @@ pub trait Service {
     /// Alguma preferência mudou (por `SetPreferences` ou `ResetPreferences`).
     #[zbus(signal)]
     fn preferences_changed(&self) -> zbus::Result<()>;
-    /// A lista de pastas do computador ou o estado de uma delas mudou.
+    /// A lista de pastas do computador ou de dispositivos, ou o estado de um deles, mudou.
     #[zbus(signal)]
     fn local_folders_changed(&self) -> zbus::Result<()>;
     /// O serviço vai sair (`Quit`).

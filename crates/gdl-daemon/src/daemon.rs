@@ -707,7 +707,7 @@ impl Daemon {
             // A tela de login da conta é da janela; o serviço só pede para abri-la.
             SIGN_IN => {
                 self.account_engine(account).await?;
-                self.open_screen(format!("sign-in:{account}"));
+                self.open_screen(format!("onboarding:resume:{account}"));
                 return Ok(());
             }
             OPEN_LOST_FOUND => KeptFolder::LostAndFound,
@@ -814,6 +814,46 @@ impl Daemon {
         }
     }
 
+    /// Por que uma conta nova não pode entrar com `connected` contas (`too-many-accounts` ou
+    /// `add-account-disabled`); `None` se pode.
+    fn add_account_refusal(&self, connected: usize) -> Option<&'static str> {
+        if connected >= MAX_ACCOUNTS {
+            Some("too-many-accounts")
+        } else if connected > 0 && self.prefs().disable_add_account {
+            Some("add-account-disabled")
+        } else {
+            None
+        }
+    }
+
+    /// As credenciais do login: as informadas ou, com o Client ID vazio, as já guardadas (da conta
+    /// que entra de novo ou, na falta delas, da primeira que as tem), para quem adiciona outra
+    /// conta sem digitá-las de novo.
+    async fn credentials_for(
+        &self,
+        given: ClientCredentials,
+        expected: &str,
+    ) -> Result<ClientCredentials, ServiceError> {
+        if !given.client_id.is_empty() {
+            return Ok(given);
+        }
+        let emails: Vec<String> = self
+            .accounts
+            .lock()
+            .await
+            .iter()
+            .map(|a| a.email.clone())
+            .collect();
+        for email in std::iter::once(expected.to_string()).chain(emails) {
+            if let Some((creds, _)) = self.config.tokens.load(&email).await.map_err(failed)? {
+                return Ok(creds);
+            }
+        }
+        Err(ServiceError::InvalidArgs(
+            "sem Client ID para entrar".into(),
+        ))
+    }
+
     /// Começa o login no navegador e devolve o endereço (para quem não tem navegador aqui). O
     /// resultado chega pelo sinal `LoginFinished`.
     pub async fn begin_login(
@@ -828,12 +868,10 @@ impl Daemon {
         };
         // Entrar de novo numa conta que já está na lista não cria conta, então não esbarra nos
         // limites.
-        if !resuming && connected >= MAX_ACCOUNTS {
-            return Err(ServiceError::Refused("too-many-accounts".into()));
+        if !resuming && let Some(reason) = self.add_account_refusal(connected) {
+            return Err(ServiceError::Refused(reason.into()));
         }
-        if !resuming && connected > 0 && self.prefs().disable_add_account {
-            return Err(ServiceError::Refused("add-account-disabled".into()));
-        }
+        let creds = self.credentials_for(creds, expected).await?;
         let expected = expected.to_string();
         let flow = LoginFlow::start(creds.clone(), self.config.oauth.clone())
             .await
@@ -1203,10 +1241,12 @@ impl Daemon {
             .iter()
             .map(|a| (a.email.clone(), a.mount_point.clone(), a.engine.clone()))
             .collect();
+        let can_add_account = self.add_account_refusal(listed.len()).is_none();
         if listed.is_empty() {
             return Ok(Status {
                 state: SyncState::SignedOut.as_str().into(),
                 remaining_secs: -1,
+                can_add_account,
                 ..Status::default()
             });
         }
@@ -1218,6 +1258,7 @@ impl Daemon {
                 email,
                 mount_point: mount_point.display().to_string(),
                 state: summary.state().as_str().into(),
+                pending_uploads: summary.pending_uploads,
             });
             summaries.push(summary);
         }
@@ -1246,6 +1287,7 @@ impl Daemon {
             last_sync_ms: summary.last_sync_ms.unwrap_or(0),
             errors: summary.errors,
             accounts,
+            can_add_account,
         })
     }
 

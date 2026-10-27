@@ -69,8 +69,8 @@ pub fn is_signed_out(status: &Status) -> bool {
 }
 
 impl TrayView {
-    /// `accounts`: quantas contas estão conectadas (a 0.2 tem uma; a dica muda com mais).
-    pub fn from_status(status: &Status, accounts: u32, i18n: &I18n) -> TrayView {
+    /// Com mais de uma conta conectada (`Status::accounts`), a dica diz quantas são.
+    pub fn from_status(status: &Status, i18n: &I18n) -> TrayView {
         let pending = u64::from(status.syncing);
         let errors = u64::from(status.errors);
         let still = Icon::Still;
@@ -82,9 +82,9 @@ impl TrayView {
             "quota-full" => (still("gdl-error"), i18n.tr("tray-quota-full", &[])),
             "needs-sign-in" => (still("gdl-error"), i18n.tr("tray-needs-sign-in", &[])),
             "error" => (still("gdl-error"), i18n.tr_count("tray-error", errors)),
-            _ if accounts > 1 => (
+            _ if status.accounts.len() > 1 => (
                 still("gdl-synced"),
-                i18n.tr_count("tray-accounts", u64::from(accounts)),
+                i18n.tr_count("tray-accounts", status.accounts.len() as u64),
             ),
             _ => (still("gdl-synced"), i18n.tr("tray-synced", &[])),
         };
@@ -155,6 +155,8 @@ fn signed_out(i18n: &I18n, tooltip: &str, service_down: bool) -> TrayView {
 
 #[cfg(test)]
 mod tests {
+    use gdl_ipc::AccountSummary;
+
     use super::*;
 
     fn status(state: &str, syncing: u32, errors: u32) -> Status {
@@ -240,23 +242,33 @@ mod tests {
             ),
         ];
         for (status, icon, pt_tip, en_tip) in table {
-            let view = TrayView::from_status(&status, 1, &pt);
+            let view = TrayView::from_status(&status, &pt);
             assert_eq!(
                 (view.icon_at(0), view.tooltip.as_str()),
                 (icon, pt_tip),
                 "{status:?}"
             );
-            let view = TrayView::from_status(&status, 1, &en);
+            let view = TrayView::from_status(&status, &en);
             assert_eq!(view.tooltip, en_tip, "{status:?}");
         }
-        let two = TrayView::from_status(&status("synced", 0, 0), 2, &pt);
-        assert_eq!(two.tooltip, "Conectado com 2 contas");
+        let mut two = status("synced", 0, 0);
+        two.accounts = vec![AccountSummary::default(); 2];
+        assert_eq!(
+            TrayView::from_status(&two, &pt).tooltip,
+            "Conectado com 2 contas"
+        );
+        assert_eq!(
+            TrayView::from_status(&two, &en).tooltip,
+            "Connected with 2 accounts"
+        );
+        two.state = "paused".into();
+        assert_eq!(TrayView::from_status(&two, &pt).tooltip, "Pausado");
     }
 
     #[test]
     fn syncing_icon_is_animated() {
         let i18n = I18n::new("en");
-        let view = TrayView::from_status(&status("syncing", 1, 0), 1, &i18n);
+        let view = TrayView::from_status(&status("syncing", 1, 0), &i18n);
         let frames: Vec<&str> = (0..5).map(|f| view.icon_at(f)).collect();
         assert_eq!(
             frames,
@@ -268,14 +280,14 @@ mod tests {
                 "gdl-syncing-1"
             ]
         );
-        let still = TrayView::from_status(&status("synced", 0, 0), 1, &i18n);
+        let still = TrayView::from_status(&status("synced", 0, 0), &i18n);
         assert_eq!(still.icon_at(3), "gdl-synced");
     }
 
     #[test]
     fn menu_without_login_has_sign_in_only() {
         let i18n = I18n::new("pt_BR");
-        let view = TrayView::from_status(&status("signed-out", 0, 0), 0, &i18n);
+        let view = TrayView::from_status(&status("signed-out", 0, 0), &i18n);
         assert_eq!(labels(&view), ["Fazer login", "Sobre", "---", "Sair"]);
         assert_eq!(view.click, Action::Open("onboarding"));
 
@@ -287,7 +299,7 @@ mod tests {
     #[test]
     fn signed_in_menu_follows_the_spec() {
         let i18n = I18n::new("pt_BR");
-        let view = TrayView::from_status(&status("synced", 0, 0), 1, &i18n);
+        let view = TrayView::from_status(&status("synced", 0, 0), &i18n);
         assert_eq!(
             labels(&view),
             [
@@ -305,14 +317,14 @@ mod tests {
             ]
         );
         assert_eq!(view.click, Action::Open("home"));
-        let paused = TrayView::from_status(&status("paused", 0, 0), 1, &i18n);
+        let paused = TrayView::from_status(&status("paused", 0, 0), &i18n);
         assert!(labels(&paused).contains(&"Retomar a sincronização"));
     }
 
     #[test]
     fn error_item_shows_count() {
         let i18n = I18n::new("pt_BR");
-        let view = TrayView::from_status(&status("error", 0, 3), 1, &i18n);
+        let view = TrayView::from_status(&status("error", 0, 3), &i18n);
         let errors = view.items.iter().find_map(|i| match i {
             MenuItem::Item {
                 label,

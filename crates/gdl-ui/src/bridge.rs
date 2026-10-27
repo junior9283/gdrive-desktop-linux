@@ -56,7 +56,12 @@ impl<'a> Args<'a> {
 
     /// A conta (e-mail) da chamada; sem ela, a primeira.
     fn account(&self) -> &'a str {
-        self.0.get("account").and_then(Value::as_str).unwrap_or("")
+        self.str_or_empty("account")
+    }
+
+    /// O texto de `key`, ou vazio se não veio.
+    fn str_or_empty(&self, key: &str) -> &'a str {
+        self.0.get(key).and_then(Value::as_str).unwrap_or("")
     }
 
     fn u64(&self, key: &str) -> Result<u64, UiError> {
@@ -126,7 +131,13 @@ impl Bridge {
             };
         }
         let reply = match method {
-            "begin_login" => j!(s.begin_login(a.str("client_id")?, a.str("client_secret")?, "")),
+            // Sem Client ID, o serviço usa o da primeira conta; sem `expected`, o login é de uma conta
+            // nova.
+            "begin_login" => j!(s.begin_login(
+                a.str_or_empty("client_id"),
+                a.str_or_empty("client_secret"),
+                a.str_or_empty("expected")
+            )),
             "status" => j!(s.status(a.account())),
             "account_info" => j!(s.account_info(a.account())),
             "activity" => j!(s.activity(a.account())),
@@ -355,6 +366,15 @@ mod tests {
             }])
         }
 
+        async fn begin_login(
+            &self,
+            client_id: &str,
+            client_secret: &str,
+            expected: &str,
+        ) -> Result<String, ServiceError> {
+            Ok(format!("{client_id}|{client_secret}|{expected}"))
+        }
+
         #[zbus(signal)]
         async fn status_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
     }
@@ -401,6 +421,38 @@ mod tests {
         let name = |reply: Result<Value, UiError>| reply.unwrap()[0]["name"].clone();
         assert_eq!(name(with), "ana@example.com|x");
         assert_eq!(name(without), "|x");
+    }
+
+    #[tokio::test]
+    async fn account_is_ignored_by_methods_that_do_not_use_it() {
+        let (_server, bridge) = bridge_with_fake().await;
+
+        let reply = bridge
+            .call(
+                "pin",
+                json!({ "path": "/Meu Drive/a", "account": "ana@example.com" }),
+            )
+            .await;
+
+        assert_eq!(reply, Ok(Value::Null));
+    }
+
+    #[tokio::test]
+    async fn login_credentials_and_expected_account_are_optional() {
+        let (_server, bridge) = bridge_with_fake().await;
+
+        let first = bridge
+            .call(
+                "begin_login",
+                json!({ "client_id": "id", "client_secret": "s" }),
+            )
+            .await;
+        let again = bridge
+            .call("begin_login", json!({ "expected": "ana@example.com" }))
+            .await;
+
+        assert_eq!(first, Ok(json!("id|s|")));
+        assert_eq!(again, Ok(json!("||ana@example.com")));
     }
 
     #[tokio::test]

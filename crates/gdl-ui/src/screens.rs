@@ -22,6 +22,7 @@ const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
 
 pub const SCREENS: [Screen; 11] = [
     screen(HOME, 900.0, 640.0),
+    // Com `add` (outra conta) ou `resume:<e-mail>` (a conta que precisa entrar de novo).
     screen("onboarding", 560.0, 640.0),
     screen("preferences", 760.0, 640.0),
     Screen {

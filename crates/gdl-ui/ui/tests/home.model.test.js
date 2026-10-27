@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { I18n, parseFtl } from '../i18n.js';
 import { formatSize } from '../format.js';
-import { headerFor, offlineText, paginate, sortRows } from '../screens/home/model.js';
+import { accountMenuFor, headerFor, offlineText, paginate, shownStatus, sortRows } from '../screens/home/model.js';
 
 const load = (lang) =>
   new I18n(
@@ -104,4 +104,49 @@ test('texto do off-line com a contagem e o tamanho', () => {
     'card-offline-text',
     { count: 2, size: formatSize(1024, 'pt-BR') },
   ]);
+});
+
+const accounts = (...list) => list.map(([email, state = 'synced']) => ({ email, mount_point: `/m/${email}`, state }));
+
+test('menu da conta: as outras contas, sem a mostrada', () => {
+  const menu = accountMenuFor({
+    account: 'ana@example.com',
+    state: 'synced',
+    accounts: accounts(['ana@example.com'], ['bia@example.com'], ['caio@example.com', 'needs-sign-in']),
+    can_add_account: true,
+  });
+  assert.deepEqual(menu.others, [
+    { email: 'bia@example.com', needsSignIn: false },
+    { email: 'caio@example.com', needsSignIn: true },
+  ]);
+  assert.equal(menu.shownNeedsSignIn, false);
+  assert.equal(menu.canAdd, true);
+});
+
+test('menu da conta: "Adicionar outra conta" some quando o serviço diz que não cabe', () => {
+  const menu = accountMenuFor({ account: 'a@x', accounts: accounts(['a@x']), can_add_account: false });
+  assert.equal(menu.canAdd, false);
+  assert.deepEqual(menu.others, []);
+});
+
+test('menu da conta: a mostrada que precisa entrar de novo pede o botão', () => {
+  const menu = accountMenuFor({
+    account: 'a@x',
+    accounts: accounts(['a@x', 'needs-sign-in'], ['b@x']),
+    can_add_account: true,
+  });
+  assert.equal(menu.shownNeedsSignIn, true);
+});
+
+test('cabeçalho da conta que precisa entrar de novo: botão de entrar, sem Pausar', () => {
+  const header = headerFor(status('needs-sign-in'), now, 'pt-BR');
+  assert.equal(header.signIn, true);
+  assert.equal(header.pause, null);
+  assert.equal(headerFor(status('synced'), now, 'pt-BR').signIn, false);
+});
+
+test('o cabeçalho mostra o estado da própria conta, não o pior entre elas', () => {
+  const both = { account: 'a@x', state: 'error', accounts: accounts(['a@x'], ['b@x', 'error']) };
+  assert.equal(shownStatus(both).state, 'synced');
+  assert.equal(shownStatus({ account: '', state: 'signed-out', accounts: [] }).state, 'signed-out');
 });

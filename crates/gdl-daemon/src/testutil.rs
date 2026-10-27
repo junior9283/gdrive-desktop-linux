@@ -146,12 +146,22 @@ impl Harness {
 
     /// Login que espera voltar como `expected` (vazio, conta nova).
     pub async fn login_expecting(&self, expected: &str) -> (bool, String, String) {
+        self.login_with("id-de-teste", "segredo", expected).await
+    }
+
+    /// Login com o Client ID e o segredo dados (vazios, o serviço usa os guardados).
+    pub async fn login_with(
+        &self,
+        client_id: &str,
+        secret: &str,
+        expected: &str,
+    ) -> (bool, String, String) {
         use futures_util::StreamExt;
 
         let mut finished = self.proxy.receive_login_finished().await.unwrap();
         let url = self
             .proxy
-            .begin_login("id-de-teste", "segredo", expected)
+            .begin_login(client_id, secret, expected)
             .await
             .unwrap();
         reqwest::get(url).await.unwrap();

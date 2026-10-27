@@ -3,9 +3,17 @@
 
 import { prefValue } from '../api.js';
 import { attempt, card, el, errorText, stylesheet, toast } from '../components.js';
+import { screenArg } from '../router.js';
 import { GUIDE, TROUBLES, actions, firstState, nextStep, stepsFor } from './onboarding/model.js';
 
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
+// `add` (o menu da conta pede outra conta) ou `resume:<e-mail>` (a conta que precisa entrar de
+// novo) vêm no argumento da tela; sem eles, o primeiro uso de sempre.
+function loginMode(arg) {
+  if (arg === 'add') return { mode: 'add' };
+  return arg?.startsWith('resume:') ? { mode: 'resume', expected: arg.slice('resume:'.length) } : {};
+}
+
 const screen = { root: null, ctx: null, state: null, listening: null };
 
 export async function render(root, ctx) {
@@ -22,6 +30,7 @@ export async function render(root, ctx) {
       signedIn: status.state !== 'signed-out',
       loginOnly: prefValue(prefs, 'DisableOnboardingDialog', false) === true,
       mount: status.mount_point,
+      ...loginMode(screenArg(location.search)),
     });
   }
   await css;
@@ -38,9 +47,11 @@ function dispatch(event) {
 
 // Pede o login ao serviço (ele abre o navegador); o fim chega pelo evento `login-finished`.
 function beginLogin() {
-  const { clientId, secret } = screen.state;
+  const { mode, expected, clientId, secret } = screen.state;
+  // Sem Client ID, o serviço usa o que a primeira conta guardou.
+  const credentials = mode ? { expected } : { client_id: clientId.trim(), client_secret: secret.trim() };
   screen.ctx.api
-    .call('begin_login', { client_id: clientId.trim(), client_secret: secret.trim() })
+    .call('begin_login', credentials)
     .then((url) => dispatch({ type: 'login-url', url }))
     .catch((e) => dispatch({ type: 'login-finished', ok: false, error: errorText(e) }));
 }
@@ -54,7 +65,7 @@ function draw(moved = true) {
     return;
   }
   const { t } = ctx;
-  const steps = stepsFor(state.loginOnly);
+  const steps = stepsFor(state.loginOnly, state.mode);
   const at = steps.indexOf(state.step);
   const list = el(
     'ol',
@@ -109,8 +120,18 @@ function guideSection(ctx, { id, link, copy = [] }) {
 // Um problema comum do login e o que fazer.
 const trouble = (t, id) => [el('dt', {}, t(`onboarding-trouble-${id}`)), el('dd', {}, t(`onboarding-trouble-${id}-fix`))];
 
+// O passo de `add` e de `resume`: o que vai acontecer e o erro do último login.
+const accountStep = (mode) => ({ t }, state) => [
+  title(t(`onboarding-${mode}-title`)),
+  el('p', {}, t(`onboarding-${mode}-text`, { account: state.expected })),
+  el('p', { class: 'step-error', role: 'alert' }, state.error ? t(...state.error) : []),
+];
+
 // O conteúdo de cada passo: `(ctx, state) => [nós]`.
 const STEPS = {
+  add: accountStep('add'),
+  resume: accountStep('resume'),
+
   setup(ctx) {
     const { api, t } = ctx;
     return [

@@ -84,7 +84,8 @@ export function confirmDialog({ title, body, confirm, cancel, danger = false, re
   });
 }
 
-// Menu suspenso abaixo de `anchor`: `items` são `{ label, action, disabled, id }`, `{ node }`
+// Menu suspenso abaixo de `anchor`: `items` são `{ label, action, disabled, id }` (`label` pode ser
+// um nó, como a linha de uma conta), `{ node }`
 // (conteúdo sem ação, como o cartão da conta) ou `'-'` (separador). Fecha ao escolher, ao clicar
 // fora ou com Esc.
 let closeOpenMenu = null;

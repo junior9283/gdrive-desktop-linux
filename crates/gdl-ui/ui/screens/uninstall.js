@@ -3,7 +3,7 @@
 // de "Desconectar conta" para os envios pendentes); depois a CLI tira os programas.
 
 import { el, errorText, stylesheet } from '../components.js';
-import { askLogout } from './home/disconnect.js';
+import { allAccounts, askLogout } from './home/disconnect.js';
 
 const logo = () => el('img', { class: 'uninstall-logo', src: 'icons/app.png', alt: '' });
 
@@ -53,22 +53,22 @@ export async function render(root, ctx) {
   });
 }
 
-// Desconecta a conta, se houver uma; `false` se o usuário desistiu.
+// Desconecta todas as contas, se houver; `false` se o usuário desistiu.
 async function signOut(ctx, say) {
   const { api, t } = ctx;
-  const status = await api.call('status');
-  if (!status.account) return true;
-  const choice = await askLogout(ctx, status);
+  const all = await allAccounts(api);
+  if (!all.emails.length) return true;
+  const choice = await askLogout(ctx, all);
   if (!choice) return false;
   say(t('disconnect-progress'));
   // Com "terminar os envios", a conta só sai quando eles acabarem: o serviço avisa a cada mudança.
   const signedOut = new Promise((resolve) => {
     const check = async () => {
-      if (!(await api.call('status')).account) resolve();
+      if (!(await api.call('status')).accounts.length) resolve();
     };
     api.on('status-changed', () => check().catch(() => {})).then(check).catch(() => {});
   });
-  await api.call('logout', choice);
+  await api.call('logout_all', choice);
   say(t('uninstall-waiting'));
   await signedOut;
   return true;

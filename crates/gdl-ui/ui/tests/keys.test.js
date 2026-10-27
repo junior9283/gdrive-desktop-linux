@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFtl } from '../i18n.js';
 import { CATEGORIES } from '../screens/errors/model.js';
-import { GUIDE, TROUBLES, stepsFor } from '../screens/onboarding/model.js';
+import { GUIDE, REASONS, TROUBLES, stepsFor } from '../screens/onboarding/model.js';
 import { ROLES, generalKinds } from '../screens/share/model.js';
 
 const ui = fileURLToPath(new URL('..', import.meta.url));
@@ -33,7 +33,8 @@ test('toda chave usada nas telas existe nos dois idiomas', () => {
     'downloading', 'downloaded', 'trashing', 'trashed', 'restoring', 'restored',
   ]) used.add(`activity-${state}`);
   for (const link of ['help', 'privacy', 'terms', 'faq', 'drive-web']) used.add(`link-${link}`);
-  for (const step of stepsFor(false)) used.add(`onboarding-step-${step}`);
+  for (const step of [...stepsFor(false), ...stepsFor(false, 'add'), ...stepsFor(false, 'resume')]) used.add(`onboarding-step-${step}`);
+  for (const reason of REASONS) used.add(`onboarding-login-failed-${reason}`);
   for (const { id, copy = [] } of GUIDE) {
     used.add(`onboarding-setup-${id}-title`).add(`onboarding-setup-${id}-text`);
     for (const { label } of copy) if (label) used.add(`onboarding-setup-field-${label}`);

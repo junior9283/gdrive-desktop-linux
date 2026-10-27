@@ -91,3 +91,26 @@ test('eventos chegam com o conteúdo', async () => {
 
   assert.deepEqual(got, [{ ok: true, email: 'a@b.c', error: '' }]);
 });
+
+test('toda chamada leva a conta mostrada, sem passar por cima da explícita', async () => {
+  const tauri = fakeTauri(false);
+  const api = createApi(() => tauri, () => 'ana@example.com');
+
+  await api.call('activity');
+  await api.call('versions', { account: 'bia@example.com', item_id: 'x' });
+
+  const sent = tauri.calls.filter((c) => c.cmd === 'call').map((c) => c.args);
+  assert.deepEqual(sent, [
+    { method: 'activity', args: { account: 'ana@example.com' } },
+    { method: 'versions', args: { account: 'bia@example.com', item_id: 'x' } },
+  ]);
+});
+
+test('sem conta escolhida, a chamada vai como está (a primeira conta)', async () => {
+  const tauri = fakeTauri(false);
+  const api = createApi(() => tauri);
+
+  await api.call('status');
+
+  assert.deepEqual(tauri.calls.at(-1).args, { method: 'status', args: {} });
+});

@@ -21,10 +21,32 @@ function lastSync(status, now, locale) {
   return ['header-last-sync', { ago: formatAgo(status.last_sync_ms, now, locale) }];
 }
 
-// `{ title, subtitle, pause }` do cabeçalho; `pause` é a chave do botão (ou `null` sem conta).
+// O login da conta venceu (só entrando de novo).
+export const needsSignIn = (state) => state === 'needs-sign-in';
+
+// O `Status` da conta mostrada: sem conta pedida o serviço manda o pior estado entre as contas, e
+// o cabeçalho mostra o da própria conta.
+export function shownStatus(status) {
+  const own = status.accounts.find((a) => a.email === status.account);
+  return own ? { ...status, state: own.state } : status;
+}
+
+// O que o menu da conta lista: as outras contas (a mostrada tem o cartão) e se cabe mais uma.
+export function accountMenuFor(status) {
+  return {
+    others: status.accounts
+      .filter((a) => a.email !== status.account)
+      .map((a) => ({ email: a.email, needsSignIn: needsSignIn(a.state) })),
+    shownNeedsSignIn: needsSignIn(shownStatus(status).state),
+    canAdd: status.can_add_account,
+  };
+}
+
+// `{ title, subtitle, pause, signIn }` do cabeçalho; `pause` é a chave do botão (ou `null` sem
+// conta ou com a conta precisando entrar de novo, caso em que `signIn` pede o botão de entrar).
 export function headerFor(status, now, locale) {
   const title = [TITLES[status.state] ?? 'header-synced', { count: status.syncing }];
-  if (status.state === 'signed-out') return { title, subtitle: null, pause: null };
+  if (status.state === 'signed-out') return { title, subtitle: null, pause: null, signIn: false };
   let subtitle;
   if (status.state === 'syncing' && status.remaining_secs >= 0) {
     subtitle = ['header-remaining', { time: formatDuration(status.remaining_secs, locale) }];
@@ -37,7 +59,9 @@ export function headerFor(status, now, locale) {
   } else {
     subtitle = lastSync(status, now, locale);
   }
-  return { title, subtitle, pause: status.paused ? 'action-resume' : 'action-pause' };
+  const signIn = needsSignIn(status.state);
+  const pause = signIn ? null : status.paused ? 'action-resume' : 'action-pause';
+  return { title, subtitle, pause, signIn };
 }
 
 // "N itens off-line (tamanho)" do `OfflineSummary`.

@@ -136,7 +136,7 @@ impl App {
         self.status = self.service.status("").await.ok();
         let signed_out = self.status.as_ref().is_some_and(is_signed_out);
         let view = match &self.status {
-            Some(status) => TrayView::from_status(status, u32::from(!signed_out), &self.i18n),
+            Some(status) => TrayView::from_status(status, &self.i18n),
             None => TrayView::service_down(&self.i18n),
         };
         if view != self.view {

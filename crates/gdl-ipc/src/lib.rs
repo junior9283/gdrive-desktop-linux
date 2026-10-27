@@ -91,6 +91,8 @@ pub struct AccountSummary {
     pub mount_point: String,
     /// Os mesmos valores de `Status::state`, só desta conta.
     pub state: String,
+    /// Envios na fila desta conta (o que a desconexão precisa saber).
+    pub pending_uploads: u32,
 }
 
 /// Resposta de `Status`; sem conta conectada, tudo vazio. Os campos são os da conta pedida
@@ -113,6 +115,9 @@ pub struct Status {
     pub remaining_secs: i64,
     /// Todas as contas conectadas, na ordem em que foram adicionadas.
     pub accounts: Vec<AccountSummary>,
+    /// Cabe mais uma conta: menos de 4 e sem `DisableAddAccount` (esta só vale a partir da
+    /// primeira conta).
+    pub can_add_account: bool,
 }
 
 /// Um aviso do histórico (`Notifications`), o mais novo primeiro.

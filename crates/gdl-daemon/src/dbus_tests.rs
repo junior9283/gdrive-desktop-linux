@@ -1655,6 +1655,7 @@ async fn status_lists_every_account() {
         ]
     );
     assert_eq!(ana.accounts, all.accounts);
+    assert!(all.accounts.iter().all(|a| a.pending_uploads == 0));
     let err = h.proxy.status("ninguem@example.com").await.unwrap_err();
     assert_eq!(err.short_name(), "NotLoggedIn", "{err}");
 }
@@ -1812,6 +1813,9 @@ async fn expired_account_does_not_stop_the_others() {
     let ana = h.proxy.status(ANA).await.unwrap();
     assert_eq!(ana.state, "needs-sign-in");
     assert_eq!(ana.pending_uploads, 1);
+    let listed = h.proxy.status("").await.unwrap().accounts;
+    let pending: Vec<_> = listed.iter().map(|a| a.pending_uploads).collect();
+    assert_eq!(pending, [0, 1], "a lista traz os envios de cada conta");
     assert_eq!(ana.errors, 0);
     assert!(h.proxy.list_lost_and_found(ANA).await.unwrap().is_empty());
     // O botão "Entrar" pede à janela o login dessa conta.
@@ -1829,7 +1833,7 @@ async fn expired_account_does_not_stop_the_others() {
     wait_until("janela no login", || {
         h.opened()[before..]
             .iter()
-            .any(|o| o.contains("sign-in:ana@example.com"))
+            .any(|o| o.contains("onboarding:resume:ana@example.com"))
     })
     .await;
 }
@@ -1929,4 +1933,53 @@ async fn signing_in_again_with_another_account_is_refused() {
     assert_eq!(error, "other-account");
     assert_eq!(h.tokens.load(ANA).await.unwrap().unwrap().1, before);
     assert_eq!(h.proxy.status(ANA).await.unwrap().state, "needs-sign-in");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_says_whether_another_account_can_be_added() {
+    let h = Harness::new().await;
+    assert!(h.proxy.status("").await.unwrap().can_add_account);
+    h.logged_in().await;
+    for n in 2..=4 {
+        assert!(h.proxy.status("").await.unwrap().can_add_account);
+        let email = format!("conta{n}@example.com");
+        h.fake.add_account(&email);
+        h.logged_in_as(&email).await;
+    }
+
+    assert!(!h.proxy.status("").await.unwrap().can_add_account);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disable_add_account_hides_adding_after_the_first() {
+    let h = Harness::with_policy("DisableAddAccount = true").await;
+    assert!(h.proxy.status("").await.unwrap().can_add_account);
+    h.logged_in().await;
+
+    assert!(!h.proxy.status("").await.unwrap().can_add_account);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_account_can_reuse_the_credentials_of_the_first() {
+    let h = Harness::new().await;
+    h.fake.add_account("ana@example.com");
+    h.logged_in().await;
+    h.fake.login_as("ana@example.com");
+
+    // Client ID vazio: o serviço usa o que a primeira conta guardou.
+    let (ok, _, error) = h.login_with("", "", "").await;
+
+    assert!(ok, "{error}");
+    assert_eq!(h.saved_accounts().len(), 2);
+    let stored = h.tokens.load("ana@example.com").await.unwrap().unwrap().0;
+    assert_eq!(stored.client_id, "id-de-teste");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn empty_credentials_without_any_account_are_refused() {
+    let h = Harness::new().await;
+
+    let err = h.proxy.begin_login("", "", "").await.unwrap_err();
+
+    assert_eq!(err.short_name(), "InvalidArgs", "{err}");
 }

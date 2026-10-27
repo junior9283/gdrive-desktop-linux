@@ -3,6 +3,9 @@
 //! política, publicado no barramento de sessão (o do `dbus-run-session` do script). Escreve
 //! `pronto` quando dá para usar e sai com SIGTERM.
 //!
+//! O primeiro login é da conta principal; o seguinte (feito pela janela, ao adicionar outra
+//! conta) é da conta `ana@example.com`.
+//!
 //! O "navegador" anota em `$GDL_E2E_OPENED` cada endereço ou caminho que o serviço abre. SIGUSR1
 //! enche o armazenamento do Drive simulado (todo pedido recebe `storageQuotaExceeded`) e SIGUSR2
 //! o libera; feito, o estado (`full` ou `free`) vai para `$GDL_E2E_QUOTA`.
@@ -22,6 +25,9 @@ use gdl_ipc::{BUS_NAME, OBJECT_PATH, ServiceProxy};
 use tokio::signal::unix::{SignalKind, signal};
 
 type Error = Box<dyn std::error::Error>;
+
+/// A conta que o próximo login (depois do primeiro) traz.
+const ANA: &str = "ana@example.com";
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -93,6 +99,10 @@ async fn main() -> Result<(), Error> {
     if !signal_ok {
         return Err("o login falhou".into());
     }
+    // Uma segunda conta, para quem adiciona outra pela janela: o próximo login entra nela.
+    let ana = fake.add_account(ANA);
+    ana.add_file(&ana.root_id(), "da-ana.txt", b"oi".to_vec());
+    fake.login_as(ANA);
     let mount = proxy.status("").await?.mount_point;
     let notes = std::path::Path::new(&mount).join("Meu Drive/notas.txt");
     proxy.pin(&notes.display().to_string()).await?;

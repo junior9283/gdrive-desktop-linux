@@ -2,7 +2,11 @@
 // resto é local. Com o serviço fora do ar, avisa quem pediu (`onService`) e volta sozinho com o
 // evento `service-up`.
 
-export function createApi(tauri) {
+import { currentAccount } from './state.js';
+
+// `getAccount()` é a conta mostrada (vazio, a primeira): toda chamada a leva, salvo se quem
+// chamou disse outra. A ponte (`bridge.rs`) só lê o `account` dos métodos que agem numa conta.
+export function createApi(tauri, getAccount = () => '') {
   let onChange = () => {};
   const invoke = (cmd, args) => tauri().invoke(cmd, args);
 
@@ -17,7 +21,9 @@ export function createApi(tauri) {
 
     async call(method, args = {}) {
       try {
-        const reply = await invoke('call', { method, args });
+        const account = getAccount();
+        const withAccount = account ? { account, ...args } : args;
+        const reply = await invoke('call', { method, args: withAccount });
         // Quem responde está no ar, mesmo que o `service-up` da ponte nunca tenha chegado.
         setUp(true);
         return reply;
@@ -65,4 +71,4 @@ export function prefValue(prefs, key, fallback = null) {
   return pref ? JSON.parse(pref.value) ?? fallback : fallback;
 }
 
-export const api = createApi(() => globalThis.__TAURI_INTERNALS__);
+export const api = createApi(() => globalThis.__TAURI_INTERNALS__, currentAccount);

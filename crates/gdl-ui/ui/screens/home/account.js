@@ -1,13 +1,15 @@
-// Menu da conta: foto, nome, e-mail, uso do armazenamento e as ações da conta.
+// Menu da conta: foto, nome, e-mail, uso do armazenamento, as outras contas e as ações da conta.
 
 import { el, popupMenu } from '../../components.js';
 import { formatSize } from '../../format.js';
+import { setCurrentAccount } from '../../state.js';
 import { disconnect } from './disconnect.js';
+import { accountMenuFor } from './model.js';
 
 // `account_info` vai ao Drive: o resultado (com a foto já convertida) vale por um minuto, e quem
-// pede durante a busca (o botão e o menu, na abertura) recebe a mesma.
+// pede durante a busca (o botão e o menu, na abertura) recebe a mesma. Um por conta.
 const FRESH_MS = 60_000;
-let cached = null;
+const cached = new Map();
 
 // A foto (bytes vindos do serviço) como endereço `data:`.
 function photoUrl(bytes) {
@@ -17,15 +19,16 @@ function photoUrl(bytes) {
 }
 
 function accountInfo(api, account) {
-  if (cached?.account === account && Date.now() - cached.at < FRESH_MS) return cached.promise;
-  const promise = api.call('account_info').then((info) => ({
+  const hit = cached.get(account);
+  if (hit && Date.now() - hit.at < FRESH_MS) return hit.promise;
+  const promise = api.call('account_info', { account }).then((info) => ({
     info,
     photo: info.photo_png.length ? photoUrl(info.photo_png) : null,
   }));
-  cached = { at: Date.now(), account, promise };
+  cached.set(account, { at: Date.now(), promise });
   // Uma falha não fica guardada: o próximo pedido tenta de novo.
   promise.catch(() => {
-    if (cached?.promise === promise) cached = null;
+    if (cached.get(account)?.promise === promise) cached.delete(account);
   });
   return promise;
 }
@@ -47,13 +50,37 @@ export function accountButton(button, api, account = '') {
     .catch(() => {});
 }
 
+// Uma conta da lista do menu: a inicial na hora (e a foto quando chegar), o e-mail e, se o login
+// venceu, o aviso.
+function accountRow(api, t, { email, needsSignIn }) {
+  const picture = el('span', { class: 'avatar initial' }, email.slice(0, 1).toUpperCase());
+  accountInfo(api, email)
+    .then(({ photo }) => photo && picture.replaceWith(avatar(photo)))
+    // Sem a foto, fica a inicial.
+    .catch(() => {});
+  return el('span', { class: 'account-row' }, picture,
+    el('span', {}, email, needsSignIn ? [el('br'), el('small', { class: 'needs-sign-in' }, t('account-needs-sign-in'))] : []));
+}
+
 // O menu abre na hora com o e-mail; nome, foto e uso chegam depois.
 export function accountMenu(anchor, ctx) {
   const { api, t, locale, home } = ctx;
-  const account = home.status?.account ?? '';
+  const status = home.status ?? { account: '', accounts: [], can_add_account: false };
+  const account = status.account;
+  const menu = accountMenuFor(status);
   const card = el('span', { class: 'account-card' }, el('strong', {}, account));
   popupMenu(anchor, [
     { node: card },
+    '-',
+    ...menu.others.map((other) => ({
+      id: `switch-${other.email}`,
+      label: accountRow(api, t, other),
+      action: () => setCurrentAccount(other.email),
+    })),
+    ...(menu.shownNeedsSignIn
+      ? [{ id: 'sign-in-again', label: t('account-sign-in-again'), action: () => api.openScreen('onboarding', `resume:${account}`) }]
+      : []),
+    ...(menu.canAdd ? [{ id: 'add-account', label: t('account-add'), action: () => api.openScreen('onboarding', 'add') }] : []),
     '-',
     { id: 'storage', label: t('storage-manage'), action: () => api.openLink('storage') },
     { id: 'disconnect', label: t('account-disconnect'), action: () => disconnect(ctx) },

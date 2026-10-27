@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { GUIDE, actions, firstState, nextStep, stepsFor } from '../screens/onboarding/model.js';
+import { GUIDE, actions, firstState, loginFailure, nextStep, stepsFor } from '../screens/onboarding/model.js';
 
 const signIn = (fields = {}) => ({ ...firstState({ signedIn: false, loginOnly: false }), step: 'sign-in', ...fields });
 
@@ -115,7 +115,7 @@ test('botões de cada passo', () => {
   const at = (step, extra = {}) => actions({ ...signIn(), step, ...extra });
   assert.deepEqual(at('setup'), { skip: true, back: false, primary: 'continue' });
   assert.deepEqual(at('sign-in'), { skip: true, back: true, primary: 'continue' });
-  assert.deepEqual(at('sign-in', { error: ['onboarding-login-failed', { error: 'x' }] }).primary, 'retry');
+  assert.deepEqual(at('sign-in', { failed: true }).primary, 'retry');
   assert.deepEqual(at('waiting'), { skip: false, back: true, primary: null });
   assert.deepEqual(at('intro'), { skip: true, back: false, primary: 'continue' });
   assert.deepEqual(at('files'), { skip: true, back: true, primary: 'continue' });
@@ -141,4 +141,62 @@ test('o login concluído traz a pasta do Drive', () => {
   const waiting = { ...signIn({ clientId: 'id', secret: 's' }), step: 'waiting' };
   assert.equal(nextStep(waiting, { type: 'login-finished', ok: true, mount: '/home/x/Google Drive' }).mount, '/home/x/Google Drive');
   assert.equal(firstState({ signedIn: true, loginOnly: false, mount: '/m' }).mount, '/m');
+});
+
+const adding = () => firstState({ signedIn: true, loginOnly: false, mode: 'add' });
+
+test('adicionar outra conta pula o guia do Client ID e a apresentação', () => {
+  const state = adding();
+  assert.equal(state.step, 'add');
+  assert.deepEqual(stepsFor(false, 'add'), ['add', 'waiting']);
+  assert.deepEqual(actions(state), { skip: false, back: false, primary: 'continue' });
+
+  const waiting = nextStep(state, { type: 'continue' });
+  assert.equal(waiting.step, 'waiting');
+  assert.equal(waiting.error, null, 'sem Client ID para preencher');
+  assert.equal(nextStep(waiting, { type: 'back' }).step, 'add');
+  assert.equal(nextStep(waiting, { type: 'login-finished', ok: true }).step, 'end');
+});
+
+test('adicionar outra conta: o erro volta ao primeiro passo e deixa tentar de novo', () => {
+  const waiting = nextStep(adding(), { type: 'continue' });
+
+  const failed = nextStep(waiting, { type: 'login-finished', ok: false, error: 'already-connected' });
+
+  assert.equal(failed.step, 'add');
+  assert.deepEqual(failed.error, ['onboarding-login-failed-already-connected']);
+  assert.equal(actions(failed).primary, 'retry');
+  assert.equal(nextStep(failed, { type: 'continue' }).failed, false);
+});
+
+const resuming = () => firstState({ signedIn: true, loginOnly: false, mode: 'resume', expected: 'ana@example.com' });
+
+test('entrar de novo: só o passo da conta e a espera, com o e-mail esperado', () => {
+  const state = resuming();
+  assert.equal(state.step, 'resume');
+  assert.equal(state.expected, 'ana@example.com');
+  assert.deepEqual(stepsFor(false, 'resume'), ['resume', 'waiting']);
+  assert.deepEqual(actions(state), { skip: false, back: false, primary: 'continue' });
+
+  const waiting = nextStep(state, { type: 'continue' });
+  assert.equal(waiting.step, 'waiting');
+  assert.equal(nextStep(waiting, { type: 'back' }).step, 'resume');
+  assert.equal(nextStep(waiting, { type: 'login-finished', ok: true }).step, 'end');
+});
+
+test('entrar de novo com outra conta: erro próprio e tentar de novo', () => {
+  const waiting = nextStep(resuming(), { type: 'continue' });
+
+  const failed = nextStep(waiting, { type: 'login-finished', ok: false, error: 'other-account' });
+
+  assert.equal(failed.step, 'resume');
+  assert.deepEqual(failed.error, ['onboarding-login-failed-other-account']);
+  assert.equal(actions(failed).primary, 'retry');
+});
+
+test('o motivo do serviço vira o texto do erro; outro texto vai como veio', () => {
+  for (const reason of ['already-connected', 'other-account', 'too-many-accounts', 'add-account-disabled']) {
+    assert.deepEqual(loginFailure(reason), [`onboarding-login-failed-${reason}`]);
+  }
+  assert.deepEqual(loginFailure('tempo esgotado'), ['onboarding-login-failed', { error: 'tempo esgotado' }]);
 });

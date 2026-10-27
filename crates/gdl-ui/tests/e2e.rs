@@ -288,6 +288,103 @@ async fn account_button_shows_photo_without_click() {
     assert!(src.starts_with("data:image/png;base64,"), "{src}");
 }
 
+/// A conta que o `e2e-daemon` deixa para o segundo login.
+const ANA: &str = "ana@example.com";
+
+/// Desconecta a segunda conta ao sair, mesmo se o teste falhou no meio: os outros testes contam
+/// com uma conta só.
+struct SecondAccount;
+
+impl Drop for SecondAccount {
+    fn drop(&mut self) {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let _ = service().await.logout(ANA, "discard", "").await;
+            })
+        });
+    }
+}
+
+/// O menu da conta lista as outras contas e deixa adicionar uma: "Adicionar outra conta" abre o
+/// primeiro uso em modo "adicionar" (sem o guia do Client ID), a conta nova entra na lista e
+/// clicar nela troca a conta mostrada pela janela.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn account_menu_switches_and_adds_accounts() {
+    let _cleanup = SecondAccount;
+    let session = Session::open("home").await;
+    session
+        .wait_text(".header-title", "Sincronização concluída")
+        .await;
+    let home = session.request(reqwest::Method::GET, "window", None).await;
+    session.click(".account-button").await;
+    session.find("[data-action='add-account']").await;
+    let rows_before = session
+        .eval("return document.querySelectorAll('.menu .account-row').length")
+        .await;
+
+    session.click("[data-action='add-account']").await;
+    let add = session.new_window().await;
+    session.post("window", json!({ "handle": add })).await;
+    let title = session.wait_text(".step-title", "outra conta").await;
+    session.click(".continue").await;
+    until("o link de login", async || {
+        let ready = session
+            .eval("return document.querySelector('.generate-link')?.disabled === false")
+            .await;
+        ready.as_bool().unwrap_or(false).then_some(())
+    })
+    .await;
+    session.click(".generate-link").await;
+    let url = until("o link na tela", async || {
+        let url = session
+            .eval("return document.querySelector('.login-url')?.value || null")
+            .await;
+        url.as_str().map(str::to_string)
+    })
+    .await;
+    // O teste faz o papel do navegador.
+    reqwest::get(url).await.unwrap();
+    // A janela do "adicionar" fecha sozinha quando a conta entra.
+    until("a janela de adicionar fechar", async || {
+        let handles = session
+            .request(reqwest::Method::GET, "window/handles", None)
+            .await;
+        (handles.as_array()?.len() == 1).then_some(())
+    })
+    .await;
+    session.post("window", json!({ "handle": home })).await;
+
+    until("a conta nova na lista", async || {
+        session.click(".account-button").await;
+        let rows = session
+            .eval("return document.querySelectorAll('.menu .account-row').length")
+            .await;
+        (rows == json!(1)).then_some(())
+    })
+    .await;
+    let row = session.text(".menu .account-row").await;
+    session
+        .click(&format!("[data-action='switch-{ANA}']"))
+        .await;
+    // A janela inteira passa a mostrar a conta escolhida: o cartão do menu é dela.
+    until("o cartão da conta escolhida", async || {
+        session.click(".account-button").await;
+        let card = session.text(".menu .account-card").await;
+        card.contains(ANA).then_some(())
+    })
+    .await;
+    // De volta à primeira (que passa a ser "outra" na lista).
+    let first = service().await.status("").await.unwrap().account;
+    session
+        .click(&format!("[data-action='switch-{first}']"))
+        .await;
+
+    assert!(title.contains("Adicione"), "{title}");
+    assert_eq!(rows_before, json!(0), "uma conta só não lista outras");
+    assert!(row.contains(ANA), "{row}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn account_menu_stays_inside_window() {

@@ -1,7 +1,7 @@
 // Menu "Mais opções".
 
 import { attempt, confirmDialog, popupMenu, toast } from '../../components.js';
-import { disconnect } from './disconnect.js';
+import { disconnect, disconnectAll } from './disconnect.js';
 
 export function moreMenu(anchor, ctx) {
   const { api, t, home } = ctx;
@@ -13,6 +13,7 @@ export function moreMenu(anchor, ctx) {
     { id: 'notification-settings', label: t('more-notification-settings'), action: () => api.openScreen('notification-settings') },
     { id: 'reset', label: t('more-reset'), action: () => reset(ctx) },
     { id: 'disconnect', label: t('account-disconnect'), action: () => disconnect(ctx), disabled: !signedIn },
+    { id: 'disconnect-all', label: t('account-disconnect-all'), action: () => disconnectAll(ctx), disabled: !signedIn },
     '-',
     { id: 'preferences', label: t('more-preferences'), action: () => api.openScreen('preferences') },
     { id: 'about', label: t('more-about'), action: () => api.openScreen('about') },

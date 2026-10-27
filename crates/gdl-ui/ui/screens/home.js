@@ -3,7 +3,7 @@
 
 import { attempt, el, icon, stylesheet } from '../components.js';
 import { accountButton, accountMenu } from './home/account.js';
-import { headerFor } from './home/model.js';
+import { headerFor, shownStatus } from './home/model.js';
 import { moreMenu } from './home/more.js';
 import * as activity from './home/activity.js';
 import * as links from './home/links.js';
@@ -11,15 +11,18 @@ import * as notifications from './home/notifications.js';
 import * as offline from './home/offline.js';
 import * as shared from './home/shared.js';
 import * as start from './home/start.js';
+import { currentAccount, onAccountChange, setCurrentAccount } from '../state.js';
 
 const VIEWS = { start, activity, offline, shared, notifications, links };
+// Tudo de uma vez: o login que terminou e a conta mostrada que mudou.
+const EVERYTHING = { status: true, badge: true, views: Object.keys(VIEWS) };
 // O que cada evento da ponte atualiza: o cabeçalho (`status`), o selo das notificações (`badge`)
 // e as visões que mostram o que mudou.
 const EVENTS = {
   'status-changed': { status: true, views: ['start'] },
   'activity-changed': { views: ['activity'] },
   'notifications-changed': { badge: true, views: ['notifications'] },
-  'login-finished': { status: true, badge: true, views: Object.keys(VIEWS) },
+  'login-finished': EVERYTHING,
 };
 // Durante a sincronização os eventos chegam várias vezes por segundo: no máximo uma atualização
 // a cada meio segundo, com o que se juntou no intervalo.
@@ -47,6 +50,11 @@ function layout({ api, t }) {
   ui.title = el('h1', { class: 'header-title' });
   ui.subtitle = el('p', { class: 'header-subtitle' });
   ui.pause = el('button', { class: 'header-pause tonal', onclick: togglePause });
+  ui.signIn = el('button', {
+    class: 'header-sign-in filled',
+    hidden: true,
+    onclick: () => api.openScreen('onboarding', `resume:${home.status.account}`),
+  }, t('account-sign-in-again'));
   const search = el('input', {
     class: 'search',
     type: 'search',
@@ -61,6 +69,7 @@ function layout({ api, t }) {
     { class: 'header', tabindex: '-1', 'aria-live': 'polite' },
     el('div', { class: 'header-text' }, ui.title, ui.subtitle),
     ui.pause,
+    ui.signIn,
   );
   ui.account = el('button', { class: 'account-button icon-button', 'aria-label': t('account-menu') });
   ui.account.addEventListener('click', () => accountMenu(ui.account, context()));
@@ -96,6 +105,8 @@ function context() {
 function wire({ api }) {
   home.wired = true;
   for (const [event, work] of Object.entries(EVENTS)) api.on(event, () => schedule(work));
+  // Outra conta escolhida (aqui ou em outra janela): tudo é lido de novo.
+  onAccountChange(() => schedule(EVERYTHING));
   // Escondida, a janela não se atualiza; ao voltar, faz o que ficou para trás.
   document.addEventListener('visibilitychange', () => schedule({}));
   // "Há N minutos" anda sozinho.
@@ -142,7 +153,17 @@ async function update({ status, badge, view }) {
 }
 
 async function updateStatus() {
-  home.status = await home.ctx.api.call('status');
+  const { api } = home.ctx;
+  // Pedir a primeira conta traz a lista de todas: com ela se confere a conta guardada.
+  let status = await api.call('status', { account: '' });
+  const shown = currentAccount();
+  if (shown && !status.accounts.some((a) => a.email === shown)) {
+    // A conta mostrada foi desconectada: fica a primeira.
+    setCurrentAccount('');
+  } else if (shown && shown !== status.account) {
+    status = await api.call('status');
+  }
+  home.status = shownStatus(status);
   updateHeader();
 }
 
@@ -154,6 +175,7 @@ function updateHeader() {
   ui.subtitle.textContent = header.subtitle ? t(...header.subtitle) : '';
   ui.pause.hidden = !header.pause;
   if (header.pause) ui.pause.textContent = t(header.pause);
+  ui.signIn.hidden = !header.signIn;
   ui.nav.hidden = status.state === 'signed-out';
   accountButton(ui.account, home.ctx.api, status.account);
   ui.header.dataset.state = status.state;

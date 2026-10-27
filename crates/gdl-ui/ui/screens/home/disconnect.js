@@ -30,19 +30,21 @@ function pendingChoices({ api, t }, count) {
   };
 }
 
-// Pergunta como desconectar a conta de `status`: `{ mode, dir }` para o `logout`, ou `null` se o
-// usuário desistiu (também usada pela desinstalação).
-export async function askLogout(ctx, status) {
+// Pergunta como desconectar as contas `emails`, com `pending` envios não sincronizados no total:
+// `{ mode, dir }` para o `logout`, ou `null` se o usuário desistiu (também usada pela
+// desinstalação).
+export async function askLogout(ctx, { emails, pending }) {
   const { t } = ctx;
-  const count = status.pending_uploads;
+  const one = emails.length === 1;
   const warning = el('p', {}, t('disconnect-offline-warning'));
-  const choices = count === 0
-    ? { body: [el('p', {}, t('disconnect-body', { account: status.account }))], value: () => ({ mode: '', dir: '' }) }
-    : pendingChoices(ctx, count);
+  const intro = one ? t('disconnect-body', { account: emails[0] }) : t('disconnect-all-body', { count: emails.length });
+  const choices = pending === 0
+    ? { body: [el('p', {}, intro)], value: () => ({ mode: '', dir: '' }) }
+    : pendingChoices(ctx, pending);
   const ok = await confirmDialog({
-    title: t('disconnect-title'),
+    title: t(one ? 'disconnect-title' : 'disconnect-all-title'),
     body: [...choices.body, warning],
-    confirm: t('account-disconnect'),
+    confirm: t(one ? 'account-disconnect' : 'account-disconnect-all'),
     cancel: t('action-cancel'),
     danger: true,
     ready: choices.ready,
@@ -50,10 +52,28 @@ export async function askLogout(ctx, status) {
   return ok ? choices.value() : null;
 }
 
+// Os e-mails de todas as contas e os envios pendentes delas somados (o `Status` já traz os dois).
+export async function allAccounts(api) {
+  const { accounts } = await api.call('status', { account: '' });
+  return {
+    emails: accounts.map((a) => a.email),
+    pending: accounts.reduce((sum, a) => sum + a.pending_uploads, 0),
+  };
+}
+
 export async function disconnect(ctx) {
   const { api, t } = ctx;
-  const choice = await askLogout(ctx, await api.call('status'));
+  const status = await api.call('status');
+  const choice = await askLogout(ctx, { emails: [status.account], pending: status.pending_uploads });
   if (!choice) return;
   toast(t('disconnect-progress'));
   attempt(api.call('logout', choice), () => toast(t('disconnect-done')));
+}
+
+export async function disconnectAll(ctx) {
+  const { api, t } = ctx;
+  const choice = await askLogout(ctx, await allAccounts(api));
+  if (!choice) return;
+  toast(t('disconnect-progress'));
+  attempt(api.call('logout_all', choice), () => toast(t('disconnect-all-done')));
 }

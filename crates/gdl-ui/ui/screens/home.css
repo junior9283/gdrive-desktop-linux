@@ -181,6 +181,26 @@
   border-radius: 50%;
 }
 
+/* A inicial da conta enquanto a foto não chega. */
+.avatar.initial {
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  font: var(--md-title-medium);
+}
+
+.account-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.needs-sign-in {
+  color: var(--md-error);
+}
+
 .view-error {
   color: var(--md-error);
 }

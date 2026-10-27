@@ -37,27 +37,44 @@ export const GUIDE = [
 export const TROUBLES = ['publish-blocked', 'access-denied', 'redirect-mismatch', 'weekly-logout', 'api-disabled'];
 const TOUR = ['intro', 'files', 'offline'];
 
-// Os passos mostrados: com `DisableOnboardingDialog`, só os do login.
-export function stepsFor(loginOnly) {
+// Os passos mostrados: com `DisableOnboardingDialog`, só os do login; adicionando outra conta
+// (`mode` `add`) ou entrando de novo numa (`resume`), só o passo dela e a espera, sem o guia: as
+// credenciais já guardadas valem.
+export function stepsFor(loginOnly, mode = '') {
+  if (mode) return [mode, 'waiting'];
   return loginOnly ? [...LOGIN] : [...LOGIN, ...TOUR];
 }
 
-// Onde começa: sem conta, no login; com a conta conectada, na apresentação (ou no fim, se ela
+// Onde começa: nos modos `add` e `resume`, no passo deles (`expected` é o e-mail da conta que
+// entra de novo); sem conta, no login; com a conta conectada, na apresentação (ou no fim, se ela
 // está desligada). `mount` é a pasta do Drive.
-export function firstState({ signedIn, loginOnly, mount = '' }) {
-  const step = !signedIn ? 'setup' : loginOnly ? 'end' : 'intro';
-  return { step, loginOnly, mount, clientId: '', secret: '', url: null, linkShown: false, error: null };
+export function firstState({ signedIn, loginOnly, mount = '', mode = '', expected = '' }) {
+  const step = mode || (!signedIn ? 'setup' : loginOnly ? 'end' : 'intro');
+  return {
+    step, loginOnly, mode, expected, mount, clientId: '', secret: '', url: null, linkShown: false, error: null,
+    failed: false,
+  };
+}
+
+// Os motivos de recusa do serviço que têm texto próprio (`onboarding-login-failed-<motivo>`).
+export const REASONS = ['already-connected', 'other-account', 'too-many-accounts', 'add-account-disabled'];
+
+// O erro de um login que não deu certo, como `[chave, argumentos]`.
+export function loginFailure(error) {
+  return REASONS.includes(error)
+    ? [`onboarding-login-failed-${error}`]
+    : ['onboarding-login-failed', { error }];
 }
 
 // O passo seguinte dentro de `steps`, ou o fim.
 function after(state) {
-  const steps = stepsFor(state.loginOnly);
+  const steps = stepsFor(state.loginOnly, state.mode);
   return steps[steps.indexOf(state.step) + 1] ?? 'end';
 }
 
 // O passo de `Voltar`, ou `null` sem volta (depois do login não se volta para ele).
-function previous(step) {
-  for (const steps of [LOGIN, TOUR]) {
+function previous({ step, mode }) {
+  for (const steps of [mode ? [mode, 'waiting'] : LOGIN, TOUR]) {
     const i = steps.indexOf(step);
     if (i > 0) return steps[i - 1];
   }
@@ -71,25 +88,27 @@ export function actions(state) {
   let primary = 'continue';
   if (state.step === 'waiting') primary = null;
   else if (last) primary = 'finish';
-  else if (state.error?.[0] === 'onboarding-login-failed') primary = 'retry';
-  return { skip: state.step !== 'waiting' && !last, back: previous(state.step) !== null, primary };
+  else if (state.failed) primary = 'retry';
+  return { skip: state.step !== 'waiting' && !last && !state.mode, back: previous(state) !== null, primary };
 }
 
 // O estado depois de `event`: `continue`, `back`, `skip`, `edit` (`field`, `value`),
 // `login-url` (`url`), `show-link` ou `login-finished` (`ok`, `error`, `mount`).
 export function nextStep(state, event) {
   // Trocar de passo esquece o erro e o link de login.
-  const go = (step, changes = {}) => ({ ...state, step, error: null, url: null, linkShown: false, ...changes });
+  const go = (step, changes = {}) => ({
+    ...state, step, error: null, failed: false, url: null, linkShown: false, ...changes,
+  });
   switch (event.type) {
     case 'edit':
-      return { ...state, [event.field]: event.value, error: null };
+      return { ...state, [event.field]: event.value, error: null, failed: false };
     case 'continue':
       if (state.step === 'sign-in' && (!state.clientId.trim() || !state.secret.trim())) {
         return { ...state, error: ['onboarding-missing-client'] };
       }
       return actions(state).primary ? go(after(state)) : state;
     case 'back': {
-      const step = previous(state.step);
+      const step = previous(state);
       return step ? go(step) : state;
     }
     case 'skip':
@@ -101,7 +120,7 @@ export function nextStep(state, event) {
     case 'login-finished':
       if (state.step !== 'waiting') return state;
       if (event.ok) return go(after(state), { mount: event.mount ?? state.mount });
-      return go('sign-in', { error: ['onboarding-login-failed', { error: event.error }] });
+      return go(state.mode || 'sign-in', { error: loginFailure(event.error), failed: true });
     default:
       return state;
   }

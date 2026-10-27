@@ -27,6 +27,10 @@ pub struct ChangePoller {
     /// Drives das mudanças que a lista de Drives não trouxe: sem procurar de novo a cada
     /// consulta enquanto a mudança se repete (limpa em `forget_searched_drives`).
     searched_drives: Mutex<BTreeSet<String>>,
+    /// A lista de Drives já foi consultada nesta partida. A primeira consulta de mudanças a
+    /// consulta também: pega o que mudou com o app fechado e o banco de quem veio da 0.7, que
+    /// foi indexado sem Drives compartilhados.
+    drives_listed: AtomicBool,
 }
 
 /// Junta o item do banco com a versão nova da nuvem. Devolve o item e se o cache deve ser
@@ -176,6 +180,7 @@ impl ChangePoller {
             offline: AtomicBool::new(false),
             last_sync_ms: AtomicI64::new(0),
             searched_drives: Mutex::default(),
+            drives_listed: AtomicBool::new(false),
         }
     }
 
@@ -226,7 +231,9 @@ impl ChangePoller {
     /// Antes de aplicar as mudanças, a lista de Drives é consultada quando um Drive mudou
     /// (criado, renomeado, dado ou tirado da conta) ou quando um item vem de um Drive que o banco
     /// não conhece: os novos entram ligados e indexados. Um que a lista não traz não é procurado
-    /// de novo até `forget_searched_drives`.
+    /// de novo até `forget_searched_drives`. Sem nada disso, a primeira consulta da partida
+    /// consulta a lista também, mas a falha dela só vai para o log (nenhuma mudança depende
+    /// dela) e ela é tentada de novo na próxima.
     async fn register_new_drives(&self, changes: &[Change]) -> Result<()> {
         let known = self.store.shared_drives()?;
         let unknown: BTreeSet<String> = {
@@ -241,11 +248,19 @@ impl ChangePoller {
                 .collect()
         };
         let drive_changed = changes.iter().any(|c| matches!(c, Change::Drive(_)));
-        if unknown.is_empty() && !drive_changed {
+        let needed = drive_changed || !unknown.is_empty();
+        if !needed && self.drives_listed.load(Ordering::Relaxed) {
             return Ok(());
         }
         let email = self.store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
-        sync_drive_list(&self.store, &self.client, Some(&self.cache), &email).await?;
+        match sync_drive_list(&self.store, &self.client, Some(&self.cache), &email).await {
+            Ok(_) => self.drives_listed.store(true, Ordering::Relaxed),
+            Err(e) if !needed => {
+                tracing::warn!(erro = %e, "falha ao consultar a lista de Drives compartilhados");
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
         let known = self.store.shared_drives()?;
         self.searched().extend(
             unknown
@@ -258,6 +273,7 @@ impl ChangePoller {
     /// A lista de Drives foi consultada por outro caminho: os que as mudanças trazem e ela não
     /// tinha voltam a ser procurados.
     pub(crate) fn forget_searched_drives(&self) {
+        self.drives_listed.store(true, Ordering::Relaxed);
         self.searched().clear();
     }
 

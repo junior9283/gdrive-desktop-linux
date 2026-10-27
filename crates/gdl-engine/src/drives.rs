@@ -440,6 +440,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_first_poll_lists_the_drives_of_an_account_indexed_before_them() {
+        // Banco da 0.7: indexado sem Drives compartilhados.
+        let (_fake, team, engine, _tmp) = setup().await;
+        let store = engine.store();
+        store.forget_drive_items(&id(&team.drive)).unwrap();
+        store.delete_shared_drive(&id(&team.drive)).unwrap();
+
+        engine.poller.run_once().await.unwrap();
+
+        assert!(store.get(&id(&team.file)).unwrap().is_some());
+        assert!(store.shared_drives().unwrap()[0].enabled);
+    }
+
+    #[tokio::test]
+    async fn the_first_poll_applies_the_changes_even_without_the_drive_list() {
+        let (fake, _team, engine, _tmp) = setup().await;
+        fake.inject(Fault::DrivesListStatus(403));
+        let mine = fake.add_file(&fake.root_id(), "novo.txt", b"1".to_vec());
+
+        engine.poller.run_once().await.unwrap();
+
+        assert!(engine.store().get(&id(&mine)).unwrap().is_some());
+    }
+
+    #[tokio::test]
     async fn renamed_drive_gets_the_new_name_on_the_next_poll() {
         let (fake, team, engine, _tmp) = setup().await;
 

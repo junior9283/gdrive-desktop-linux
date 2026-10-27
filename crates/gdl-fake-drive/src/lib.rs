@@ -50,6 +50,8 @@ pub enum Fault {
     /// A listagem dos itens do Drive compartilhado `drive` responde o erro `code`, até
     /// `clear_faults` (o Drive está em `drives.list`, mas não dá para ler o que há nele).
     DriveListingStatus { drive: String, code: u16 },
+    /// A lista de Drives compartilhados (`drives.list`) responde o erro `code`, até `clear_faults`.
+    DrivesListStatus(u16),
 }
 
 pub struct FakeDrive {
@@ -270,6 +272,7 @@ impl FakeDrive {
             Fault::DelayUploads(delay) => self.shared.state().upload_delay = Some(delay),
             Fault::ThumbStatus(code) => self.shared.state().thumb_status = Some(code),
             Fault::CutThumbBody => self.shared.state().thumb_cut = true,
+            Fault::DrivesListStatus(code) => self.shared.state().drives_list_fault = Some(code),
             Fault::DriveListingStatus { drive, code } => {
                 self.shared.state().drive_listing_fault = Some((drive, code));
             }
@@ -285,6 +288,7 @@ impl FakeDrive {
             state.upload_delay = None;
             state.thumb_status = None;
             state.drive_listing_fault = None;
+            state.drives_list_fault = None;
             state.thumb_cut = false;
         }
         self.shared.drop_budget.store(-1, Ordering::SeqCst);

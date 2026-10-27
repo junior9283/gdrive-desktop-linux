@@ -183,6 +183,8 @@ pub(crate) struct State {
     pub(crate) thumb_status: Option<u16>,
     /// Erro da listagem de um Drive compartilhado (`Fault::DriveListingStatus`).
     pub(crate) drive_listing_fault: Option<(String, u16)>,
+    /// Erro da lista de Drives (`Fault::DrivesListStatus`).
+    pub(crate) drives_list_fault: Option<u16>,
     /// Corpo de cada miniatura cortado no meio (`Fault::CutThumbBody`).
     pub(crate) thumb_cut: bool,
     pub(crate) files: BTreeMap<String, FileRec>,
@@ -239,6 +241,7 @@ impl State {
             max_uploads_in_flight: 0,
             thumb_status: None,
             drive_listing_fault: None,
+            drives_list_fault: None,
             thumb_cut: false,
             files: BTreeMap::new(),
             drives: vec![],

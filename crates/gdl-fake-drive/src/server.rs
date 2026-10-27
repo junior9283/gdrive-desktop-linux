@@ -383,14 +383,21 @@ async fn list_drives(
     State(shared): Shr,
     Extension(me): Extension<Me>,
     Query(params): Params,
-) -> Json<Value> {
+) -> Response {
     let state = shared.state();
+    if let Some(code) = state.drives_list_fault {
+        return api_error(
+            code,
+            "forbidden",
+            "The user does not have sufficient permissions",
+        );
+    }
     let (drives, next) = offset_page(&params, state.drives_of(&me.0));
     let mut body = json!({ "kind": "drive#driveList", "drives": drives.into_iter().map(drive_json).collect::<Vec<_>>() });
     if let Some(next) = next {
         body["nextPageToken"] = next.into();
     }
-    Json(body)
+    Json(body).into_response()
 }
 
 /// `drives.create`: o mesmo `requestId` devolve o drive que já foi criado.

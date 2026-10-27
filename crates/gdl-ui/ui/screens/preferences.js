@@ -9,6 +9,7 @@ import { screenArg } from '../router.js';
 import { currentAccount } from '../state.js';
 import { disconnect } from './home/disconnect.js';
 import { configurator, folderArg, folderName } from './preferences/folders.js';
+import { mirrorConfirm, suggestedMirror } from './preferences/mirror.js';
 import {
   diff, fromPrefs, gbToKb, hotkeyFrom, kbToGb, numberOrNull, proxyMode, proxyPatch, validate,
 } from './preferences/model.js';
@@ -21,6 +22,8 @@ const screen = { root: null, ctx: null, tab: 'drive', listening: null, listening
 const form = { original: {}, edited: {}, managed: new Set(), limits: {}, mount: '', restartDue: false };
 // As pastas do computador (`LocalFolders`) e as contas, para o configurador.
 const computer = { folders: [], accounts: [] };
+// A pasta do Espelho da conta atual (vazia no Stream).
+const drive = { mirror: '' };
 // Os pedaços que mudam sem redesenhar e a conferência de cada campo com linha de erro.
 const ui = { errors: {} };
 
@@ -36,8 +39,12 @@ export async function render(root, ctx) {
       .catch(() => {});
   });
   screen.listeningArg ??= listenArg(ctx);
-  screen.listeningFolders ??= ctx.api.on('local-folders-changed', () => loadFolders().then(drawFolders).catch(() => {}));
-  await Promise.all([loadPrefs(), loadContext(), loadFolders(), css]);
+  // Os pares mudaram (uma pasta, ou o Espelho ligado ou desligado, até por fora desta janela).
+  screen.listeningFolders ??= ctx.api.on('local-folders-changed', () =>
+    Promise.all([loadFolders(), loadMirror()])
+      .then(() => (screen.tab === 'drive' ? showTab('drive') : drawFolders()))
+      .catch(() => {}));
+  await Promise.all([loadPrefs(), loadContext(), loadFolders(), loadMirror(), css]);
   draw();
   if (screen.folderArg) {
     const path = screen.folderArg;
@@ -80,6 +87,21 @@ async function loadContext() {
   computer.accounts = status.accounts.map((a) => a.email);
   form.limits = { maxCacheGb: summary ? Math.floor((summary.cache_bytes + summary.free_bytes) / 1024 ** 3) : null };
 }
+
+async function loadMirror() {
+  drive.mirror = await screen.ctx.api.call('mirror', { account: currentAccount() }).catch(() => drive.mirror);
+}
+
+// Uma pasta escolhida no seletor do sistema, passada a `then` (nada se o usuário cancelou).
+function pickDir(then) {
+  return async () => {
+    const dir = await screen.ctx.api.pickFolder(screen.ctx.t('pref-pick-folder')).catch(() => null);
+    if (dir) then(dir);
+  };
+}
+
+// A chave está travada ligada pelo administrador.
+const policyOn = (key) => form.managed.has(key) && form.original[key] === true;
 
 async function loadFolders() {
   computer.folders = await screen.ctx.api.call('local_folders');
@@ -152,14 +174,14 @@ function cancel() {
 function computerTab() {
   const { t } = screen.ctx;
   // A política desliga a sincronização de pastas: o botão fica bloqueado com o aviso de sempre.
-  const disabled = form.managed.has('DisableMirroredFolders') && form.original.DisableMirroredFolders === true;
+  const disabled = policyOn('DisableMirroredFolders');
   ui.folders = el('ul', { class: 'local-folders' });
   drawFolders();
   return [
     el('p', { class: 'meta' }, t('pref-computer-text')),
     ui.folders,
     el('fieldset', { class: 'pref', 'data-key': 'DisableMirroredFolders', disabled },
-      el('button', { class: 'tonal add-folder', onclick: () => pickAndAdd() }, t('pref-add-folder')),
+      el('button', { class: 'tonal add-folder', onclick: pickDir(addFolder) }, t('pref-add-folder')),
       disabled ? el('span', { class: 'meta managed-note' }, t('folder-refused-folders-disabled')) : []),
   ];
 }
@@ -167,11 +189,6 @@ function computerTab() {
 // A lista das pastas do computador (redesenhada quando o serviço avisa que mudou).
 function drawFolders() {
   ui.folders?.replaceChildren(...folderItems(screen.ctx, computer.folders, computer.accounts.length > 1));
-}
-
-async function pickAndAdd() {
-  const dir = await screen.ctx.api.pickFolder(screen.ctx.t('pref-pick-folder')).catch(() => null);
-  if (dir) addFolder(dir);
 }
 
 // O configurador da pasta `path`: a conta, o tamanho e a contagem (ou o motivo da recusa), a
@@ -223,23 +240,113 @@ async function addFolder(path) {
     .catch(refusalToast(t));
 }
 
+// Stream ou Espelho: a troca vale na hora, depois da confirmação (não entra no Salvar). A
+// política bloqueia o Espelho para quem ainda não está nele.
 function driveTab() {
   const { api, t } = screen.ctx;
-  const mode = (value, label, text, disabled) =>
-    choice(el('input', { type: 'radio', name: 'drive-mode', value, checked: value === 'stream', disabled }),
+  const mirrored = Boolean(drive.mirror);
+  const locked = !mirrored && policyOn('DisableMirroredMyDrive');
+  const mode = (value, label, text, { disabled = false, note = null, onchange }) =>
+    choice(el('input', { type: 'radio', name: 'drive-mode', value, checked: (value === 'mirror') === mirrored, disabled, onchange }),
       el('strong', {}, label), el('br'), text,
-      disabled ? [el('br'), el('span', { class: 'meta' }, t('pref-coming-soon'))] : []);
+      note ? [el('br'), el('span', { class: 'meta managed-note' }, note)] : []);
   return [
     el('h2', {}, t('pref-drive-mode')),
     el('div', { class: 'choices' },
-      mode('stream', t('pref-stream'), t('pref-stream-text'), false),
-      mode('mirror', t('pref-mirror'), t('pref-mirror-text'), true)),
+      mode('stream', t('pref-stream'), t('pref-stream-text'), { onchange: toStream }),
+      mode('mirror', t('pref-mirror'), t('pref-mirror-text'), {
+        disabled: locked,
+        note: locked ? t('folder-refused-mirror-disabled') : null,
+        onchange: toMirror,
+      })),
     el('h2', {}, t('pref-drive-folder')),
-    el('p', { class: 'path' }, form.mount),
+    el('p', { class: 'path drive-folder' }, drive.mirror || form.mount),
     el('button', { class: 'tonal', onclick: () => attempt(api.openMount()) }, t('pref-open-folder')),
     el('button', { class: 'tonal manage-shared-drives', onclick: () => api.openScreen('shared-drives', currentAccount()) },
       t('pref-shared-drives')),
   ];
+}
+
+// Para o Espelho: a pasta (sugerida ao lado da montagem, editável ou escolhida no seletor), o
+// tamanho a baixar e o espaço livre (ou o motivo da recusa) e o que ainda não foi enviado.
+async function toMirror() {
+  const { api, t, locale } = screen.ctx;
+  const account = currentAccount();
+  const field = el('input', { type: 'text', class: 'mirror-path', value: suggestedMirror(form.mount, t('pref-mirror-name')) });
+  const summary = el('p', { class: 'folder-summary' });
+  let state = null;
+  const check = async () => {
+    state = null;
+    summary.textContent = '';
+    const reply = await api.call('mirror_check', { account, path: field.value }).catch(toastError);
+    if (reply) {
+      state = mirrorConfirm(reply);
+      summary.textContent = mirrorText(state, t, locale);
+      summary.classList.toggle('field-error', !state.ok);
+    }
+    body.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const pick = pickDir((dir) => {
+    field.value = dir;
+    check();
+  });
+  field.addEventListener('change', check);
+  const body = el('div', { class: 'mirror-config' },
+    el('p', { class: 'meta' }, t('mirror-config-text')),
+    el('label', { class: 'field' }, el('span', {}, t('mirror-config-folder')), field),
+    el('button', { class: 'tonal', onclick: pick }, t('mirror-config-pick')),
+    summary);
+  const answer = confirmDialog({
+    title: t('mirror-config-title'),
+    body,
+    confirm: t('mirror-config-done'),
+    cancel: t('action-cancel'),
+    ready: () => Boolean(state?.ok),
+  });
+  await check();
+  if (await answer) {
+    await api.call('set_mirror', { account, path: field.value })
+      .then(() => {
+        drive.mirror = field.value;
+        toast(t('mirror-on'));
+      })
+      .catch(refusalToast(t));
+  }
+  showTab('drive');
+}
+
+function mirrorText(state, t, locale) {
+  if (state.refusal) return t(state.refusal);
+  const size = (bytes) => formatSize(bytes, locale);
+  return [
+    t('mirror-config-summary', { size: size(state.size), free: size(state.free) }),
+    state.fits ? '' : t('mirror-no-space'),
+    state.pending ? t('mirror-config-pending', { count: state.pending }) : '',
+  ].filter(Boolean).join(' ');
+}
+
+// De volta ao Stream: a pasta do Espelho fica, ou vai para a lixeira se o usuário marcar.
+async function toStream() {
+  const { api, t } = screen.ctx;
+  const remove = el('input', { type: 'checkbox', class: 'mirror-remove' });
+  const answer = await confirmDialog({
+    title: t('stream-config-title'),
+    body: el('div', {},
+      el('p', {}, t('stream-config-text', { path: drive.mirror })),
+      choice(remove, t('stream-config-remove'))),
+    confirm: t('stream-config-done'),
+    cancel: t('action-cancel'),
+  });
+  if (answer) {
+    await api.call('set_stream', { account: currentAccount(), remove_old: remove.checked })
+      .then(() => {
+        drive.mirror = '';
+        toast(t('stream-on'));
+      })
+      .catch(refusalToast(t));
+  }
+  // Redesenhar também devolve o rádio ao modo atual quando o usuário cancela.
+  showTab('drive');
 }
 
 function settingsTab() {
@@ -298,16 +405,13 @@ function checkbox(key, label, hint) {
 
 // Uma pasta com Alterar (o seletor do sistema) e Redefinir (o padrão, `fallback` na tela).
 function folder(key, label, fallback) {
-  const { api, t } = screen.ctx;
+  const { t } = screen.ctx;
   const path = el('span', { class: 'path' }, form.edited[key] ?? fallback);
   const choose = (dir) => {
     path.textContent = dir ?? fallback;
     set({ [key]: dir });
   };
-  const change = async () => {
-    const dir = await api.pickFolder(t('pref-pick-folder')).catch(() => null);
-    if (dir) choose(dir);
-  };
+  const change = pickDir(choose);
   return row(key, el('div', { class: 'field' }, el('span', {}, t(label)), path),
     el('div', { class: 'row-buttons' },
       el('button', { class: 'text', onclick: change }, t('pref-change')),

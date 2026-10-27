@@ -329,7 +329,26 @@ folder-refused-nested = This folder is already inside a synced folder or the Goo
 folder-refused-contains = This folder contains a synced folder or the Google Drive folder.
 folder-refused-network = Network folders can't be synced.
 folder-refused-folders-disabled = Your administrator turned off syncing folders from this computer.
-pref-coming-soon = Coming in a future version
+folder-refused-mirror-disabled = Your administrator turned off mirroring My Drive.
+folder-refused-mirror-pending = Files in the mirror are still uploading. Try again when they finish.
+pref-mirror-name = My Drive
+mirror-config-title = Mirror files
+mirror-config-text = A copy of all of My Drive stays in this folder on your computer, available even without internet. Shared drives stay in the Google Drive folder.
+mirror-config-folder = My Drive folder
+mirror-config-pick = Choose folder
+mirror-config-summary = { $size } will be downloaded; { $free } free on the disk.
+mirror-no-space = There is not enough space.
+mirror-config-pending = { $count ->
+    [one] 1 item has not been uploaded yet and keeps uploading.
+   *[other] { $count } items have not been uploaded yet and keep uploading.
+}
+mirror-config-done = Mirror
+mirror-on = My Drive is being mirrored on this computer.
+stream-config-title = Stream files
+stream-config-text = Files go back to the cloud and the folder { $path } stops syncing.
+stream-config-remove = Move the old folder to the trash
+stream-config-done = Stream
+stream-on = My Drive files are back in the cloud.
 pref-drive-mode = How My Drive lives on this computer
 pref-stream = Stream files
 pref-stream-text = Files stay in the cloud and are downloaded when you open them. Uses little disk space.

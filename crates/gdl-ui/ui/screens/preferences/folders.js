@@ -2,7 +2,9 @@
 // mostra de uma pasta escolhida.
 
 // Os motivos de recusa que têm texto próprio no `ui.ftl` (`folder-refused-<motivo>`).
-const REFUSALS = new Set(['missing', 'unreadable', 'nested', 'contains', 'network', 'folders-disabled']);
+const REFUSALS = new Set([
+  'missing', 'unreadable', 'nested', 'contains', 'network', 'folders-disabled', 'mirror-disabled', 'mirror-pending',
+]);
 
 // A pasta do argumento da janela `folder:<caminho>` (o Dolphin e os avisos abrem assim), ou `null`.
 export function folderArg(arg) {
@@ -37,7 +39,12 @@ function notice({ state, deletes }) {
 
 // O configurador para a conferência do serviço (`CheckLocalFolder`).
 export function configurator({ refusal, size, files, exists }) {
-  return { refusal: refusal ? refusalKey(refusal) ?? 'folder-refused-unreadable' : null, size, files, askMerge: exists };
+  return { refusal: refusalOf(refusal), size, files, askMerge: exists };
+}
+
+// A chave do texto da recusa vinda de uma conferência do serviço (`null` se a pasta serve).
+export function refusalOf(reason) {
+  return reason ? refusalKey(reason) ?? 'folder-refused-unreadable' : null;
 }
 
 // A chave do texto de um motivo de recusa do serviço, ou `null` quando não tem texto próprio.

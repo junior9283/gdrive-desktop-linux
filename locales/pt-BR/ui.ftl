@@ -329,7 +329,26 @@ folder-refused-nested = Esta pasta já está dentro de uma pasta sincronizada ou
 folder-refused-contains = Esta pasta contém uma pasta já sincronizada ou a pasta do Google Drive.
 folder-refused-network = Pastas de rede não podem ser sincronizadas.
 folder-refused-folders-disabled = O administrador desativou a sincronização de pastas do computador.
-pref-coming-soon = Chega numa próxima versão
+folder-refused-mirror-disabled = O administrador desativou o espelhamento do Meu Drive.
+folder-refused-mirror-pending = Ainda há arquivos do Espelho sendo enviados. Tente de novo quando terminarem.
+pref-mirror-name = Meu Drive
+mirror-config-title = Espelhar os arquivos
+mirror-config-text = Uma cópia de todo o Meu Drive fica nesta pasta do computador, disponível mesmo sem internet. Os Drives compartilhados continuam na pasta do Google Drive.
+mirror-config-folder = Pasta do Meu Drive
+mirror-config-pick = Escolher pasta
+mirror-config-summary = Serão baixados { $size }; há { $free } livres no disco.
+mirror-no-space = Não há espaço suficiente.
+mirror-config-pending = { $count ->
+    [one] 1 item ainda não foi enviado e continua sendo enviado.
+   *[other] { $count } itens ainda não foram enviados e continuam sendo enviados.
+}
+mirror-config-done = Espelhar
+mirror-on = O Meu Drive está sendo espelhado no computador.
+stream-config-title = Fazer streaming dos arquivos
+stream-config-text = Os arquivos voltam a ficar na nuvem e a pasta { $path } deixa de ser sincronizada.
+stream-config-remove = Mover a pasta antiga para a lixeira
+stream-config-done = Fazer streaming
+stream-on = Os arquivos do Meu Drive voltaram a ficar na nuvem.
 pref-drive-mode = Como o Meu Drive fica no computador
 pref-stream = Fazer streaming dos arquivos
 pref-stream-text = Os arquivos ficam na nuvem e são baixados quando você abre. Ocupa pouco espaço no disco.

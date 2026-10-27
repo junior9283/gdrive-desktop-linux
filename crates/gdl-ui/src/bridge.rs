@@ -215,6 +215,10 @@ impl Bridge {
                 j!(s.relocate_local_folder(a.account(), a.i64("id")?, a.str("path")?))
             }
             "confirm_folder_deletes" => j!(s.confirm_folder_deletes(a.account(), a.i64("id")?)),
+            "mirror" => j!(s.mirror(a.account())),
+            "mirror_check" => j!(s.mirror_check(a.account(), a.str("path")?)),
+            "set_mirror" => j!(s.set_mirror(a.account(), a.str("path")?)),
+            "set_stream" => j!(s.set_stream(a.account(), a.bool("remove_old")?)),
             "versions" => j!(s.versions(a.account(), a.str("item_id")?)),
             "version_download" => {
                 j!(s.version_download(a.account(), a.str("item_id")?, a.str("version_id")?))
@@ -242,10 +246,14 @@ impl Bridge {
         self.settle(reply)
     }
 
-    /// A pasta do Drive (a montagem), direto do `Status` do serviço.
+    /// A pasta do Drive da conta atual: a do Espelho, se houver, senão a montagem.
     pub async fn mount_point(&self) -> Result<String, UiError> {
-        let status = self.settle(self.service.status("").await)?;
-        Ok(status.mount_point)
+        let (mirror, status) = tokio::join!(self.service.mirror(""), self.service.status(""));
+        let mirror = self.settle(mirror)?;
+        if !mirror.is_empty() {
+            return Ok(mirror);
+        }
+        Ok(self.settle(status)?.mount_point)
     }
 
     /// A pasta do computador `id` da conta, pelo que o serviço guarda.

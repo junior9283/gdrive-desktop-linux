@@ -943,6 +943,49 @@ fn computer_folder(name: &str) -> std::path::PathBuf {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
+async fn drive_tab_switches_to_mirror_and_back() {
+    let service = service().await;
+    let dir = std::env::temp_dir().join(format!("Espelho-e2e-{}", std::process::id()));
+    let path = dir.display().to_string();
+    let session = Session::open("preferences:drive").await;
+
+    session.click("input[name='drive-mode'][value='mirror']").await;
+    session.wait_text(".dialog .folder-summary", "livres").await;
+    session
+        .eval(&format!(
+            "const f = document.querySelector('.mirror-path'); f.value = {path:?}; \
+             f.dispatchEvent(new Event('change', {{ bubbles: true }}));"
+        ))
+        .await;
+    session.wait_text(".dialog .folder-summary", "livres").await;
+    session.click(".dialog .filled").await;
+    session.wait_text(".toast", "sendo espelhado").await;
+    let shown = session.wait_text(".drive-folder", &path).await;
+    let mirrored = service.mirror("").await.unwrap();
+
+    // A volta espera os envios do Espelho (o Drive de teste traz arquivos para baixar).
+    let mut back = false;
+    for _ in 0..50 {
+        session.click("input[name='drive-mode'][value='stream']").await;
+        session.click(".dialog .mirror-remove").await;
+        session.click(".dialog .filled").await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        if service.mirror("").await.unwrap().is_empty() {
+            back = true;
+            break;
+        }
+    }
+    let removed = !dir.exists();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(mirrored, path);
+    assert!(shown.contains(&path), "{shown}");
+    assert!(back, "de volta ao Stream");
+    assert!(removed, "a pasta antiga vai para a lixeira");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
 async fn connected_folders_view_lists_the_pairs() {
     let service = service().await;
     let dir = computer_folder("Projetos");
@@ -1182,6 +1225,14 @@ async fn screenshots_for_the_readme() {
         session.wait_text(css, wanted).await;
         save(&session, name).await;
     }
+    let mirror = Session::open("preferences:drive").await;
+    mirror
+        .click("input[name='drive-mode'][value='mirror']")
+        .await;
+    mirror.wait_text(".dialog .folder-summary", "livres").await;
+    save(&mirror, "espelhar").await;
+    mirror.click(".dialog .dialog-cancel").await;
+    drop(mirror);
 
     let service = service().await;
     service.logout("", "discard", "").await.unwrap();

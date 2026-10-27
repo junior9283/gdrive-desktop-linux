@@ -4,6 +4,7 @@
 // Os motivos de recusa que têm texto próprio no `ui.ftl` (`folder-refused-<motivo>`).
 const REFUSALS = new Set([
   'missing', 'unreadable', 'nested', 'contains', 'network', 'folders-disabled', 'mirror-disabled', 'mirror-pending',
+  'devices-disabled',
 ]);
 
 // A pasta do argumento da janela `folder:<caminho>` (o Dolphin e os avisos abrem assim), ou `null`.

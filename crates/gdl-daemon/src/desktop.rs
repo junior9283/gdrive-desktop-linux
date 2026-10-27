@@ -193,7 +193,8 @@ fn split_kconfig_list(value: &str) -> Vec<String> {
     items
 }
 
-fn xml_text(text: &str) -> String {
+/// O texto como texto dentro de XML ou da marcação dos avisos.
+pub(crate) fn xml_text(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")

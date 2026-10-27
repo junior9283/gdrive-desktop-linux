@@ -34,7 +34,7 @@ if [ "${1:-}" != "--inside" ]; then
     exit 77
   fi
   cargo build -q -p gdl-ui -p gdl-tray -p gdl-cli --bins
-  cargo build -q -p gdl-daemon --example e2e-daemon
+  cargo build -q -p gdl-daemon --features testing --example e2e-daemon
   cargo test -q -p gdl-ui --test e2e --no-run
   exec env -u DISPLAY -u WAYLAND_DISPLAY \
     dbus-run-session --config-file=scripts/e2e-bus.conf -- xvfb-run -a -s "-screen 0 ${screen}x24" "$0" --inside "$@"

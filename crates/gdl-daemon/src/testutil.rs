@@ -13,12 +13,13 @@ use gdl_drive::token_store::{MemoryStore, TokenStore};
 use gdl_engine::engine::Intervals;
 use gdl_fake_drive::FakeDrive;
 use zbus::connection::Builder;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue};
+use zbus::zvariant::OwnedValue;
 use zbus::{Connection, Guid};
 
 use crate::daemon::{Api, Config, Daemon};
 use crate::dbus::Service;
 use crate::devices::UDISKS_PATH;
+use crate::fake_udisks;
 use crate::metered::NETWORK_MANAGER_PATH;
 use crate::notify::NOTIFICATIONS_PATH;
 use gdl_ipc::{OBJECT_PATH, ServiceProxy};
@@ -39,6 +40,11 @@ struct FakeNotifications(Arc<Mutex<Vec<Note>>>);
 
 #[zbus::interface(name = "org.freedesktop.Notifications")]
 impl FakeNotifications {
+    /// Como os servidores de verdade (KDE, GNOME): o corpo aceita marcação.
+    fn get_capabilities(&self) -> Vec<String> {
+        vec!["body".into(), "body-markup".into(), "actions".into()]
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn notify(
         &self,
@@ -79,73 +85,6 @@ impl FakeNetworkManager {
     #[zbus(property)]
     fn metered(&self) -> u32 {
         self.metered
-    }
-}
-
-/// UDisks2 falso: cada dispositivo é uma unidade removível (`Drive`) e um sistema de arquivos
-/// montado (`Block` e `Filesystem`) sob o gerenciador de objetos, que avisa a entrada e a saída.
-struct FakeUDisksDrive;
-
-#[zbus::interface(name = "org.freedesktop.UDisks2.Drive")]
-impl FakeUDisksDrive {
-    #[zbus(property)]
-    fn removable(&self) -> bool {
-        true
-    }
-
-    #[zbus(property)]
-    fn media_removable(&self) -> bool {
-        true
-    }
-}
-
-struct FakeBlock {
-    uuid: String,
-    label: String,
-    drive: OwnedObjectPath,
-}
-
-#[zbus::interface(name = "org.freedesktop.UDisks2.Block")]
-impl FakeBlock {
-    #[zbus(property, name = "IdUUID")]
-    fn id_uuid(&self) -> String {
-        self.uuid.clone()
-    }
-
-    #[zbus(property, name = "IdLabel")]
-    fn id_label(&self) -> String {
-        self.label.clone()
-    }
-
-    #[zbus(property)]
-    fn size(&self) -> u64 {
-        1 << 30
-    }
-
-    #[zbus(property)]
-    fn hint_system(&self) -> bool {
-        false
-    }
-
-    #[zbus(property)]
-    fn drive(&self) -> OwnedObjectPath {
-        self.drive.clone()
-    }
-}
-
-struct FakeFilesystem {
-    mount: PathBuf,
-}
-
-#[zbus::interface(name = "org.freedesktop.UDisks2.Filesystem")]
-impl FakeFilesystem {
-    /// Caminhos terminados em NUL, como o UDisks2 manda.
-    #[zbus(property)]
-    fn mount_points(&self) -> Vec<Vec<u8>> {
-        use std::os::unix::ffi::OsStrExt;
-        let mut path = self.mount.as_os_str().as_bytes().to_vec();
-        path.push(0);
-        vec![path]
     }
 }
 
@@ -332,33 +271,16 @@ impl Harness {
 
     /// Conecta um pendrive montado em `mount` (o UDisks2 falso avisa a entrada).
     pub async fn plug(&self, uuid: &str, label: &str, mount: &Path) {
-        let (drive, block) = udisks_paths(uuid);
-        let server = self.client.object_server();
-        server.at(drive.clone(), FakeUDisksDrive).await.unwrap();
-        server
-            .at(
-                block.clone(),
-                FakeFilesystem {
-                    mount: mount.to_path_buf(),
-                },
-            )
+        fake_udisks::plug(self.client.object_server(), uuid, label, mount)
             .await
             .unwrap();
-        let block_iface = FakeBlock {
-            uuid: uuid.into(),
-            label: label.into(),
-            drive: drive.try_into().unwrap(),
-        };
-        server.at(block, block_iface).await.unwrap();
     }
 
     /// Desconecta o pendrive `uuid`.
     pub async fn unplug(&self, uuid: &str) {
-        let (drive, block) = udisks_paths(uuid);
-        let server = self.client.object_server();
-        server.remove::<FakeBlock, _>(block.clone()).await.unwrap();
-        server.remove::<FakeFilesystem, _>(block).await.unwrap();
-        server.remove::<FakeUDisksDrive, _>(drive).await.unwrap();
+        fake_udisks::unplug(self.client.object_server(), uuid)
+            .await
+            .unwrap();
     }
 
     pub fn notes(&self) -> Vec<Note> {
@@ -373,15 +295,6 @@ impl Drop for Harness {
             tokio::runtime::Handle::current().block_on(self.daemon.shutdown())
         });
     }
-}
-
-/// Os objetos da unidade e do sistema de arquivos do pendrive `uuid` no UDisks2 falso.
-fn udisks_paths(uuid: &str) -> (String, String) {
-    let name = uuid.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-    (
-        format!("{UDISKS_PATH}/drives/d{name}"),
-        format!("{UDISKS_PATH}/block_devices/b{name}"),
-    )
 }
 
 /// Espera sem bloquear o runtime.

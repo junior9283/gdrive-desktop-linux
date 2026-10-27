@@ -207,3 +207,22 @@ async fn turning_off_the_question_still_lets_the_user_back_up() {
     h.proxy.backup_device(UUID, false).await.unwrap();
     backed_up(&h, "praia.jpg").await;
 }
+
+/// Bug: o rótulo do pendrive (escolhido por quem o formatou) ia como marcação para o corpo do
+/// aviso, que o servidor de notificações interpreta.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn device_label_is_not_markup() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let mount = pendrive(&h);
+
+    h.plug(UUID, "<a href='x'>A&B</a>", &mount).await;
+
+    wait_until("pergunta", || h.notes().iter().any(|n| n.summary == ASK)).await;
+    let ask = h.notes().into_iter().find(|n| n.summary == ASK).unwrap();
+    assert!(
+        ask.body.contains("&lt;a href='x'&gt;A&amp;B&lt;/a&gt;"),
+        "{}",
+        ask.body
+    );
+}

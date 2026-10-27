@@ -1043,6 +1043,42 @@ async fn computer_tab_adds_and_stops_a_folder() {
     assert!(kept, "parar não apaga os arquivos");
 }
 
+/// O pendrive do serviço de teste na aba "Meu computador": ignorar, remover a escolha e fazer
+/// backup lembrando.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn computer_tab_backs_up_a_device() {
+    let service = service().await;
+    let session = Session::open("preferences:computer").await;
+    let row = ".device[data-id='E2E-0001']";
+    session.wait_text(".devices", "PENDRIVE").await;
+
+    session.click(&format!("{row} .device-ignore")).await;
+    session.wait_text(row, "Ignorado").await;
+    session
+        .click(&format!("{row}[data-choice='ignored'] .device-forget"))
+        .await;
+    // A linha redesenhada, sem a escolha.
+    session.find(&format!("{row}[data-choice='']")).await;
+
+    session.click(&format!("{row} .device-backup")).await;
+    session.click(".dialog .device-remember").await;
+    session.click(".dialog .filled").await;
+    session.wait_text(".toast", "Fazendo backup").await;
+    session.find(&format!("{row}[data-choice='backup']")).await;
+    let found = until("a foto no Drive", async || {
+        let found = service.search("", "foto.jpg").await.unwrap();
+        found
+            .into_iter()
+            .map(|r| r.path)
+            .find(|p| p.contains("PENDRIVE"))
+    })
+    .await;
+    service.forget_device("E2E-0001").await.unwrap();
+
+    assert!(found.contains("Computadores"), "{found}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn shortcut_screen_picks_a_folder() {

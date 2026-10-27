@@ -215,6 +215,10 @@ impl Bridge {
                 j!(s.relocate_local_folder(a.account(), a.i64("id")?, a.str("path")?))
             }
             "confirm_folder_deletes" => j!(s.confirm_folder_deletes(a.account(), a.i64("id")?)),
+            "devices" => j!(s.devices()),
+            "backup_device" => j!(s.backup_device(a.str("id")?, a.bool("remember")?)),
+            "ignore_device" => j!(s.ignore_device(a.str("id")?)),
+            "forget_device" => j!(s.forget_device(a.str("id")?)),
             "mirror" => j!(s.mirror(a.account())),
             "mirror_check" => j!(s.mirror_check(a.account(), a.str("path")?)),
             "set_mirror" => j!(s.set_mirror(a.account(), a.str("path")?)),

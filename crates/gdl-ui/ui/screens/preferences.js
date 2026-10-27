@@ -8,6 +8,7 @@ import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
 import { currentAccount } from '../state.js';
 import { disconnect } from './home/disconnect.js';
+import { deviceRows } from './preferences/devices.js';
 import { configurator, folderArg, folderName } from './preferences/folders.js';
 import { mirrorConfirm, suggestedMirror } from './preferences/mirror.js';
 import {
@@ -20,8 +21,9 @@ const DEFAULT_HOTKEY = 'Ctrl+Alt+G';
 const screen = { root: null, ctx: null, tab: 'drive', listening: null, listeningArg: null };
 // O que veio do serviço e o que o usuário mudou.
 const form = { original: {}, edited: {}, managed: new Set(), limits: {}, mount: '', restartDue: false };
-// As pastas do computador (`LocalFolders`) e as contas, para o configurador.
-const computer = { folders: [], accounts: [] };
+// As pastas do computador (`LocalFolders`), os dispositivos (`Devices`) e as contas, para o
+// configurador.
+const computer = { folders: [], devices: [], accounts: [] };
 // A pasta do Espelho da conta atual (vazia no Stream).
 const drive = { mirror: '' };
 // Os pedaços que mudam sem redesenhar e a conferência de cada campo com linha de erro.
@@ -39,12 +41,13 @@ export async function render(root, ctx) {
       .catch(() => {});
   });
   screen.listeningArg ??= listenArg(ctx);
-  // Os pares mudaram (uma pasta, ou o Espelho ligado ou desligado, até por fora desta janela).
+  // Os pares mudaram (uma pasta, um dispositivo, ou o Espelho ligado ou desligado, até por fora
+  // desta janela).
   screen.listeningFolders ??= ctx.api.on('local-folders-changed', () =>
-    Promise.all([loadFolders(), loadMirror()])
+    Promise.all([loadComputer(), loadMirror()])
       .then(() => (screen.tab === 'drive' ? showTab('drive') : drawFolders()))
       .catch(() => {}));
-  await Promise.all([loadPrefs(), loadContext(), loadFolders(), loadMirror(), css]);
+  await Promise.all([loadPrefs(), loadContext(), loadComputer(), loadMirror(), css]);
   draw();
   if (screen.folderArg) {
     const path = screen.folderArg;
@@ -103,8 +106,9 @@ function pickDir(then) {
 // A chave está travada ligada pelo administrador.
 const policyOn = (key) => form.managed.has(key) && form.original[key] === true;
 
-async function loadFolders() {
-  computer.folders = await screen.ctx.api.call('local_folders');
+async function loadComputer() {
+  const { api } = screen.ctx;
+  [computer.folders, computer.devices] = await Promise.all([api.call('local_folders'), api.call('devices')]);
 }
 
 const pending = () => diff(form.original, form.edited);
@@ -175,7 +179,10 @@ function computerTab() {
   const { t } = screen.ctx;
   // A política desliga a sincronização de pastas: o botão fica bloqueado com o aviso de sempre.
   const disabled = policyOn('DisableMirroredFolders');
+  // A política desliga os dispositivos: a lista e a pergunta ficam bloqueadas.
+  const noDevices = policyOn('DisableExternalMediaSync');
   ui.folders = el('ul', { class: 'local-folders' });
+  ui.devices = el('ul', { class: 'devices' });
   drawFolders();
   return [
     el('p', { class: 'meta' }, t('pref-computer-text')),
@@ -183,12 +190,55 @@ function computerTab() {
     el('fieldset', { class: 'pref', 'data-key': 'DisableMirroredFolders', disabled },
       el('button', { class: 'tonal add-folder', onclick: pickDir(addFolder) }, t('pref-add-folder')),
       disabled ? el('span', { class: 'meta managed-note' }, t('folder-refused-folders-disabled')) : []),
+    el('h2', {}, t('pref-devices')),
+    el('fieldset', { class: 'pref', 'data-key': 'DisableExternalMediaSync', disabled: noDevices },
+      checkbox('PromptToBackupDevices', 'pref-ask-devices'),
+      ui.devices,
+      noDevices ? el('span', { class: 'meta managed-note' }, t('folder-refused-devices-disabled')) : []),
   ];
 }
 
-// A lista das pastas do computador (redesenhada quando o serviço avisa que mudou).
+// As listas de pastas e de dispositivos (redesenhadas quando o serviço avisa que mudaram).
 function drawFolders() {
   ui.folders?.replaceChildren(...folderItems(screen.ctx, computer.folders, computer.accounts.length > 1));
+  drawDevices();
+}
+
+function drawDevices() {
+  const rows = deviceRows(computer.devices);
+  ui.devices?.replaceChildren(...(rows.length
+    ? rows.map(deviceRow)
+    : [el('li', { class: 'empty' }, screen.ctx.t('pref-devices-empty'))]));
+}
+
+// Um dispositivo: nome, onde está montado, o estado e os botões de `deviceRows`.
+function deviceRow(row) {
+  const { api, t } = screen.ctx;
+  const call = (method) => () => attempt(api.call(method, { id: row.id }));
+  const buttons = { backup: () => backupDevice(row), ignore: call('ignore_device'), forget: call('forget_device') };
+  return el('li', { class: 'device', 'data-id': row.id, 'data-choice': row.choice },
+    el('div', { class: 'field' },
+      el('strong', {}, row.label),
+      row.path ? el('span', { class: 'path' }, row.path) : [],
+      row.status ? el('span', { class: 'meta' }, t(row.status)) : []),
+    el('div', { class: 'row-buttons' }, row.actions.map((action) =>
+      el('button', { class: `text device-${action}`, onclick: buttons[action] }, t(`pref-device-${action}`)))));
+}
+
+// "Fazer backup", com a opção de lembrar: o dispositivo passa a fazer backup sozinho.
+async function backupDevice(row) {
+  const { api, t } = screen.ctx;
+  const remember = el('input', { type: 'checkbox', class: 'device-remember' });
+  const ok = await confirmDialog({
+    title: t('device-backup-title', { name: row.label }),
+    body: el('div', {}, el('p', {}, t('device-backup-text')), choice(remember, t('device-backup-remember'))),
+    confirm: t('pref-device-backup'),
+    cancel: t('action-cancel'),
+  });
+  if (!ok) return;
+  api.call('backup_device', { id: row.id, remember: remember.checked })
+    .then(() => toast(t('device-backup-started', { name: row.label })))
+    .catch(refusalToast(t));
 }
 
 // O configurador da pasta `path`: a conta, o tamanho e a contagem (ou o motivo da recusa), a

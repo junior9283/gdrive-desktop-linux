@@ -96,6 +96,19 @@ async fn main() -> Result<(), Error> {
         return Err("o serviço já está rodando nesta sessão".into());
     }
     daemon.attach(conn.clone()).await?;
+    // Um pendrive já conectado, num UDisks2 falso no mesmo barramento, para a aba "Meu
+    // computador" listar.
+    let pendrive = dir.path().join("media/PENDRIVE");
+    std::fs::create_dir_all(&pendrive)?;
+    std::fs::write(pendrive.join("foto.jpg"), b"foto")?;
+    let udisks = zbus::connection::Builder::session()?
+        .name(gdl_daemon::devices::UDISKS_SERVICE)?
+        .serve_at(gdl_daemon::devices::UDISKS_PATH, zbus::fdo::ObjectManager)?
+        .build()
+        .await?;
+    gdl_daemon::fake_udisks::plug(udisks.object_server(), "E2E-0001", "PENDRIVE", &pendrive)
+        .await?;
+    daemon.watch_devices(conn.clone());
 
     // O login pelo próprio D-Bus, com este programa no papel do navegador.
     let proxy = ServiceProxy::new(&zbus::Connection::session().await?).await?;

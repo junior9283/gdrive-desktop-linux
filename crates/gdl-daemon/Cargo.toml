@@ -35,6 +35,14 @@ tracing-subscriber.workspace = true
 url.workspace = true
 zbus.workspace = true
 
+[features]
+# O UDisks2 falso, para o serviço dos testes de ponta a ponta (`examples/e2e-daemon.rs`).
+testing = []
+
+[[example]]
+name = "e2e-daemon"
+required-features = ["testing"]
+
 [dev-dependencies]
 gdl-fake-drive.workspace = true
 reqwest.workspace = true

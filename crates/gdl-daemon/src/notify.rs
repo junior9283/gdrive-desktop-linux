@@ -55,6 +55,8 @@ pub trait Notifications {
         expire_timeout: i32,
     ) -> zbus::Result<u32>;
 
+    fn get_capabilities(&self) -> zbus::Result<Vec<String>>;
+
     #[zbus(signal)]
     fn action_invoked(&self, id: u32, action_key: String) -> zbus::Result<()>;
 }
@@ -284,6 +286,10 @@ pub struct Notifier {
     app_name: String,
     /// Último aviso mostrado de cada chave, para o próximo substituí-lo.
     shown: Mutex<HashMap<String, u32>>,
+    /// O servidor interpreta marcação no corpo (`body-markup`): nomes de arquivo e rótulos vão
+    /// escapados, para não virar negrito, link ou imagem. Perguntado no primeiro aviso (não na
+    /// partida, quando o servidor pode ainda não ter subido) e guardado só quando ele responde.
+    markup: tokio::sync::OnceCell<bool>,
 }
 
 impl Notifier {
@@ -292,6 +298,7 @@ impl Notifier {
             proxy: NotificationsProxy::new(conn).await?,
             app_name: i18n.tr("notify-title", &[]),
             shown: Mutex::default(),
+            markup: tokio::sync::OnceCell::new(),
         })
     }
 
@@ -316,6 +323,18 @@ impl Notifier {
             .iter()
             .flat_map(|(key, label)| [*key, label.as_str()])
             .collect();
+        let markup = self
+            .markup
+            .get_or_try_init(|| async {
+                let caps = self.proxy.get_capabilities().await?;
+                zbus::Result::Ok(caps.iter().any(|c| c == "body-markup"))
+            })
+            .await;
+        // Sem resposta, sem escapar: a mesma falha impede o aviso de sair.
+        let body = match markup {
+            Ok(true) => std::borrow::Cow::Owned(crate::desktop::xml_text(&note.body)),
+            _ => std::borrow::Cow::Borrowed(&note.body),
+        };
         let sent = self
             .proxy
             .notify(
@@ -323,7 +342,7 @@ impl Notifier {
                 replaces,
                 "google-drive",
                 &note.summary,
-                &note.body,
+                &body,
                 &actions,
                 HashMap::new(),
                 -1,

@@ -289,6 +289,9 @@ impl Service {
     pub async fn notifications_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 
     #[zbus(signal)]
+    pub async fn states_changed(emitter: &SignalEmitter<'_>, paths: &[String]) -> zbus::Result<()>;
+
+    #[zbus(signal)]
     pub async fn preferences_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 
     #[zbus(signal)]

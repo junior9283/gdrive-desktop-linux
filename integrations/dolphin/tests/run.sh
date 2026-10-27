@@ -12,6 +12,7 @@ export QT_QPA_PLATFORM=offscreen
 plugin=$(find "$build" -name gdrive_desktop_linux_menu.so | head -1)
 export QT_PLUGIN_PATH="${plugin%/kf6/kfileitemaction/*}"
 probe=$(find "$build" -name gdl-dolphin-probe -type f | head -1)
+overlay=$(find "$build" -name gdl-overlay-probe -type f | head -1)
 work=$(mktemp -d) fake=""
 d="$work/drive"
 mkdir -p "$d/pasta" && touch "$d/a.txt"
@@ -58,4 +59,24 @@ expect "erro do serviço vira aviso" "erro: sem internet" \
 expect "as ações chegam ao serviço com os caminhos" "copy-link a.txt
 online-only a.txt pasta
 trash pasta" "$(cat "$work/actions")"
+# Os emblemas: o atributo que a montagem dá a cada item; fora dela (sem atributo), nenhum.
+mkdir -p "$work/fora" && touch "$work/fora/b.txt"
+state() { python3 -I -c 'import os, sys; os.setxattr(sys.argv[1], "user.gdl.state", sys.argv[2].encode())' "$@"; }
+state "$d/a.txt" offline
+state "$d/pasta" cloud
+expect "um emblema para cada estado" "a.txt: gdl-emblem-offline
+pasta: gdl-emblem-cloud
+b.txt: " "$("$overlay" "$d/a.txt" "$d/pasta" "$work/fora/b.txt")"
+"$overlay" --wait 1 "$d/a.txt" > "$work/overlay" &
+waiting=$!
+until grep -q esperando "$work/overlay" 2>/dev/null; do sleep 0.1; done
+state "$d/a.txt" syncing
+python3 -I -W ignore::DeprecationWarning -c '
+import sys
+from gi.repository import Gio, GLib
+name = "io.github.junior9283.GDriveDesktopLinux1"
+Gio.bus_get_sync(Gio.BusType.SESSION).call_sync(name, "/io/github/junior9283/GDriveDesktopLinux1",
+    name + ".Service", "EmitStates", GLib.Variant("(as)", (sys.argv[1:],)), None, 0, -1)' "$d/a.txt"
+wait "$waiting" || true
+expect "StatesChanged redesenha o emblema" "mudou a.txt: gdl-emblem-syncing" "$(tail -1 "$work/overlay")"
 exit $failed

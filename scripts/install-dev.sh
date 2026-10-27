@@ -86,6 +86,10 @@ for file in "$repo"/assets/icons/hicolor/*/apps/*.png; do
   install_as 644 "$file" "$share/icons/hicolor/${file#"$repo/assets/icons/hicolor/"}"
 done
 remove "$share/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLinux.svg"
+# Os emblemas de estado do Dolphin, no tema do sistema (é nele que o Dolphin procura).
+for file in "$repo"/assets/icons/hicolor/scalable/emblems/*.svg; do
+  install_as 644 "$file" "$share/icons/hicolor/scalable/emblems/$(basename "$file")"
+done
 # Os ícones da bandeja, no tema próprio que ela procura ao lado dos programas.
 for file in "$repo"/assets/icons/hicolor/scalable/status/*.svg; do
   install_as 644 "$file" "$share/gdrive-desktop-linux/icons/hicolor/scalable/status/$(basename "$file")"

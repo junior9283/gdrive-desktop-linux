@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Emblema do gdrive-desktop-linux. O desenho de dentro é do Material Symbols (Apache-2.0). -->
+  <circle cx="16" cy="16" r="15" fill="#dc2626" stroke="#ffffff" stroke-width="2"/>
+  <path fill="#ffffff" transform="translate(6 26) scale(0.0208333)" d="M480-120q-33 0-56.5-23.5T400-200q0-33 23.5-56.5T480-280q33 0 56.5 23.5T560-200q0 33-23.5 56.5T480-120Zm-80-240v-480h160v480H400Z"/>
+</svg>

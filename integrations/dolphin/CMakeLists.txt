@@ -1,5 +1,6 @@
 # O submenu "Google Drive" do botão direito no Dolphin (e em quem usa os menus do KIO): um
-# plugin KFileItemAction que só desenha o que o serviço responde pelo D-Bus.
+# plugin KFileItemAction que só desenha o que o serviço responde pelo D-Bus. E os emblemas de
+# estado nos arquivos (um plugin KOverlayIconPlugin).
 cmake_minimum_required(VERSION 3.22)
 project(gdrive-desktop-linux-dolphin LANGUAGES CXX)
 
@@ -21,9 +22,16 @@ kcoreaddons_add_plugin(gdrive_desktop_linux_menu
 target_link_libraries(gdrive_desktop_linux_menu
     Qt6::DBus Qt6::Gui Qt6::Widgets KF6::CoreAddons KF6::KIOWidgets)
 
+kcoreaddons_add_plugin(gdrive_desktop_linux_overlay
+    SOURCES gdriveoverlay.cpp
+    INSTALL_NAMESPACE "kf6/overlayicon")
+target_link_libraries(gdrive_desktop_linux_overlay Qt6::DBus KF6::KIOCore)
+
 # Os pacotes compilam com -DBUILD_TESTING=OFF.
 if(BUILD_TESTING)
     add_executable(gdl-dolphin-probe tests/probe.cpp)
     target_link_libraries(gdl-dolphin-probe Qt6::Widgets KF6::CoreAddons KF6::KIOCore KF6::KIOWidgets)
+    add_executable(gdl-overlay-probe tests/overlay-probe.cpp)
+    target_link_libraries(gdl-overlay-probe KF6::CoreAddons KF6::KIOCore)
     add_test(NAME plugin COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/run.sh ${CMAKE_BINARY_DIR})
 endif()

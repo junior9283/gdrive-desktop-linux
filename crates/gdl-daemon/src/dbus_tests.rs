@@ -1064,6 +1064,26 @@ async fn uninstall_purge_keeps_only_the_kept_copies() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn states_changed_names_the_items_whose_state_changed() {
+    use futures_util::StreamExt;
+
+    let h = Harness::new().await;
+    let folder = h.fake.add_folder(&h.fake.root_id(), "Pasta");
+    h.fake.add_file(&folder, "a.txt", b"a".to_vec());
+    h.logged_in().await;
+    let mut changed = h.proxy.receive_states_changed().await.unwrap();
+    let a = h.drive().join("Pasta/a.txt").display().to_string();
+
+    h.proxy.pin(&a).await.unwrap();
+
+    let signal = tokio::time::timeout(std::time::Duration::from_secs(10), changed.next())
+        .await
+        .expect("StatesChanged")
+        .unwrap();
+    assert_eq!(signal.args().unwrap().paths, [a]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn menu_shows_only_inside_my_drive_with_offline_marks() {
     let h = Harness::new().await;
     let folder = h.fake.add_folder(&h.fake.root_id(), "Pasta");

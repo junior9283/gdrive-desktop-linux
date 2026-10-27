@@ -138,8 +138,8 @@ scripts/install-dev.sh --prefix /outro/lugar
 Ele instala os quatro programas (serviço, CLI, bandeja e janela), o serviço do usuário (systemd),
 a ativação do serviço e da janela pelo D-Bus, o atalho no menu de aplicativos, a abertura dos
 ponteiros `.gdoc`, os ícones e a extensão do menu do botão direito para Nautilus, Nemo, Caja e
-Thunar. O plugin do Dolphin compila à parte (`integrations/dolphin/build.sh`, com CMake e KF6) e
-vai na pasta de plugins do Qt do sistema.
+Thunar. Os plugins do Dolphin (menu e emblemas de estado) compilam à parte
+(`integrations/dolphin/build.sh`, com CMake e KF6) e vão na pasta de plugins do Qt do sistema.
 
 `scripts/package.sh dist` gera os mesmos instaladores do release (precisa do
 [nfpm](https://nfpm.goreleaser.com)).

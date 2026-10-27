@@ -1,0 +1,9 @@
+{
+    "KPlugin": {
+        "Description": "Mostra nos arquivos do Meu Drive se estão na nuvem, off-line, sincronizando ou em conflito",
+        "Description[en]": "Shows whether files in My Drive are in the cloud, offline, syncing or in conflict",
+        "EnabledByDefault": true,
+        "Icon": "io.github.junior9283.GDriveDesktopLinux",
+        "Name": "Google Drive"
+    }
+}

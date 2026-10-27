@@ -59,6 +59,10 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const CURRENT_ACCOUNT: &str = "current-account";
 /// Intervalo mínimo entre dois sinais `ActivityChanged`.
 const ACTIVITY_SIGNAL_GAP: Duration = Duration::from_millis(250);
+/// De quanto em quanto tempo o serviço recolhe os itens que mudaram de estado (`StatesChanged`).
+const STATES_SIGNAL_GAP: Duration = Duration::from_millis(300);
+/// Caminhos por sinal `StatesChanged` (fixar uma pasta grande muda milhares de itens).
+const STATES_PER_SIGNAL: usize = 500;
 /// Foto da conta, no diretório de dados dela.
 const PHOTO_FILE: &str = "photo.png";
 /// Histórico das notificações, na pasta de estado.
@@ -186,6 +190,18 @@ impl<'a> DrivePaths<'a> {
         let folder = self.my_drive.join(folder.unwrap_or_default());
         folder.join(&item.local_name).display().to_string()
     }
+}
+
+/// Os caminhos na montagem dos itens que mudaram de estado desde a última vez (os que foram para
+/// a lixeira não aparecem mais lá).
+fn changed_paths(engine: &Engine, my_drive: &Path) -> Vec<String> {
+    let items = engine.store().take_state_changes().unwrap_or_default();
+    let mut paths = DrivePaths::new(engine, my_drive);
+    items
+        .iter()
+        .filter(|item| !item.trashed)
+        .map(|item| paths.of(item))
+        .collect()
 }
 
 /// O que o menu do botão direito precisa saber do item.
@@ -850,6 +866,8 @@ impl Daemon {
         });
         self.forward_events(engine.subscribe(), shutdown.clone());
         self.forward_activity(engine.activity_changes(), shutdown.clone());
+        let my_drive = mount_point.join(self.my_drive_name());
+        self.forward_states(engine.clone(), my_drive, shutdown.clone());
         let moved = mount_point != preferred;
         *self.account.lock().await = Some(Account {
             email,
@@ -920,6 +938,39 @@ impl Daemon {
                 daemon.emit_activity_changed().await;
                 drop(daemon);
                 tokio::time::sleep(ACTIVITY_SIGNAL_GAP).await;
+            }
+        });
+    }
+
+    /// `StatesChanged` com os caminhos dos itens cujo estado local ou fixação mudou (o banco
+    /// anota cada mudança, venha de onde vier), recolhidos a cada `STATES_SIGNAL_GAP`.
+    fn forward_states(
+        self: &Arc<Self>,
+        engine: Arc<Engine>,
+        my_drive: PathBuf,
+        shutdown: CancellationToken,
+    ) {
+        let daemon = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    () = shutdown.cancelled() => break,
+                    () = tokio::time::sleep(STATES_SIGNAL_GAP) => {}
+                }
+                let Some(daemon) = daemon.upgrade() else {
+                    break;
+                };
+                let paths = {
+                    let (engine, my_drive) = (engine.clone(), my_drive.clone());
+                    tokio::task::spawn_blocking(move || changed_paths(&engine, &my_drive))
+                        .await
+                        .unwrap_or_default()
+                };
+                if let Some(emitter) = daemon.emitter() {
+                    for chunk in paths.chunks(STATES_PER_SIGNAL) {
+                        let _ = Service::states_changed(&emitter, chunk).await;
+                    }
+                }
             }
         });
     }

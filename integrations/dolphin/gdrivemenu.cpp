@@ -17,11 +17,12 @@
 #include <QIcon>
 #include <QMenu>
 
+#include "gdriveservice.h"
+
+using namespace gdrive;
+
 namespace
 {
-const QString SERVICE = QStringLiteral("io.github.junior9283.GDriveDesktopLinux1");
-const QString PATH = QStringLiteral("/io/github/junior9283/GDriveDesktopLinux1");
-const QString INTERFACE = QStringLiteral("io.github.junior9283.GDriveDesktopLinux1.Service");
 const QString APP_ICON = QStringLiteral("io.github.junior9283.GDriveDesktopLinux");
 // O menu abre na hora: o serviço responde do banco local, e passando disso ele fica de fora.
 constexpr int MENU_TIMEOUT_MS = 500;

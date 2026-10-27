@@ -1,5 +1,5 @@
 #!/bin/sh
-# Compila o plugin do Dolphin, roda os testes dele e copia o .so para <saída>.
+# Compila os plugins do Dolphin (menu e emblemas), roda os testes deles e copia os .so para <saída>.
 #
 #   integrations/dolphin/build.sh <saída>
 #
@@ -14,4 +14,6 @@ trap 'rm -rf "$build"' EXIT
 cmake -S "$here" -B "$build" -DCMAKE_BUILD_TYPE=Release -Wno-dev
 cmake --build "$build" -j"$(nproc)"
 (cd "$build" && ctest --output-on-failure)
-cp "$(find "$build" -name gdrive_desktop_linux_menu.so | head -1)" "$out/"
+for plugin in gdrive_desktop_linux_menu gdrive_desktop_linux_overlay; do
+  cp "$(find "$build" -name "$plugin.so" | head -1)" "$out/"
+done

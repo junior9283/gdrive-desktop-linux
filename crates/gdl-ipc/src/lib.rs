@@ -442,6 +442,10 @@ pub trait Service {
     /// O histórico de notificações mudou (aviso novo, lido ou dispensado).
     #[zbus(signal)]
     fn notifications_changed(&self) -> zbus::Result<()>;
+    /// O estado (na nuvem, off-line, sincronizando, conflito) destes caminhos da montagem mudou:
+    /// os gerenciadores de arquivos redesenham os emblemas deles.
+    #[zbus(signal)]
+    fn states_changed(&self, paths: Vec<String>) -> zbus::Result<()>;
     /// Alguma preferência mudou (por `SetPreferences` ou `ResetPreferences`).
     #[zbus(signal)]
     fn preferences_changed(&self) -> zbus::Result<()>;

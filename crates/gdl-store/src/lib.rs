@@ -91,6 +91,17 @@ impl Store {
             |ctx| Ok(fold(ctx.get_raw(0).as_str()?)),
         )?;
         schema::migrate(&mut conn)?;
+        // Os itens cujo estado local ou fixação mudou, venha a escrita de onde vier, até alguém
+        // recolher (`take_state_changes`); só desta conexão, e somem ao fechar.
+        conn.execute_batch(
+            "CREATE TEMP TABLE state_changes (id TEXT PRIMARY KEY);
+             CREATE TEMP TRIGGER item_state_changed AFTER UPDATE OF local_state, pin ON main.items
+             WHEN OLD.local_state IS NOT NEW.local_state OR OLD.pin IS NOT NEW.pin
+             BEGIN
+               -- Não `OR IGNORE`: num upsert, valeria a política de conflito do comando de fora.
+               INSERT INTO temp.state_changes VALUES (NEW.id) ON CONFLICT DO NOTHING;
+             END;",
+        )?;
         Ok(Store {
             conn: Mutex::new(conn),
         })
@@ -370,6 +381,22 @@ impl Store {
             params![job_id, next_try_ms, category, message],
         )?;
         Ok(())
+    }
+
+    /// Os itens cujo estado local ou fixação mudou desde a última chamada (cada um uma vez).
+    /// Sem mudança, só uma leitura.
+    pub fn take_state_changes(&self) -> Result<Vec<Item>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(select_items!(
+            "WHERE id IN (SELECT id FROM temp.state_changes)"
+        ))?;
+        let items = stmt
+            .query_and_then([], item_from_row)?
+            .collect::<Result<Vec<_>>>()?;
+        if !items.is_empty() {
+            conn.execute("DELETE FROM temp.state_changes", [])?;
+        }
+        Ok(items)
     }
 
     pub fn set_local_state(&self, id: &ItemId, state: LocalState) -> Result<()> {
@@ -1018,6 +1045,43 @@ mod tests {
             local_state: LocalState::Clean,
             pin: PinState::None,
         }
+    }
+
+    #[test]
+    fn state_changes_are_collected_once_each() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store.upsert_item(&item("a", None)).unwrap();
+        store.upsert_item(&item("b", None)).unwrap();
+        // Criar não conta: o gerenciador de arquivos lê o estado de quem aparece.
+        assert!(store.take_state_changes().unwrap().is_empty());
+
+        store.set_local_state(&id("a"), LocalState::Dirty).unwrap();
+        store
+            .set_pins(&[id("a"), id("b")], PinState::Pinned)
+            .unwrap();
+        store
+            .upsert_item(&Item {
+                size: 9,
+                ..item("b", None)
+            })
+            .unwrap();
+        let mut changed: Vec<_> = store
+            .take_state_changes()
+            .unwrap()
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+        changed.sort_by(|x, y| x.0.cmp(&y.0));
+
+        // O `b` voltou a não fixado pela gravação acima, mas aparece uma vez só.
+        assert_eq!(changed, [id("a"), id("b")]);
+        assert!(store.take_state_changes().unwrap().is_empty());
+        store.set_local_state(&id("a"), LocalState::Dirty).unwrap();
+        assert!(
+            store.take_state_changes().unwrap().is_empty(),
+            "sem mudança de verdade, nada"
+        );
     }
 
     #[test]

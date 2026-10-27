@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Serviço falso para os testes das extensões dos gerenciadores de arquivos: responde `Menu` e
 `MenuAction` como o serviço real, com o "Meu Drive" na pasta do segundo argumento. Cada
-`MenuAction` vai para o arquivo do primeiro argumento."""
+`MenuAction` vai para o arquivo do primeiro argumento. `EmitStates` (só dos testes) manda o sinal
+`StatesChanged` com os caminhos dados, como o serviço faz quando o estado deles muda."""
 
 import sys
 
@@ -15,6 +16,8 @@ XML = f"""
   <method name="MenuAction">
     <arg type="s" direction="in"/><arg type="as" direction="in"/><arg type="s" direction="out"/>
   </method>
+  <method name="EmitStates"><arg type="as" direction="in"/></method>
+  <signal name="StatesChanged"><arg type="as"/></signal>
 </interface></node>
 """
 log = open(sys.argv[1], "a", buffering=1)
@@ -34,6 +37,10 @@ def menu(paths):
 def call(conn, sender, path, iface, method, params, invocation):
     if method == "Menu":
         invocation.return_value(GLib.Variant("(a(sss))", (menu(params[0]),)))
+        return
+    if method == "EmitStates":
+        conn.emit_signal(None, PATH, f"{NAME}.Service", "StatesChanged", params)
+        invocation.return_value(None)
         return
     action, paths = params
     log.write(" ".join([action] + [p.removeprefix(drive) for p in paths]) + "\n")

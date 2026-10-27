@@ -3,11 +3,12 @@
 # openSUSE), .pkg.tar.zst (Arch, Manjaro) e um .tar.gz para qualquer distribuição, com o
 # install.sh que instala em ~/.local sem root.
 #
-#   scripts/package.sh [--from DIR] [--dolphin ARQUIVO] <saída>
+#   scripts/package.sh [--from DIR] [--dolphin PASTA] <saída>
 #
 # --from usa os programas já compilados em DIR (sem ele, compila com `cargo build --release`).
-# --dolphin põe nos pacotes o plugin do menu do Dolphin (integrations/dolphin/build.sh); ele não
-# vai no .tar.gz, que instala em ~/.local, fora do caminho de plugins do Qt.
+# --dolphin põe nos pacotes os plugins do Dolphin (menu e emblemas) da PASTA que o
+# integrations/dolphin/build.sh preenche; eles não vão no .tar.gz, que instala em ~/.local, fora
+# do caminho de plugins do Qt.
 # Os pacotes saem do nfpm (https://nfpm.goreleaser.com); NFPM troca o comando (ex.: um contêiner).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -15,11 +16,11 @@ from="" dolphin=""
 while [ $# -gt 1 ]; do
   case "$1" in
     --from) from=$2; shift 2 ;;
-    --dolphin) dolphin=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
+    --dolphin) dolphin=$(cd "$2" && pwd); shift 2 ;;
     *) echo "argumento desconhecido: $1" >&2; exit 2 ;;
   esac
 done
-[ $# -eq 1 ] || { echo "uso: scripts/package.sh [--from DIR] [--dolphin ARQUIVO] <saída>" >&2; exit 2; }
+[ $# -eq 1 ] || { echo "uso: scripts/package.sh [--from DIR] [--dolphin PASTA] <saída>" >&2; exit 2; }
 mkdir -p "$1"
 out=$(cd "$1" && pwd)
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo/Cargo.toml" | head -n 1)
@@ -50,11 +51,13 @@ sh "$repo/scripts/install-dev.sh" --prefix /usr --destdir "$work/stage" --from "
     printf '  - src: "%s"\n    dst: "/usr/share/%s/package"\n    packager: %s\n    file_info:\n      mode: 0644\n' \
       "$work/package-$packager" "$name" "$packager"
   done
-  # O plugin do Dolphin, na pasta de plugins do Qt de cada formato. Sem dependência do KDE: o
-  # KIO só o carrega quando já está rodando (no Dolphin), e fora dele o arquivo fica parado.
+  # Os plugins do Dolphin, na pasta de plugins do Qt de cada formato. Sem dependência do KDE: o
+  # KIO só os carrega quando já está rodando (no Dolphin), e fora dele os arquivos ficam parados.
   [ -z "$dolphin" ] || for target in deb:/usr/lib/x86_64-linux-gnu rpm:/usr/lib64 archlinux:/usr/lib; do
-    printf '  - src: "%s"\n    dst: "%s/qt6/plugins/kf6/kfileitemaction/gdrive_desktop_linux_menu.so"\n    packager: %s\n    file_info:\n      mode: 0644\n' \
-      "$dolphin" "${target#*:}" "${target%%:*}"
+    for plugin in kfileitemaction/gdrive_desktop_linux_menu overlayicon/gdrive_desktop_linux_overlay; do
+      printf '  - src: "%s"\n    dst: "%s/qt6/plugins/kf6/%s.so"\n    packager: %s\n    file_info:\n      mode: 0644\n' \
+        "$dolphin/${plugin#*/}.so" "${target#*:}" "$plugin" "${target%%:*}"
+    done
   done
 } > "$work/nfpm.yaml"
 for packager in deb rpm archlinux; do

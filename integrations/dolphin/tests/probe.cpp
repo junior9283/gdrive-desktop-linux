@@ -80,7 +80,8 @@ int main(int argc, char **argv)
         app.quit();
     });
     chosen->trigger();
-    // Ações sem resposta visível (só o serviço muda algo) terminam pelo tempo.
-    QTimer::singleShot(1000, &app, &QApplication::quit);
+    // Ações sem resposta visível (só o serviço muda algo) terminam pelo tempo, folgado para a
+    // resposta de erro chegar mesmo com a máquina ocupada.
+    QTimer::singleShot(3000, &app, &QApplication::quit);
     return app.exec();
 }

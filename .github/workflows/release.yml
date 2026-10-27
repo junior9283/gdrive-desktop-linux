@@ -60,7 +60,7 @@ jobs:
           name: dolphin
           path: dolphin
       - name: Instaladores
-        run: scripts/package.sh --dolphin dolphin/gdrive_desktop_linux_menu.so dist
+        run: scripts/package.sh --dolphin dolphin dist
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -81,12 +81,12 @@ jobs:
           # Com o KIO, para conferir que o plugin do Dolphin acha as bibliotecas dele.
           - image: fedora:latest
             install: dnf install -y ./dist/*.rpm kf6-kio-widgets-libs
-            plugin: /usr/lib64/qt6/plugins/kf6/kfileitemaction/gdrive_desktop_linux_menu.so
+            plugins: /usr/lib64/qt6/plugins/kf6
           - image: opensuse/tumbleweed
             install: zypper --non-interactive install --allow-unsigned-rpm ./dist/*.rpm
           - image: archlinux:latest
             install: pacman -Syu --noconfirm kio && pacman -U --noconfirm ./dist/*.pkg.tar.zst
-            plugin: /usr/lib/qt6/plugins/kf6/kfileitemaction/gdrive_desktop_linux_menu.so
+            plugins: /usr/lib/qt6/plugins/kf6
           # O .tar.gz não traz as dependências: elas vêm do sistema, como diz o README.
           - image: ubuntu:22.04
             install: >-
@@ -107,11 +107,13 @@ jobs:
           gdrive-desktop-linux --version
           # A janela carrega as bibliotecas dela (sem tela, só confere que nenhuma falta).
           ! ldd "$(command -v gdrive-desktop-linux-ui)" | grep 'not found'
-      - name: O plugin do Dolphin carrega as bibliotecas dele
-        if: matrix.plugin
+      - name: Os plugins do Dolphin carregam as bibliotecas deles
+        if: matrix.plugins
         run: |
-          test -f "${{ matrix.plugin }}"
-          ! ldd "${{ matrix.plugin }}" | grep 'not found'
+          for plugin in kfileitemaction/gdrive_desktop_linux_menu overlayicon/gdrive_desktop_linux_overlay; do
+            test -f "${{ matrix.plugins }}/$plugin.so"
+            ! ldd "${{ matrix.plugins }}/$plugin.so" | grep 'not found'
+          done
 
   publish:
     needs: install

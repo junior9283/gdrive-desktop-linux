@@ -150,10 +150,18 @@ async fn error_from(resp: reqwest::Response) -> DriveError {
     }
 }
 
-/// `q` da pesquisa por nome e conteúdo, com aspas e barras escapadas como a API pede.
+/// Texto como literal entre aspas simples do `q`, com aspas e barras escapadas como a API pede.
+fn literal(text: &str) -> String {
+    format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+/// `q` da pesquisa por nome e conteúdo.
 fn search_query(text: &str) -> String {
-    let escaped = text.replace('\\', "\\\\").replace('\'', "\\'");
-    format!("fullText contains '{escaped}' and trashed = false")
+    format!("fullText contains {} and trashed = false", literal(text))
+}
+
+fn folder_meta(parent: &str, name: &str) -> Value {
+    json!({ "name": name, "mimeType": FOLDER_MIME, "parents": [parent] })
 }
 
 /// Pede o `id` reservado na criação.
@@ -601,10 +609,43 @@ impl DriveClient {
         name: &str,
         id: Option<&str>,
     ) -> Result<RemoteFile> {
-        let mut meta = json!({ "name": name, "mimeType": FOLDER_MIME, "parents": [parent] });
+        let mut meta = folder_meta(parent, name);
         with_id(&mut meta, id);
         let result = self.create(&meta).await;
         self.created(id, result).await
+    }
+
+    /// Pasta com `appProperties` (visíveis só para o app que as gravou), para ser achada depois
+    /// sem depender do nome.
+    pub async fn create_folder_with_props(
+        &self,
+        parent: &str,
+        name: &str,
+        props: &[(&str, &str)],
+    ) -> Result<RemoteFile> {
+        let props: serde_json::Map<String, Value> = props
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect();
+        let mut meta = folder_meta(parent, name);
+        meta["appProperties"] = props.into();
+        self.create(&meta).await
+    }
+
+    /// Os itens fora da lixeira com a `appProperty` `key` = `value`.
+    pub async fn find_by_app_property(&self, key: &str, value: &str) -> Result<Vec<RemoteFile>> {
+        let q = format!(
+            "appProperties has {{ key={} and value={} }} and trashed = false",
+            literal(key),
+            literal(value)
+        );
+        let mut found = Vec::new();
+        self.list(&Corpus::MyDrive, &q, FILE_FIELDS, 1000, |files| {
+            found.extend(files);
+            Ok::<_, DriveError>(true)
+        })
+        .await?;
+        Ok(found)
     }
 
     /// Uma criação com ID reservado que dá 409 já tinha dado certo antes (a resposta é que se
@@ -1061,6 +1102,39 @@ mod tests {
 
     pub(super) fn client(fake: &FakeDrive) -> DriveClient {
         client_with_token(fake, TEST_ACCESS_TOKEN)
+    }
+
+    /// As pastas de apoio ("Computadores") são achadas pelas `appProperties`, não pelo nome.
+    #[tokio::test]
+    async fn app_properties_are_saved_and_searched() {
+        let fake = FakeDrive::start().await;
+        let c = client(&fake);
+        let root = fake.root_id();
+        let mine = c
+            .create_folder_with_props(&root, "Computadores", &[("gdl.role", "computers")])
+            .await
+            .unwrap();
+        c.create_folder_with_props(&root, "Outra", &[("gdl.role", "other")])
+            .await
+            .unwrap();
+        c.create_folder(&root, "Computadores", None).await.unwrap();
+
+        let found = c
+            .find_by_app_property("gdl.role", "computers")
+            .await
+            .unwrap();
+        assert_eq!(
+            found.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(),
+            [mine.id.as_str()]
+        );
+        c.set_trashed(&mine.id, true).await.unwrap();
+        assert!(
+            c.find_by_app_property("gdl.role", "computers")
+                .await
+                .unwrap()
+                .is_empty(),
+            "na lixeira não vale"
+        );
     }
 
     /// Duas contas no mesmo Drive simulado: cada token vê só a árvore da sua conta.

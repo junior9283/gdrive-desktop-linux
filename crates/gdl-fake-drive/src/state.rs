@@ -108,6 +108,8 @@ pub(crate) struct FileRec {
     pub(crate) old_revisions: Vec<OldRevision>,
     /// Revisões marcadas para "manter para sempre", inclusive a atual.
     pub(crate) keep_forever: HashSet<String>,
+    /// Propriedades privadas do app (`appProperties`).
+    pub(crate) app_properties: BTreeMap<String, String>,
 }
 
 /// O que uma listagem ou lista de mudanças abrange (`corpora` e `includeItemsFromAllDrives`).
@@ -465,6 +467,7 @@ impl State {
                 permissions: vec![owner],
                 old_revisions: vec![],
                 keep_forever: HashSet::new(),
+                app_properties: BTreeMap::new(),
             },
         );
         self.record_change(&id);
@@ -521,6 +524,15 @@ impl State {
         }
         if let Some(ms) = meta["modifiedTime"].as_str().and_then(parse_rfc3339) {
             file.modified_ms = ms;
+        }
+        // Como no Drive: as chaves enviadas se juntam às que já existem; `null` apaga.
+        if let Some(props) = meta["appProperties"].as_object() {
+            for (key, value) in props {
+                match value.as_str() {
+                    Some(v) => file.app_properties.insert(key.clone(), v.into()),
+                    None => file.app_properties.remove(key),
+                };
+            }
         }
         self.record_change(id);
     }
@@ -591,6 +603,9 @@ impl State {
             "capabilities": { "canEdit": f.can_edit },
             "webViewLink": format!("https://drive.google.com/open?id={}", f.id),
         });
+        if !f.app_properties.is_empty() {
+            v["appProperties"] = json!(f.app_properties);
+        }
         if f.has_content() {
             v["size"] = f.content.len().to_string().into();
             v["md5Checksum"] = f.md5.clone().into();
@@ -758,6 +773,7 @@ pub(crate) enum Clause {
     MimeIs(String),
     MimeIsNot(String),
     SharedWithMe,
+    AppProperty(String, String),
 }
 
 impl Clause {
@@ -775,20 +791,32 @@ impl Clause {
             Clause::MimeIs(t) => f.mime == *t,
             Clause::MimeIsNot(t) => f.mime != *t,
             Clause::SharedWithMe => f.shared.is_some(),
+            Clause::AppProperty(k, v) => f.app_properties.get(k) == Some(v),
         }
     }
 }
 
 /// Interpreta um `q` com cláusulas unidas por `and`.
 pub(crate) fn parse_query(q: &str) -> Result<Vec<Clause>, String> {
-    q.split(" and ")
-        .map(str::trim)
-        .filter(|c| !c.is_empty())
+    clauses_text(q)
+        .into_iter()
         .map(|clause| {
             Ok(if let Some(rest) = clause.strip_suffix(" in parents") {
                 Clause::InParents(literal(rest)?)
             } else if clause.ends_with(" in owners") {
                 Clause::Always
+            } else if let Some(inner) = clause
+                .strip_prefix("appProperties has {")
+                .and_then(|c| c.strip_suffix('}'))
+            {
+                let [key, value] = clauses_text(inner)[..] else {
+                    return Err(format!("appProperties inválido: {clause}"));
+                };
+                let field = |text: &str, name: &str| match text.strip_prefix(name) {
+                    Some(v) => literal(v.trim_start().trim_start_matches('=')),
+                    None => Err(format!("appProperties sem {name}")),
+                };
+                Clause::AppProperty(field(key, "key")?, field(value, "value")?)
             } else if clause == "sharedWithMe = true" {
                 Clause::SharedWithMe
             } else if let Some(rest) = clause.strip_prefix("trashed =") {
@@ -808,6 +836,28 @@ pub(crate) fn parse_query(q: &str) -> Result<Vec<Clause>, String> {
             })
         })
         .collect()
+}
+
+/// As cláusulas unidas por `and` no nível de fora (nem entre aspas, nem entre chaves).
+fn clauses_text(q: &str) -> Vec<&str> {
+    let (mut parts, mut start, mut depth, mut quoted, mut escaped) = (vec![], 0, 0, false, false);
+    for (i, c) in q.char_indices() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '\'' => quoted = !quoted,
+            '{' if !quoted => depth += 1,
+            '}' if !quoted => depth -= 1,
+            ' ' if !quoted && depth == 0 && q[i..].starts_with(" and ") => {
+                parts.push(q[start..i].trim());
+                start = i + " and ".len();
+            }
+            _ => {}
+        }
+    }
+    parts.push(q[start..].trim());
+    parts.retain(|p| !p.is_empty());
+    parts
 }
 
 /// Texto entre aspas simples, com `\'` e `\\` desfeitos.

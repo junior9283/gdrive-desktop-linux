@@ -91,15 +91,6 @@
   gap: 4px;
 }
 
-.field-error {
-  margin: 0;
-  color: var(--md-error);
-}
-
-.field-error:empty {
-  display: none;
-}
-
 .managed-note {
   font: var(--md-label-large);
 }
@@ -108,15 +99,3 @@
   background: var(--md-secondary-container);
   color: var(--md-on-secondary-container);
 }
-
-.preferences > .actions {
-  align-items: center;
-  padding: 12px 24px;
-  border-top: 1px solid var(--md-outline-variant);
-}
-
-.pending-changes {
-  margin-right: auto;
-  color: var(--md-on-surface-variant);
-}
-

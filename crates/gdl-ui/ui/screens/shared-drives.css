@@ -1,0 +1,35 @@
+/* Drives compartilhados: o texto e a lista (que rola) no alto, o rodapé com Cancelar e Salvar. */
+
+.shared-drives {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.shared-drives main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 24px;
+}
+
+.shared-drives h1,
+.shared-drives main > p {
+  margin: 0;
+}
+
+.shared-drives .new-drive {
+  align-self: flex-start;
+}
+
+.drive-list {
+  flex: 1;
+  overflow: auto;
+  min-height: 64px;
+}
+
+.drive-list .empty {
+  color: var(--md-on-surface-variant);
+}

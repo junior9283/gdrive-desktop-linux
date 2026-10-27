@@ -5,8 +5,8 @@ use std::sync::Arc;
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
     AccountInfo, ActivityItem, MenuEntry, NotificationItem, NotificationSetting, OfflineEntry,
-    OfflineSummary, Pref, SearchResult, ServiceError, SharedItem, Sharing, Status, SyncErrorItem,
-    Versions,
+    OfflineSummary, Pref, SearchResult, ServiceError, SharedDriveItem, SharedItem, Sharing, Status,
+    SyncErrorItem, Versions,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -216,6 +216,30 @@ impl Service {
         self.daemon
             .share_set_general(account, item_id, kind, role)
             .await
+    }
+
+    /// Os Drives compartilhados da conta, por nome, com o estado de ligado de cada um.
+    async fn shared_drives(&self, account: &str) -> Result<Vec<SharedDriveItem>, ServiceError> {
+        self.daemon.shared_drives(account).await
+    }
+
+    /// Liga exatamente os Drives de `enabled` e desliga os outros. Com envio pendente num que seria
+    /// desligado, recusa com `PendingUploads` e nada muda.
+    async fn set_shared_drives(
+        &self,
+        account: &str,
+        enabled: Vec<String>,
+    ) -> Result<(), ServiceError> {
+        self.daemon.set_shared_drives(account, &enabled).await
+    }
+
+    /// Cria um Drive compartilhado (nome repetido ganha " (2)"…) e o devolve, já ligado.
+    async fn create_shared_drive(
+        &self,
+        account: &str,
+        name: &str,
+    ) -> Result<SharedDriveItem, ServiceError> {
+        self.daemon.create_shared_drive(account, name).await
     }
 
     async fn versions(&self, account: &str, item_id: &str) -> Result<Versions, ServiceError> {

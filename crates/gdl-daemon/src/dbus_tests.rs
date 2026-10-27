@@ -2017,11 +2017,9 @@ async fn menu_works_inside_a_shared_drive() {
     let ids: Vec<_> = file_menu.iter().map(|e| e.id.as_str()).collect();
     assert_eq!(ids[..4], ["open-web", "share", "copy-link", "versions"]);
     assert!(folder_menu.iter().any(|e| e.id == "new-document"));
-    // A raiz do drive também é uma pasta do menu; a pasta virtual que os reúne não é do Drive.
+    // A raiz do drive também é uma pasta do menu; a pasta virtual que os reúne tem o menu dela.
     let team = in_team(&mount, "");
     assert!(!h.proxy.menu(&[&team]).await.unwrap().is_empty());
-    let drives = mount.join("Drives compartilhados").display().to_string();
-    assert!(h.proxy.menu(&[&drives]).await.unwrap().is_empty());
     // As ações acham o item pelo caminho.
     let link = h.proxy.menu_action("copy-link", &[&plan]).await.unwrap();
     assert_eq!(link, format!("https://drive.google.com/file/d/{file}/view"));
@@ -2171,4 +2169,136 @@ async fn refused_folder_move_warns_and_cannot_be_turned_off() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("InvalidArgs"), "{err}");
+}
+
+/// O que `SharedDrives` diz da conta `account`: `(nome, ligado)` de cada drive.
+async fn drive_list(h: &Harness, account: &str) -> Vec<(String, bool)> {
+    let drives = h.proxy.shared_drives(account).await.unwrap();
+    drives.into_iter().map(|d| (d.name, d.enabled)).collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shared_drives_list_toggle_and_create_on_the_requested_account() {
+    let h = Harness::new().await;
+    team_drive(&h);
+    h.logged_in().await;
+    h.logged_in_as(ANA).await;
+    let team = h.proxy.shared_drives("").await.unwrap()[0].id.clone();
+    let team_dir = in_team(&h.home.join("Google Drive"), "");
+    let exists = || {
+        let dir = std::path::PathBuf::from(&team_dir);
+        blocking(move || dir.symlink_metadata().is_ok())
+    };
+    assert_eq!(drive_list(&h, "").await, [("Equipe".into(), true)]);
+    assert!(exists().await);
+
+    // Desligar na primeira conta: a pasta some da montagem dela, e a conta da Ana não muda.
+    h.proxy.set_shared_drives("", &[]).await.unwrap();
+    assert_eq!(drive_list(&h, "").await, [("Equipe".into(), false)]);
+    assert_eq!(drive_list(&h, ANA).await, [("Equipe".into(), true)]);
+    wait_until("a pasta do drive sair da montagem", || {
+        let dir = std::path::PathBuf::from(&team_dir);
+        !dir.exists()
+    })
+    .await;
+    h.proxy.set_shared_drives("", &[&team]).await.unwrap();
+    assert_eq!(drive_list(&h, "").await, [("Equipe".into(), true)]);
+    wait_until("a pasta do drive voltar", || {
+        std::path::Path::new(&team_dir).exists()
+    })
+    .await;
+
+    // Um nome já usado ganha o sufixo, e o drive novo nasce ligado só na conta pedida.
+    let made = h.proxy.create_shared_drive("", " Equipe ").await.unwrap();
+    assert_eq!((made.name.as_str(), made.enabled), ("Equipe (2)", true));
+    assert!(h.proxy.shared_drives("").await.unwrap().contains(&made));
+    let other = h.proxy.create_shared_drive(ANA, "Só da Ana").await.unwrap();
+    assert!(h.proxy.shared_drives(ANA).await.unwrap().contains(&other));
+    let mine = h.proxy.shared_drives("").await.unwrap();
+    assert!(mine.iter().all(|d| d.id != other.id));
+    let err = h.proxy.create_shared_drive("", "  ").await.unwrap_err();
+    assert_eq!(err.short_name(), "InvalidArgs", "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disabling_a_shared_drive_with_pending_uploads_is_refused() {
+    let h = Harness::new().await;
+    team_drive(&h);
+    h.logged_in().await;
+    let mount = h.home.join("Google Drive");
+    h.proxy.pause().await.unwrap();
+    let draft = in_team(&mount, "rascunho.txt");
+    blocking(move || std::fs::write(draft, b"ainda nao subiu").unwrap()).await;
+
+    let err = h.proxy.set_shared_drives("", &[]).await.unwrap_err();
+
+    assert_eq!(err.short_name(), "PendingUploads", "{err}");
+    assert!(err.to_string().contains("enviados"), "{err}");
+    assert_eq!(drive_list(&h, "").await, [("Equipe".into(), true)]);
+    // Manter o drive ligado, mesmo com envio pendente, é salvar sem mudar nada.
+    let team = h.proxy.shared_drives("").await.unwrap()[0].id.clone();
+    h.proxy.set_shared_drives("", &[&team]).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shared_drives_folder_menu_opens_the_screens_of_its_account() {
+    let h = Harness::new().await;
+    team_drive(&h);
+    h.logged_in().await;
+    h.logged_in_as(ANA).await;
+    let (first, ana) = (h.fake.email(), ANA.to_string());
+    let folder = |account: &str| {
+        let mount = if account == ANA {
+            h.mount_of(ANA)
+        } else {
+            h.home.join("Google Drive")
+        };
+        mount.join("Drives compartilhados").display().to_string()
+    };
+
+    let menu = h.proxy.menu(&[&folder(&first)]).await.unwrap();
+    let ids: Vec<_> = menu.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, ["new-shared-drive", "manage-shared-drives"]);
+    assert_eq!(menu[0].label, "Novo Drive compartilhado");
+    assert_eq!(menu[1].label, "Gerenciar drives compartilhados");
+    let before = h.opened().len();
+    h.proxy
+        .menu_action("new-shared-drive", &[&folder(&first)])
+        .await
+        .unwrap();
+    h.proxy
+        .menu_action("manage-shared-drives", &[&folder(&ana)])
+        .await
+        .unwrap();
+    wait_until("as duas telas abertas", || h.opened().len() == before + 2).await;
+    let opened = h.opened().split_off(before);
+    for wanted in [
+        format!("--open shared-drives:{first}/new"),
+        format!("--open shared-drives:{ana}"),
+    ] {
+        assert!(opened.contains(&wanted), "{wanted} em {opened:?}");
+    }
+
+    // Só vale na própria pasta, e sozinha: o resto do menu não existe lá, e vice-versa.
+    let inside = in_team(&h.home.join("Google Drive"), "Planos");
+    let both = [folder(&first), inside.clone()];
+    assert!(
+        h.proxy
+            .menu(&[&both[0], &both[1]])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let err = h
+        .proxy
+        .menu_action("manage-shared-drives", &[&inside])
+        .await
+        .unwrap_err();
+    assert_eq!(err.short_name(), "InvalidArgs", "{err}");
+    let err = h
+        .proxy
+        .menu_action("trash", &[&folder(&first)])
+        .await
+        .unwrap_err();
+    assert_eq!(err.short_name(), "NotFound", "{err}");
 }

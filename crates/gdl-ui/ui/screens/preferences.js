@@ -2,8 +2,9 @@
 // "Alterações pendentes", Cancelar e Salvar (todas as mudanças num `set_preferences` só). Uma
 // chave da política aparece bloqueada. A lógica fica em `preferences/model.js`.
 
-import { attempt, choice, el, stylesheet, toast } from '../components.js';
+import { attempt, choice, el, saveFooter, stylesheet, toast } from '../components.js';
 import { screenArg } from '../router.js';
+import { currentAccount } from '../state.js';
 import { disconnect } from './home/disconnect.js';
 import {
   diff, fromPrefs, gbToKb, hotkeyFrom, kbToGb, numberOrNull, proxyMode, proxyPatch, validate,
@@ -69,9 +70,7 @@ function draw() {
   ui.tabs = Object.keys(TABS).map((tab) =>
     el('button', { role: 'tab', 'data-tab': tab, onclick: () => showTab(tab) }, t(`pref-tab-${tab}`)));
   ui.content = el('main', { class: 'tab-content', role: 'tabpanel' });
-  ui.pending = el('span', { class: 'pending-changes' }, t('pref-pending'));
-  ui.save = el('button', { class: 'filled save', onclick: save }, t('pref-save'));
-  ui.cancel = el('button', { class: 'tonal cancel', onclick: cancel }, t('action-cancel'));
+  ui.footer = saveFooter(t, { onSave: save, onCancel: cancel });
   ui.banner = el('div', { class: 'banner restart-banner', role: 'status', hidden: !form.restartDue },
     el('span', {}, t('pref-restart-needed')),
     el('button', { onclick: () => attempt(api.call('restart')) }, t('pref-restart-now')));
@@ -80,7 +79,7 @@ function draw() {
       el('nav', { class: 'tabs', role: 'tablist' }, ui.tabs),
       ui.content,
       ui.banner,
-      el('footer', { class: 'actions' }, ui.pending, ui.cancel, ui.save)),
+      ui.footer.footer),
   );
   showTab(screen.tab);
 }
@@ -98,9 +97,7 @@ function updateFooter() {
   const changes = pending();
   // Só o que mudou se valida: um valor antigo fora dos limites não impede salvar o resto.
   const invalid = changes.some(([key]) => validate(key, form.edited[key], form.limits));
-  ui.pending.hidden = !changes.length;
-  ui.cancel.disabled = !changes.length;
-  ui.save.disabled = !changes.length || invalid;
+  ui.footer.update(changes.length > 0, !invalid);
 }
 
 // Grava `patch` (`{ chave: valor }`) no que o usuário mudou e confere os campos.
@@ -152,6 +149,8 @@ function driveTab() {
     el('h2', {}, t('pref-drive-folder')),
     el('p', { class: 'path' }, form.mount),
     el('button', { class: 'tonal', onclick: () => attempt(api.openMount()) }, t('pref-open-folder')),
+    el('button', { class: 'tonal manage-shared-drives', onclick: () => api.openScreen('shared-drives', currentAccount()) },
+      t('pref-shared-drives')),
   ];
 }
 

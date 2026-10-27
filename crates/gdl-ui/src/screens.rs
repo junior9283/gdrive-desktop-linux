@@ -20,7 +20,7 @@ const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
     }
 }
 
-pub const SCREENS: [Screen; 11] = [
+pub const SCREENS: [Screen; 12] = [
     screen(HOME, 900.0, 640.0),
     // Com `add` (outra conta) ou `resume:<e-mail>` (a conta que precisa entrar de novo).
     screen("onboarding", 560.0, 640.0),
@@ -37,6 +37,8 @@ pub const SCREENS: [Screen; 11] = [
     // As duas abrem com o id do item (`share:<conta>/<id>`).
     screen("share", 520.0, 640.0),
     screen("versions", 560.0, 480.0),
+    // Com a conta (`shared-drives:<conta>`) e, para já abrir o diálogo de criar, `/new` no fim.
+    screen("shared-drives", 520.0, 600.0),
 ];
 
 impl Screen {

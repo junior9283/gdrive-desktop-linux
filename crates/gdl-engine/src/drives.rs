@@ -175,8 +175,12 @@ impl Engine {
     }
 
     /// Cria um Drive compartilhado, que já entra ligado e indexado. Se o nome já é de outro
-    /// Drive da conta, ganha o sufixo " (2)", " (3)"…
+    /// Drive da conta, ganha o sufixo " (2)", " (3)"… Sem nome (vazio ou só espaços), recusa.
     pub async fn create_shared_drive(&self, name: &str) -> Result<SharedDriveInfo> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(EngineError::EmptyName);
+        }
         let email = self.account_email()?;
         let taken: Vec<String> = sync_drive_list(&self.store, &self.client, &email)
             .await?
@@ -354,6 +358,19 @@ mod tests {
             assert!(engine.store().get(&id(&drive.id)).unwrap().is_some());
         }
         assert_eq!(engine.shared_drives().await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_blank_drive_name_is_refused_and_the_others_are_trimmed() {
+        let fake = FakeDrive::start().await;
+        let (engine, _tmp) = indexed_engine(&fake).await;
+
+        let err = engine.create_shared_drive(" \t ").await.unwrap_err();
+        let made = engine.create_shared_drive("  Obras ").await.unwrap();
+
+        assert!(matches!(err, EngineError::EmptyName), "{err}");
+        assert_eq!(made.name, "Obras");
+        assert_eq!(engine.shared_drives().await.unwrap().len(), 1);
     }
 
     #[tokio::test]

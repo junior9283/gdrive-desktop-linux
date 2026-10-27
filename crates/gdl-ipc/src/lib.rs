@@ -290,6 +290,15 @@ pub struct Versions {
     pub versions: Vec<VersionItem>,
 }
 
+/// Um Drive compartilhado da conta (`SharedDrives`), para a tela de gerenciar.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct SharedDriveItem {
+    pub id: String,
+    pub name: String,
+    /// Ligado: indexado e visível na montagem.
+    pub enabled: bool,
+}
+
 /// Um item do menu "Google Drive" do botão direito (`Menu`), na ordem de exibição.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct MenuEntry {
@@ -449,6 +458,17 @@ pub trait Service {
         kind: &str,
         role: &str,
     ) -> Result<(), ServiceError>;
+    /// Os Drives compartilhados da conta, por nome, com o estado de ligado de cada um.
+    fn shared_drives(&self, account: &str) -> Result<Vec<SharedDriveItem>, ServiceError>;
+    /// Liga exatamente os Drives de `enabled` e desliga os outros. Com envio pendente num que seria
+    /// desligado, recusa com `PendingUploads` e nada muda.
+    fn set_shared_drives(&self, account: &str, enabled: &[&str]) -> Result<(), ServiceError>;
+    /// Cria um Drive compartilhado (nome repetido ganha " (2)"…) e o devolve, já ligado.
+    fn create_shared_drive(
+        &self,
+        account: &str,
+        name: &str,
+    ) -> Result<SharedDriveItem, ServiceError>;
     /// As versões do arquivo, da mais nova para a mais antiga.
     fn versions(&self, account: &str, item_id: &str) -> Result<Versions, ServiceError>;
     /// Baixa a versão para a pasta de downloads e devolve o caminho do arquivo.

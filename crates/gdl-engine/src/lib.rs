@@ -45,6 +45,8 @@ pub enum EngineError {
     NotUploaded,
     #[error("o Drive compartilhado tem arquivos que ainda não foram enviados")]
     PendingUploads,
+    #[error("o nome do Drive compartilhado está vazio")]
+    EmptyName,
     #[error("a API não move pastas entre o Meu Drive e os Drives compartilhados")]
     FolderCrossDrive,
 }

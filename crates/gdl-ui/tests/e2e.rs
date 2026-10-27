@@ -855,6 +855,49 @@ async fn versions_screen_lists_and_keeps_a_version() {
     assert_eq!(list.matches("Atual").count(), 1, "{list}");
 }
 
+/// O que `SharedDrives` diz da conta principal: `(nome, ligado)` de cada drive.
+async fn drives(service: &ServiceProxy<'_>) -> Vec<(String, bool)> {
+    let list = service.shared_drives("").await.unwrap();
+    list.into_iter().map(|d| (d.name, d.enabled)).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn shared_drives_screen_saves_and_creates() {
+    let service = service().await;
+    let team = service.shared_drives("").await.unwrap()[0].id.clone();
+    let session = Session::open("shared-drives").await;
+    session.wait_text(".drive-list", "Equipe").await;
+    let idle = session
+        .eval("return document.querySelector('.save').disabled")
+        .await;
+    assert_eq!(idle, json!(true), "sem mudança, não há o que salvar");
+
+    // Desliga o drive e salva: o serviço passa a ter o drive desligado.
+    session.click(&format!("[data-drive='{team}'] input")).await;
+    session.click(".save").await;
+    session.wait_text(".toast", "Alterações salvas").await;
+    let after_save = drives(&service).await;
+
+    // Cria um drive pelo diálogo: ele entra na lista e no serviço, ligado.
+    session.click(".new-drive").await;
+    session.fill(".dialog .drive-name", "Nova equipe").await;
+    session.click(".dialog .filled").await;
+    session.wait_text(".drive-list", "Nova equipe").await;
+    let after_create = drives(&service).await;
+
+    // Deixa o Drive de teste como estava para os outros testes.
+    service.set_shared_drives("", &[&team]).await.unwrap();
+    assert_eq!(after_save, [("Equipe".to_string(), false)]);
+    assert_eq!(
+        after_create,
+        [
+            ("Equipe".to_string(), false),
+            ("Nova equipe".to_string(), true)
+        ]
+    );
+}
+
 /// A bandeja do `scripts/e2e.sh`, encerrada no fim do teste.
 struct TrayProcess(std::process::Child);
 

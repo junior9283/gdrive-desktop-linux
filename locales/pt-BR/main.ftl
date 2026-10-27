@@ -54,6 +54,7 @@ notify-kind-offline = Sem conexão com a internet
 
 # Login e saída da conta
 login-rejected = A conta { $email } não é permitida neste computador.
+shared-drives-pending = Algum dos drives que você desligou tem arquivos que ainda não foram enviados. Espere os envios terminarem (ou mantenha o drive ligado) e salve de novo.
 logout-pending = Há { $count } itens que ainda não estão no Drive (envios pendentes ou cópias no Lost and Found). Escolha terminar os envios, mover os arquivos para uma pasta ou descartá-los; o Lost and Found nunca é apagado.
 not-logged-in = Nenhuma conta conectada.
 uninstall-signed-in = Desconecte a conta antes de apagar os dados deste computador: a saída da conta decide o que fazer com os envios pendentes.
@@ -146,6 +147,7 @@ window-notification-settings = Preferências de notificação
 window-uninstall = Desinstalar o Google Drive
 window-share = Compartilhar
 window-versions = Gerenciar versões
+window-shared-drives = Drives compartilhados
 
 ## Menu "Google Drive" do botão direito nos gerenciadores de arquivos.
 menu-open-web = Abrir no navegador
@@ -162,6 +164,8 @@ menu-new-spreadsheet = Nova Planilha Google
 menu-new-presentation = Nova Apresentação Google
 menu-refresh = Atualizar pasta
 menu-trash = Ver itens na lixeira
+menu-new-shared-drive = Novo Drive compartilhado
+menu-manage-shared-drives = Gerenciar drives compartilhados
 new-document-name = Documento sem título
 new-spreadsheet-name = Planilha sem título
 new-presentation-name = Apresentação sem título

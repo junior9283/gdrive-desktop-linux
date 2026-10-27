@@ -75,6 +75,27 @@ button.filled:hover {
   gap: 8px;
 }
 
+/* Rodapé de Cancelar e Salvar (`saveFooter`) e a linha de erro de um campo. */
+.save-footer {
+  align-items: center;
+  padding: 12px 24px;
+  border-top: 1px solid var(--md-outline-variant);
+}
+
+.pending-changes {
+  margin-right: auto;
+  color: var(--md-on-surface-variant);
+}
+
+.field-error {
+  margin: 0;
+  color: var(--md-error);
+}
+
+.field-error:empty {
+  display: none;
+}
+
 /* Serviço fora do ar. */
 .banner {
   display: flex;

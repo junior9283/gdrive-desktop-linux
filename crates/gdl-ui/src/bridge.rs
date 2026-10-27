@@ -195,6 +195,9 @@ impl Bridge {
                     a.str("role")?
                 ))
             }
+            "shared_drives" => j!(s.shared_drives(a.account())),
+            "set_shared_drives" => j!(s.set_shared_drives(a.account(), &a.strs("enabled")?)),
+            "create_shared_drive" => j!(s.create_shared_drive(a.account(), a.str("name")?)),
             "versions" => j!(s.versions(a.account(), a.str("item_id")?)),
             "version_download" => {
                 j!(s.version_download(a.account(), a.str("item_id")?, a.str("version_id")?))

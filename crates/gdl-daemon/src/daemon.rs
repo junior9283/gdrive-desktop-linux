@@ -38,8 +38,8 @@ use zbus::object_server::SignalEmitter;
 use gdl_ipc::launcher::Launcher;
 use gdl_ipc::{
     AccountInfo, AccountSummary, ActivityItem, MenuEntry, NotificationItem, NotificationSetting,
-    OBJECT_PATH, OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError, SharedItem,
-    Status, SyncErrorItem,
+    OBJECT_PATH, OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError, SharedDriveItem,
+    SharedItem, Status, SyncErrorItem,
 };
 
 use crate::cosmic;
@@ -1609,21 +1609,78 @@ impl Daemon {
             .map_err(|e| engine_error(e, item_id))
     }
 
+    pub async fn shared_drives(&self, account: &str) -> Result<Vec<SharedDriveItem>, ServiceError> {
+        let engine = self.account_engine(account).await?;
+        let drives = engine.shared_drives().await.map_err(failed)?;
+        Ok(drives
+            .into_iter()
+            .map(|d| SharedDriveItem {
+                id: d.id,
+                name: d.name,
+                enabled: d.enabled,
+            })
+            .collect())
+    }
+
+    pub async fn set_shared_drives(
+        &self,
+        account: &str,
+        enabled: &[String],
+    ) -> Result<(), ServiceError> {
+        let engine = self.account_engine(account).await?;
+        engine
+            .set_drives_enabled(enabled)
+            .await
+            .map_err(|e| match e {
+                EngineError::PendingUploads => {
+                    ServiceError::PendingUploads(self.i18n.tr("shared-drives-pending", &[]))
+                }
+                e => failed(e),
+            })
+    }
+
+    pub async fn create_shared_drive(
+        &self,
+        account: &str,
+        name: &str,
+    ) -> Result<SharedDriveItem, ServiceError> {
+        let engine = self.account_engine(account).await?;
+        let drive = engine
+            .create_shared_drive(name)
+            .await
+            .map_err(|e| match e {
+                EngineError::EmptyName => ServiceError::InvalidArgs("name".into()),
+                e => failed(e),
+            })?;
+        Ok(SharedDriveItem {
+            id: drive.id,
+            name: drive.name,
+            enabled: drive.enabled,
+        })
+    }
+
+    /// O motor da conta dona da pasta virtual "Drives compartilhados", se `paths` for só ela.
+    async fn shared_drives_folder(&self, paths: &[String]) -> Option<Arc<Engine>> {
+        let [path] = paths else {
+            return None;
+        };
+        let (engine, relative) = self.engine_at(Path::new(path)).await?;
+        (relative == Path::new(&self.layout.shared_drives)).then_some(engine)
+    }
+
     /// O menu do botão direito para `paths`: vazio se algum não for do Meu Drive (ou sem conta),
-    /// para o gerenciador de arquivos não mostrar o submenu.
+    /// para o gerenciador de arquivos não mostrar o submenu. A pasta "Drives compartilhados" tem
+    /// o menu dela.
     pub async fn menu(&self, paths: &[String]) -> Vec<MenuEntry> {
-        let Ok(selection) = self.selection(paths).await else {
-            return Vec::new();
+        let entries = if self.shared_drives_folder(paths).await.is_some() {
+            menu::SHARED_DRIVES.map(|a| (Some(a), "")).into()
+        } else {
+            match self.picked_entries(paths).await {
+                Some(entries) => entries,
+                None => return Vec::new(),
+            }
         };
-        let office = self.prefs().open_office_files_in_docs;
-        let picked: Result<Vec<_>, _> = selection
-            .iter()
-            .map(|(engine, item)| picked(engine, item, office))
-            .collect();
-        let Ok(picked) = picked else {
-            return Vec::new();
-        };
-        menu::entries(&picked)
+        entries
             .into_iter()
             .map(|(action, state)| MenuEntry {
                 id: action.map_or(menu::SEPARATOR, Action::id).into(),
@@ -1631,6 +1688,20 @@ impl Daemon {
                 state: state.into(),
             })
             .collect()
+    }
+
+    /// Os itens do menu para a seleção de itens do Drive; `None` se ela não for válida.
+    async fn picked_entries(
+        &self,
+        paths: &[String],
+    ) -> Option<Vec<(Option<Action>, &'static str)>> {
+        let selection = self.selection(paths).await.ok()?;
+        let office = self.prefs().open_office_files_in_docs;
+        let picked: Result<Vec<_>, _> = selection
+            .iter()
+            .map(|(engine, item)| picked(engine, item, office))
+            .collect();
+        Some(menu::entries(&picked.ok()?))
     }
 
     /// Faz a ação `action` do menu nos `paths`; devolve o link em `copy-link` e vazio nas outras.
@@ -1641,6 +1712,12 @@ impl Daemon {
     ) -> Result<String, ServiceError> {
         let invalid = || ServiceError::InvalidArgs(action.into());
         let action = Action::parse(action).ok_or_else(invalid)?;
+        if let Some(screen) = action.shared_drives_screen() {
+            let engine = self.shared_drives_folder(paths).await.ok_or_else(invalid)?;
+            let account = self.email_of(&engine).await;
+            self.open_screen(format!("shared-drives:{account}{screen}"));
+            return Ok(String::new());
+        }
         let selection = self.selection(paths).await?;
         let single = || match selection.as_slice() {
             [(engine, item)] => Ok((engine, item)),
@@ -1691,6 +1768,9 @@ impl Daemon {
                     }
                     .map_err(|e| engine_error(e, &item.id.0))?;
                 }
+            }
+            Action::NewSharedDrive | Action::ManageSharedDrives => {
+                unreachable!("tratadas acima por `shared_drives_screen`")
             }
             Action::Refresh => folder()?.0.refresh().await,
             Action::Trash => self.open(DRIVE_TRASH.into()),

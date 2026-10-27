@@ -54,6 +54,7 @@ notify-kind-offline = No internet connection
 
 # Signing in and out
 login-rejected = The account { $email } isn't allowed on this computer.
+shared-drives-pending = A drive you turned off has files that have not been uploaded yet. Wait for the uploads to finish (or keep the drive on) and save again.
 logout-pending = There are { $count } items not yet in Drive (pending uploads or copies in Lost and Found). Choose to finish the uploads, move the files to a folder, or discard them; Lost and Found is never deleted.
 not-logged-in = No account is connected.
 uninstall-signed-in = Disconnect the account before deleting the data on this computer: signing out decides what happens to pending uploads.
@@ -146,6 +147,7 @@ window-notification-settings = Notification preferences
 window-uninstall = Uninstall Google Drive
 window-share = Share
 window-versions = Manage versions
+window-shared-drives = Shared drives
 
 ## The "Google Drive" right-click menu in file managers.
 menu-open-web = Open in browser
@@ -162,6 +164,8 @@ menu-new-spreadsheet = New Google Sheet
 menu-new-presentation = New Google Slides
 menu-refresh = Refresh folder
 menu-trash = View items in trash
+menu-new-shared-drive = New shared drive
+menu-manage-shared-drives = Manage shared drives
 new-document-name = Untitled document
 new-spreadsheet-name = Untitled spreadsheet
 new-presentation-name = Untitled presentation

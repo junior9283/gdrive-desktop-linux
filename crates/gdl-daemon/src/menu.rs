@@ -24,6 +24,10 @@ pub enum Action {
     NewPresentation,
     Refresh,
     Trash,
+    /// Só na pasta "Drives compartilhados": abre a tela para criar um Drive.
+    NewSharedDrive,
+    /// Só na pasta "Drives compartilhados": abre a tela de ligar e desligar os Drives.
+    ManageSharedDrives,
 }
 
 /// Um documento Google vazio de "Novo …": o tipo e a chave da tradução do nome.
@@ -33,7 +37,7 @@ pub struct NewFile {
 }
 
 impl Action {
-    pub const ALL: [Action; 14] = [
+    pub const ALL: [Action; 16] = [
         Action::OpenWeb,
         Action::OpenDocs,
         Action::OpenSheets,
@@ -48,6 +52,8 @@ impl Action {
         Action::NewPresentation,
         Action::Refresh,
         Action::Trash,
+        Action::NewSharedDrive,
+        Action::ManageSharedDrives,
     ];
 
     /// `(id, chave do rótulo)`.
@@ -67,6 +73,8 @@ impl Action {
             Action::NewPresentation => ("new-presentation", "menu-new-presentation"),
             Action::Refresh => ("refresh", "menu-refresh"),
             Action::Trash => ("trash", "menu-trash"),
+            Action::NewSharedDrive => ("new-shared-drive", "menu-new-shared-drive"),
+            Action::ManageSharedDrives => ("manage-shared-drives", "menu-manage-shared-drives"),
         }
     }
 
@@ -96,6 +104,16 @@ impl Action {
         OfficeEditor::ALL
             .into_iter()
             .find(|e| Action::open_with(*e) == self)
+    }
+
+    /// O fim do pedido de tela (`shared-drives:<conta>…`) das ações da pasta "Drives
+    /// compartilhados"; `None` nas outras.
+    pub fn shared_drives_screen(self) -> Option<&'static str> {
+        match self {
+            Action::NewSharedDrive => Some("/new"),
+            Action::ManageSharedDrives => Some(""),
+            _ => None,
+        }
     }
 
     pub fn new_file(self) -> Option<NewFile> {
@@ -193,6 +211,9 @@ pub fn entries(picked: &[Picked]) -> Vec<(Option<Action>, &'static str)> {
     list.push((Some(Action::Trash), ""));
     list
 }
+
+/// Os itens da pasta "Drives compartilhados" da montagem, que não é um item do Drive.
+pub const SHARED_DRIVES: [Action; 2] = [Action::NewSharedDrive, Action::ManageSharedDrives];
 
 #[cfg(test)]
 mod tests {
@@ -292,6 +313,25 @@ mod tests {
         assert!(!ids(&list).contains(&"copy-link"));
         assert!(!ids(&list).contains(&"share"));
         assert!(entries(&[]).is_empty());
+    }
+
+    #[test]
+    fn the_shared_drives_folder_only_creates_and_manages_drives() {
+        assert_eq!(
+            SHARED_DRIVES.map(Action::id),
+            ["new-shared-drive", "manage-shared-drives"]
+        );
+        assert_eq!(Action::NewSharedDrive.shared_drives_screen(), Some("/new"));
+        assert_eq!(Action::Trash.shared_drives_screen(), None);
+        // Nenhuma outra seleção mostra essas duas.
+        for picked in [[FILE], [FOLDER]] {
+            let list = ids(&entries(&picked));
+            assert!(!list.contains(&"new-shared-drive") && !list.contains(&"manage-shared-drives"));
+        }
+        assert_eq!(
+            Action::parse("manage-shared-drives"),
+            Some(Action::ManageSharedDrives)
+        );
     }
 
     #[test]

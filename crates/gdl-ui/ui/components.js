@@ -159,6 +159,23 @@ export function pager(t, page, go, ...extra) {
   );
 }
 
+// O rodapé "Alterações pendentes", Cancelar e Salvar das telas que editam e salvam (Preferências e
+// Drives compartilhados): `footer` é o elemento e `update(changed, valid)` liga os botões (Salvar
+// também pede `valid`).
+export function saveFooter(t, { onSave, onCancel }) {
+  const pending = el('span', { class: 'pending-changes' }, t('pref-pending'));
+  const cancel = el('button', { class: 'tonal cancel', onclick: onCancel }, t('action-cancel'));
+  const save = el('button', { class: 'filled save', onclick: onSave }, t('pref-save'));
+  return {
+    footer: el('footer', { class: 'actions save-footer' }, pending, cancel, save),
+    update(changed, valid = true) {
+      pending.hidden = !changed;
+      cancel.disabled = !changed;
+      save.disabled = !changed || !valid;
+    },
+  };
+}
+
 // Aviso curto no rodapé da janela.
 export function toast(text) {
   const note = el('div', { class: 'toast', role: 'status' }, text);

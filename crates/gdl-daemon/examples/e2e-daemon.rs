@@ -43,6 +43,11 @@ async fn main() -> Result<(), Error> {
     fake.modify_remote(&notes, b"lembrar de testar".to_vec());
     fake.add_file(&root, "inventario.ods", b"tabela".to_vec());
     fake.add_gdoc(&root, "Planilha", "application/vnd.google-apps.spreadsheet");
+    // Um Drive compartilhado da Ana, de que a conta principal é membro, para a tela "Drives
+    // compartilhados".
+    let ana = fake.add_account(ANA);
+    let team = ana.add_shared_drive("Equipe");
+    fake.share_drive(&team, &fake.email());
 
     let dir = tempfile::tempdir()?;
     let browser = recording_browser(dir.path())?;
@@ -100,7 +105,6 @@ async fn main() -> Result<(), Error> {
         return Err("o login falhou".into());
     }
     // Uma segunda conta, para quem adiciona outra pela janela: o próximo login entra nela.
-    let ana = fake.add_account(ANA);
     ana.add_file(&ana.root_id(), "da-ana.txt", b"oi".to_vec());
     fake.login_as(ANA);
     let mount = proxy.status("").await?.mount_point;

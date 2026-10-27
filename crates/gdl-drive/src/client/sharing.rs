@@ -12,7 +12,7 @@ const REVISION_FIELDS: &str = "id,modifiedTime,size,keepForever,lastModifyingUse
 impl DriveClient {
     /// `files/{file_id}/{rest}` na API.
     fn file_sub_api(&self, file_id: &str, rest: &str) -> url::Url {
-        self.api(&format!("files/{file_id}/{rest}"))
+        self.all_drives_api(&format!("files/{file_id}/{rest}"))
     }
 
     /// Quem tem acesso ao item.

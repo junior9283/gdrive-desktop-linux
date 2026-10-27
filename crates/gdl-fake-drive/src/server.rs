@@ -14,7 +14,7 @@ use axum::routing::{get, patch, post, put};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 
-use crate::state::{self, IdRefused, Session, SessionRef, Shared, parse_query, random_id};
+use crate::state::{self, IdRefused, Scope, Session, SessionRef, Shared, parse_query, random_id};
 
 pub(crate) type Shr = State<Arc<Shared>>;
 pub(crate) type Params = Query<HashMap<String, String>>;
@@ -31,6 +31,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
         .route("/drive/v3/files", get(list).post(create))
         .route("/drive/v3/files/generateIds", get(generate_ids))
         .route("/drive/v3/files/{id}", get(get_file).patch(update))
+        .route("/drive/v3/drives", get(list_drives).post(create_drive))
         .route("/drive/v3/changes/startPageToken", get(start_page_token))
         .route("/drive/v3/changes", get(changes))
         .route("/upload/drive/v3/files/{id}", patch(upload_update))
@@ -139,6 +140,39 @@ async fn require_token(State(shared): Shr, mut req: Request, next: Next) -> Resp
     }
 }
 
+/// O escopo do pedido: `corpora=user` é só o Meu Drive, `corpora=drive` um Drive compartilhado;
+/// nos outros casos os Drives compartilhados só entram com `includeItemsFromAllDrives`.
+fn scope_of(params: &HashMap<String, String>) -> Scope {
+    match (
+        params.get("corpora").map(String::as_str),
+        params.get("driveId"),
+    ) {
+        (Some("user"), _) => Scope::MyDrive,
+        (Some("drive"), Some(id)) => Scope::Drive(id.clone()),
+        _ if params.get("includeItemsFromAllDrives").map(String::as_str) == Some("true") => {
+            Scope::Everything
+        }
+        _ => Scope::MyDrive,
+    }
+}
+
+/// A página de `pageSize` itens a partir de `pageToken` (um deslocamento) e o token da seguinte,
+/// se houver mais.
+fn offset_page<T>(
+    params: &HashMap<String, String>,
+    items: impl Iterator<Item = T>,
+) -> (Vec<T>, Option<String>) {
+    let size = page_size(params);
+    let offset: usize = params
+        .get("pageToken")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let mut rest = items.skip(offset);
+    let page = rest.by_ref().take(size).collect();
+    let next = rest.next().map(|_| (offset + size).to_string());
+    (page, next)
+}
+
 fn page_size(params: &HashMap<String, String>) -> usize {
     params
         .get("pageSize")
@@ -183,24 +217,22 @@ async fn list(State(shared): Shr, Extension(me): Extension<Me>, Query(params): P
         Ok(c) => c,
         Err(e) => return api_error(400, "invalid", &e),
     };
-    let size = page_size(&params);
-    let offset: usize = params
-        .get("pageToken")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
     // Como no Drive real, o compartilhado comigo (sem pai no Meu Drive) também vem na listagem.
+    let scope = scope_of(&params);
     let mut state = shared.state();
     let my_root = state.root_of(&me.0);
-    let mut hits = state
-        .files
-        .values()
-        .filter(|f| f.id != my_root && state.visible_to(&me.0, f))
-        .filter(|f| clauses.iter().all(|c| c.matches(f)))
-        .skip(offset);
-    let files: Vec<Value> = hits.by_ref().take(size).map(|f| state.to_json(f)).collect();
+    let (hits, next) = offset_page(
+        &params,
+        state
+            .files
+            .values()
+            .filter(|f| f.id != my_root && state.listed_for(&me.0, &scope, f))
+            .filter(|f| clauses.iter().all(|c| c.matches(f))),
+    );
+    let files: Vec<Value> = hits.into_iter().map(|f| state.to_json(f)).collect();
     let mut body = json!({ "kind": "drive#fileList", "files": files });
-    if hits.next().is_some() {
-        body["nextPageToken"] = (offset + size).to_string().into();
+    if let Some(next) = next {
+        body["nextPageToken"] = next.into();
     }
     if let Some((pages, ..)) = &mut state.edit_during_listing {
         *pages -= 1;
@@ -332,6 +364,49 @@ async fn update(
     Json(state.to_json(&state.files[&id])).into_response()
 }
 
+fn drive_json(drive: &state::DriveRec) -> Value {
+    json!({
+        "kind": "drive#drive",
+        "id": drive.id,
+        "name": drive.name,
+        "capabilities": { "canAddChildren": drive.can_add_children },
+    })
+}
+
+async fn list_drives(
+    State(shared): Shr,
+    Extension(me): Extension<Me>,
+    Query(params): Params,
+) -> Json<Value> {
+    let state = shared.state();
+    let (drives, next) = offset_page(&params, state.drives_of(&me.0));
+    let mut body = json!({ "kind": "drive#driveList", "drives": drives.into_iter().map(drive_json).collect::<Vec<_>>() });
+    if let Some(next) = next {
+        body["nextPageToken"] = next.into();
+    }
+    Json(body)
+}
+
+/// `drives.create`: o mesmo `requestId` devolve o drive que já foi criado.
+async fn create_drive(
+    State(shared): Shr,
+    Extension(me): Extension<Me>,
+    Query(params): Params,
+    body: Bytes,
+) -> Response {
+    let (Some(request_id), Some(meta)) = (params.get("requestId"), json_body(&body)) else {
+        return api_error(400, "required", "requestId e corpo JSON são obrigatórios");
+    };
+    let mut state = shared.state();
+    let id = state.add_drive(
+        meta["name"].as_str().unwrap_or("Sem título"),
+        &me.0,
+        Some(request_id),
+    );
+    let drive = state.drives.iter().find(|d| d.id == id).unwrap();
+    Json(drive_json(drive)).into_response()
+}
+
 async fn start_page_token(State(shared): Shr) -> Json<Value> {
     Json(json!({ "startPageToken": shared.state().start_page_token() }))
 }
@@ -347,7 +422,7 @@ async fn changes(
     Json(
         shared
             .state()
-            .changes_since(&me.0, token, page_size(&params)),
+            .changes_since(&me.0, &scope_of(&params), token, page_size(&params)),
     )
     .into_response()
 }

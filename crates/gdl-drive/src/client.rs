@@ -31,6 +31,25 @@ pub const RESUMABLE_THRESHOLD: u64 = 8 * 1024 * 1024;
 const CHUNK: usize = 8 * 1024 * 1024;
 /// Pedaço do corpo enviado com limite de banda: o ritmo fica uniforme dentro de um trecho.
 const THROTTLE_SLICE: usize = 64 * 1024;
+/// Parâmetro de toda chamada de arquivo: o app lida com itens de Drives compartilhados.
+const ALL_DRIVES: (&str, &str) = ("supportsAllDrives", "true");
+/// Listagens e mudanças trazem também os itens de Drives compartilhados de que a conta é membro.
+const INCLUDE_DRIVES: (&str, &str) = ("includeItemsFromAllDrives", "true");
+/// Campos pedidos de cada Drive compartilhado.
+const DRIVE_FIELDS: &str = "id,name,capabilities/canAddChildren";
+
+/// O que uma listagem abrange.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Corpus {
+    /// Só o Meu Drive (e o compartilhado comigo).
+    MyDrive,
+    /// Só o Drive compartilhado com esse ID.
+    Drive(String),
+    /// Tudo o que a conta vê. Na API real é lento e pode vir incompleto (`incompleteSearch`):
+    /// serve para pesquisa e miniaturas, não para indexar.
+    AllDrives,
+}
+
 /// Quantos resultados a pesquisa do Drive traz.
 pub const SEARCH_LIMIT: usize = 50;
 
@@ -225,14 +244,25 @@ impl DriveClient {
         self.base.join(path).expect("caminho relativo válido")
     }
 
+    /// Endereço de uma rota de arquivo, com o aviso de que o app entende itens de Drives
+    /// compartilhados: sem ele a API recusa (404) os arquivos de dentro deles.
+    fn all_drives_url(base: &Url, path: &str) -> Url {
+        let mut url = base.join(path).expect("caminho relativo válido");
+        url.query_pairs_mut()
+            .append_pair(ALL_DRIVES.0, ALL_DRIVES.1);
+        url
+    }
+
+    fn all_drives_api(&self, path: &str) -> Url {
+        Self::all_drives_url(&self.base, path)
+    }
+
     fn file_api(&self, id: &str) -> Url {
-        self.api(&format!("files/{id}"))
+        self.all_drives_api(&format!("files/{id}"))
     }
 
     fn upload_api(&self, path: &str) -> Url {
-        self.upload_base
-            .join(path)
-            .expect("caminho relativo válido")
+        Self::all_drives_url(&self.upload_base, path)
     }
 
     /// Uma tentativa autenticada; num 401, renova o token uma vez e repete.
@@ -352,6 +382,7 @@ impl DriveClient {
         let q = format!("'{folder_id}' in parents and trashed = false");
         let mut links = Vec::new();
         self.list(
+            &Corpus::AllDrives,
             &q,
             "id,thumbnailLink,modifiedTime",
             1000,
@@ -392,13 +423,14 @@ impl DriveClient {
         .await
     }
 
-    /// Todos os itens fora da lixeira, entregues página a página (1000 por página). Para na
-    /// primeira página que `page` recusar.
+    /// Todos os itens de `corpus` fora da lixeira, entregues página a página (1000 por página).
+    /// Para na primeira página que `page` recusar.
     pub async fn list_all<E: From<DriveError>>(
         &self,
+        corpus: &Corpus,
         mut page: impl FnMut(Vec<RemoteFile>) -> std::result::Result<(), E>,
     ) -> std::result::Result<(), E> {
-        self.list("trashed = false", FILE_FIELDS, 1000, |files| {
+        self.list(corpus, "trashed = false", FILE_FIELDS, 1000, |files| {
             page(files).map(|()| true)
         })
         .await
@@ -412,10 +444,16 @@ impl DriveClient {
             id: String,
         }
         let mut found = Vec::new();
-        self.list(&search_query(text), "id", SEARCH_LIMIT, |hits: Vec<Hit>| {
-            found = hits.into_iter().map(|h| h.id).collect();
-            Ok::<_, DriveError>(false)
-        })
+        self.list(
+            &Corpus::AllDrives,
+            &search_query(text),
+            "id",
+            SEARCH_LIMIT,
+            |hits: Vec<Hit>| {
+                found = hits.into_iter().map(|h| h.id).collect();
+                Ok::<_, DriveError>(false)
+            },
+        )
         .await?;
         Ok(found)
     }
@@ -425,6 +463,7 @@ impl DriveClient {
         let fields = format!("{FILE_FIELDS},sharedWithMeTime,owners(displayName)");
         let mut shared = Vec::new();
         self.list(
+            &Corpus::MyDrive,
             "sharedWithMe = true and trashed = false",
             &fields,
             1000,
@@ -437,9 +476,10 @@ impl DriveClient {
         Ok(shared)
     }
 
-    /// `files.list` com `q`, página a página, enquanto `page` devolver `true`.
+    /// `files.list` de `corpus` com `q`, página a página, enquanto `page` devolver `true`.
     async fn list<T: DeserializeOwned, E: From<DriveError>>(
         &self,
+        corpus: &Corpus,
         q: &str,
         file_fields: &str,
         page_size: usize,
@@ -455,12 +495,22 @@ impl DriveClient {
         }
         let fields = format!("nextPageToken,files({file_fields})");
         let page_size = page_size.to_string();
+        let mut params = vec![
+            INCLUDE_DRIVES,
+            ("q", q),
+            ("pageSize", &page_size),
+            ("fields", &fields),
+        ];
+        match corpus {
+            Corpus::MyDrive => params.push(("corpora", "user")),
+            Corpus::Drive(id) => params.extend([("corpora", "drive"), ("driveId", id)]),
+            Corpus::AllDrives => params.push(("corpora", "allDrives")),
+        }
         let mut token: Option<String> = None;
         loop {
             let p: Page<T> = self
                 .json(|| {
-                    let req = self.http.get(self.api("files"));
-                    let req = req.query(&[("q", q), ("pageSize", &page_size), ("fields", &fields)]);
+                    let req = self.http.get(self.all_drives_api("files")).query(&params);
                     match &token {
                         Some(t) => req.query(&[("pageToken", t)]),
                         None => req,
@@ -520,7 +570,7 @@ impl DriveClient {
     async fn create(&self, meta: &Value) -> Result<RemoteFile> {
         self.file(|| {
             self.http
-                .post(self.api("files"))
+                .post(self.all_drives_api("files"))
                 .query(&[("fields", FILE_FIELDS)])
                 .json(meta)
         })
@@ -640,6 +690,51 @@ impl DriveClient {
             .await
     }
 
+    /// Os Drives compartilhados de que a conta é membro.
+    pub async fn drives(&self) -> Result<Vec<SharedDrive>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Page {
+            #[serde(default)]
+            drives: Vec<SharedDrive>,
+            next_page_token: Option<String>,
+        }
+        let fields = format!("nextPageToken,drives({DRIVE_FIELDS})");
+        let mut all = vec![];
+        let mut token: Option<String> = None;
+        loop {
+            let page: Page = self
+                .json(|| {
+                    let req = self
+                        .http
+                        .get(self.api("drives"))
+                        .query(&[("pageSize", "100"), ("fields", &fields)]);
+                    match &token {
+                        Some(t) => req.query(&[("pageToken", t)]),
+                        None => req,
+                    }
+                })
+                .await?;
+            all.extend(page.drives);
+            match page.next_page_token {
+                Some(t) => token = Some(t),
+                None => return Ok(all),
+            }
+        }
+    }
+
+    /// Cria um Drive compartilhado. `request_id` torna a repetição segura: com o mesmo valor, a
+    /// API devolve o drive já criado em vez de outro.
+    pub async fn create_drive(&self, name: &str, request_id: &str) -> Result<SharedDrive> {
+        self.json(|| {
+            self.http
+                .post(self.api("drives"))
+                .query(&[("requestId", request_id), ("fields", DRIVE_FIELDS)])
+                .json(&json!({ "name": name }))
+        })
+        .await
+    }
+
     pub async fn start_page_token(&self) -> Result<String> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -647,7 +742,11 @@ impl DriveClient {
             start_page_token: String,
         }
         let raw: Raw = self
-            .json(|| self.http.get(self.api("changes/startPageToken")))
+            .json(|| {
+                self.http
+                    .get(self.all_drives_api("changes/startPageToken"))
+                    .query(&[INCLUDE_DRIVES])
+            })
             .await?;
         Ok(raw.start_page_token)
     }
@@ -677,12 +776,15 @@ impl DriveClient {
         loop {
             let page: Page = self
                 .json(|| {
-                    self.http.get(self.api("changes")).query(&[
-                        ("pageToken", page_token.as_str()),
-                        ("pageSize", "1000"),
-                        ("includeRemoved", "true"),
-                        ("fields", &fields),
-                    ])
+                    self.http
+                        .get(self.all_drives_api("changes"))
+                        .query(&[INCLUDE_DRIVES])
+                        .query(&[
+                            ("pageToken", page_token.as_str()),
+                            ("pageSize", "1000"),
+                            ("includeRemoved", "true"),
+                            ("fields", &fields),
+                        ])
                 })
                 .await?;
             all.extend(page.changes.into_iter().map(|c| match c.file {
@@ -961,7 +1063,7 @@ mod tests {
         ana.add_file(&ana.root_id(), "da-ana.txt", b"b".to_vec());
         let names = |c: DriveClient| async move {
             let mut names = vec![];
-            c.list_all(|page| -> Result<()> {
+            c.list_all(&Corpus::MyDrive, |page| -> Result<()> {
                 names.extend(page.into_iter().map(|f| f.name));
                 Ok(())
             })
@@ -1017,7 +1119,7 @@ mod tests {
         assert_eq!(items[0].owner, "Ana Souza");
         assert!(items[0].shared_ms > 0);
         let mut all = Vec::new();
-        c.list_all(|page| -> Result<()> {
+        c.list_all(&Corpus::MyDrive, |page| -> Result<()> {
             all.extend(page);
             Ok(())
         })
@@ -1081,7 +1183,7 @@ mod tests {
             }};
         }
         spawnable_call!(about());
-        spawnable_call!(list_all(|_| Ok::<_, DriveError>(())));
+        spawnable_call!(list_all(&Corpus::MyDrive, |_| Ok::<_, DriveError>(())));
         spawnable_call!(download_stream("x", 0, 1));
         spawnable_call!(changes("1"));
         spawnable_call!(set_trashed("x", true));
@@ -1299,7 +1401,7 @@ mod tests {
         fake.trash_remote(&gone);
         let mut pages = vec![];
         client(&fake)
-            .list_all(|page| {
+            .list_all(&Corpus::MyDrive, |page| {
                 pages.push(page.len());
                 Ok::<_, DriveError>(())
             })
@@ -1669,6 +1771,176 @@ mod tests {
         let (none, again) = c.changes(&next).await.unwrap();
         assert!(none.is_empty());
         assert_eq!(again, next);
+    }
+
+    async fn all_files(c: &DriveClient) -> Vec<RemoteFile> {
+        files_of(c, &Corpus::AllDrives).await
+    }
+
+    async fn files_of(c: &DriveClient, corpus: &Corpus) -> Vec<RemoteFile> {
+        let mut files = vec![];
+        c.list_all(corpus, |page| -> Result<()> {
+            files.extend(page);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        files
+    }
+
+    #[tokio::test]
+    async fn shared_drive_files_are_listed() {
+        let fake = FakeDrive::start().await;
+        let ana = fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Equipe");
+        ana.add_shared_drive("Só da Ana");
+        fake.share_drive(&drive, &fake.email());
+        let folder = ana.add_folder(&drive, "Planos");
+        ana.add_file(&folder, "plano.txt", b"1".to_vec());
+        fake.add_file(&fake.root_id(), "meu.txt", b"2".to_vec());
+
+        let files = all_files(&client(&fake)).await;
+
+        let drive_of = |name: &str| {
+            let file = files.iter().find(|f| f.name == name).unwrap();
+            file.drive_id.clone()
+        };
+        assert_eq!(drive_of("Planos"), Some(drive.clone()));
+        assert_eq!(drive_of("plano.txt"), Some(drive));
+        assert_eq!(drive_of("meu.txt"), None);
+        assert_eq!(files.len(), 3, "o drive que não é dela não aparece");
+    }
+
+    #[tokio::test]
+    async fn each_corpus_lists_only_its_own_items() {
+        let fake = FakeDrive::start().await;
+        let ana = fake.add_account("ana@example.com");
+        let (a, b) = (ana.add_shared_drive("A"), ana.add_shared_drive("B"));
+        let ana_client = client_with_token(&fake, &ana.access_token());
+        ana.add_file(&a, "em-a.txt", vec![]);
+        ana.add_file(&b, "em-b.txt", vec![]);
+        ana.add_file(&ana.root_id(), "meu.txt", vec![]);
+        let names = |files: Vec<RemoteFile>| {
+            let mut names: Vec<_> = files.into_iter().map(|f| f.name).collect();
+            names.sort();
+            names
+        };
+
+        let mine = names(files_of(&ana_client, &Corpus::MyDrive).await);
+        let in_a = names(files_of(&ana_client, &Corpus::Drive(a)).await);
+        let everything = names(files_of(&ana_client, &Corpus::AllDrives).await);
+
+        assert_eq!(mine, ["meu.txt"]);
+        assert_eq!(in_a, ["em-a.txt"]);
+        assert_eq!(everything, ["em-a.txt", "em-b.txt", "meu.txt"]);
+    }
+
+    #[tokio::test]
+    async fn changes_include_shared_drives() {
+        let fake = FakeDrive::start().await;
+        let ana = fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Equipe");
+        fake.share_drive(&drive, &fake.email());
+        let c = client(&fake);
+        let token = c.start_page_token().await.unwrap();
+        let id = ana.add_file(&drive, "novo.txt", b"1".to_vec());
+
+        let (changes, _) = c.changes(&token).await.unwrap();
+
+        assert!(matches!(
+            &changes[..],
+            [Change::Upsert(f)] if f.id == id && f.drive_id.as_deref() == Some(drive.as_str())
+        ));
+    }
+
+    #[tokio::test]
+    async fn creating_a_drive_twice_with_the_same_request_makes_one() {
+        let fake = FakeDrive::start().await;
+        let c = client(&fake);
+
+        let first = c.create_drive("Equipe", "pedido-1").await.unwrap();
+        let again = c.create_drive("Equipe", "pedido-1").await.unwrap();
+        let other = c.create_drive("Equipe", "pedido-2").await.unwrap();
+
+        assert_eq!(first, again);
+        assert_ne!(first.id, other.id);
+        let drives = c.drives().await.unwrap();
+        assert_eq!(drives.len(), 2);
+        assert!(drives.contains(&SharedDrive {
+            id: first.id,
+            name: "Equipe".into(),
+            can_add_children: true,
+        }));
+    }
+
+    #[tokio::test]
+    async fn a_read_only_drive_cannot_add_children() {
+        let fake = FakeDrive::start().await;
+        let drive = fake
+            .add_account("ana@example.com")
+            .add_shared_drive("Leitura");
+        fake.share_drive(&drive, &fake.email());
+        fake.set_drive_can_add_children(&drive, false);
+
+        let drives = client(&fake).drives().await.unwrap();
+
+        assert!(drives.iter().all(|d| !d.can_add_children));
+        assert_eq!(drives.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_drive_shared_with_two_accounts_shows_up_for_both() {
+        let fake = FakeDrive::start().await;
+        let ana = fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Equipe");
+        let file = ana.add_file(&drive, "comum.txt", b"1".to_vec());
+        let ana_client = client_with_token(&fake, &ana.access_token());
+        let primary = client(&fake);
+        assert!(primary.drives().await.unwrap().is_empty());
+
+        fake.share_drive(&drive, &fake.email());
+
+        for c in [&ana_client, &primary] {
+            let drives = c.drives().await.unwrap();
+            assert_eq!(
+                drives.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+                ["Equipe"]
+            );
+            let found = all_files(c).await;
+            assert!(found.iter().any(|f| f.id == file));
+        }
+    }
+
+    #[tokio::test]
+    async fn moving_a_folder_into_a_drive_moves_its_children_too() {
+        let fake = FakeDrive::start().await;
+        let ana = fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Equipe");
+        fake.share_drive(&drive, &fake.email());
+        let folder = fake.add_folder(&fake.root_id(), "Pasta");
+        let sub = fake.add_folder(&folder, "Sub");
+        fake.add_file(&sub, "filho.txt", b"1".to_vec());
+        let c = client(&fake);
+
+        c.rename_move(&folder, None, Some(&drive), Some(&fake.root_id()))
+            .await
+            .unwrap();
+
+        let files = all_files(&c).await;
+        assert_eq!(files.len(), 3);
+        assert!(files.iter().all(|f| f.drive_id.as_deref() == Some(&drive)));
+    }
+
+    #[tokio::test]
+    async fn drives_are_listed_across_pages() {
+        let fake = FakeDrive::start().await;
+        let c = client(&fake);
+        for n in 0..150 {
+            c.create_drive(&format!("d{n}"), &format!("r{n}"))
+                .await
+                .unwrap();
+        }
+        assert_eq!(c.drives().await.unwrap().len(), 150);
     }
 
     #[tokio::test]

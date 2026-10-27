@@ -8,7 +8,7 @@ pub const SHORTCUT_MIME: &str = "application/vnd.google-apps.shortcut";
 
 /// Campos pedidos à API para cada arquivo (sempre os mesmos, para o banco ficar completo).
 pub const FILE_FIELDS: &str = "id,name,mimeType,parents,size,md5Checksum,headRevisionId,modifiedTime,\
-                               createdTime,trashed,capabilities/canEdit,shortcutDetails,webViewLink";
+                               createdTime,trashed,capabilities/canEdit,shortcutDetails,webViewLink,driveId";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(from = "RawFile")]
@@ -28,6 +28,44 @@ pub struct RemoteFile {
     /// Atalho: ID e tipo do item apontado.
     pub shortcut_target: Option<(String, String)>,
     pub web_view_link: Option<String>,
+    /// O Drive compartilhado onde o item está; `None` no Meu Drive e nos compartilhados comigo.
+    pub drive_id: Option<String>,
+}
+
+/// Um Drive compartilhado de que a conta é membro (`drives.list`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "RawDrive")]
+pub struct SharedDrive {
+    pub id: String,
+    pub name: String,
+    /// Falso para quem só pode ver ou comentar: não dá para criar nada dentro dele.
+    pub can_add_children: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawDrive {
+    id: String,
+    #[serde(default)]
+    name: String,
+    capabilities: Option<DriveCapabilities>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DriveCapabilities {
+    #[serde(default)]
+    can_add_children: bool,
+}
+
+impl From<RawDrive> for SharedDrive {
+    fn from(raw: RawDrive) -> SharedDrive {
+        SharedDrive {
+            id: raw.id,
+            name: raw.name,
+            can_add_children: raw.capabilities.is_some_and(|c| c.can_add_children),
+        }
+    }
 }
 
 /// Endereço da miniatura que o Google gera para um arquivo.
@@ -180,6 +218,7 @@ struct RawFile {
     capabilities: Option<Capabilities>,
     shortcut_details: Option<ShortcutDetails>,
     web_view_link: Option<String>,
+    drive_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -247,6 +286,7 @@ impl From<RawFile> for RemoteFile {
             head_revision: raw.head_revision_id,
             trashed: raw.trashed,
             web_view_link: raw.web_view_link,
+            drive_id: raw.drive_id,
         }
     }
 }

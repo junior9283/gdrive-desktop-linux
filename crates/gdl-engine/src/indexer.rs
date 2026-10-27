@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use gdl_common::names;
-use gdl_drive::client::{DriveClient, FOLDER_MIME, RemoteFile, SHORTCUT_MIME};
+use gdl_drive::client::{Corpus, DriveClient, FOLDER_MIME, RemoteFile, SHORTCUT_MIME};
 use gdl_store::{Inode, Item, ItemId, ItemKind, LocalState, PinState, Store};
 
 use crate::gdocs::{pointer_extension, pointer_json};
@@ -71,7 +71,7 @@ pub async fn initial_index(store: &Store, client: &DriveClient) -> Result<()> {
 
     let mut parents = BTreeSet::from([root.id]);
     client
-        .list_all(|page| {
+        .list_all(&Corpus::MyDrive, |page| {
             let items: Vec<Item> = page
                 .into_iter()
                 .map(|r| item_from_remote(r, &about.email))

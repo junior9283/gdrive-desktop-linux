@@ -110,6 +110,28 @@ pub(crate) struct FileRec {
     pub(crate) keep_forever: HashSet<String>,
 }
 
+/// O que uma listagem ou lista de mudanças abrange (`corpora` e `includeItemsFromAllDrives`).
+pub(crate) enum Scope {
+    /// Só o que não é de Drive compartilhado.
+    MyDrive,
+    /// Só o Drive compartilhado com esse ID.
+    Drive(String),
+    /// Tudo o que a conta vê, inclusive Drives compartilhados.
+    Everything,
+}
+
+/// Um Drive compartilhado: a raiz dele é a pasta de mesmo ID.
+pub(crate) struct DriveRec {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    /// Falso para quem só vê: nada novo cabe dentro (`drives.get` → `capabilities`).
+    pub(crate) can_add_children: bool,
+    /// Contas que veem tudo dentro dele.
+    pub(crate) members: Vec<String>,
+    /// O `requestId` da criação, para repeti-la sem duplicar.
+    request_id: Option<String>,
+}
+
 pub(crate) struct OldRevision {
     pub(crate) id: String,
     pub(crate) content: Bytes,
@@ -162,6 +184,7 @@ pub(crate) struct State {
     /// Corpo de cada miniatura cortado no meio (`Fault::CutThumbBody`).
     pub(crate) thumb_cut: bool,
     pub(crate) files: BTreeMap<String, FileRec>,
+    pub(crate) drives: Vec<DriveRec>,
     /// A conta principal (a dos auxiliares do `FakeDrive` e do `TEST_ACCESS_TOKEN`).
     pub(crate) root_id: String,
     pub(crate) email: String,
@@ -215,6 +238,7 @@ impl State {
             thumb_status: None,
             thumb_cut: false,
             files: BTreeMap::new(),
+            drives: vec![],
             root_id: String::new(),
             email: "teste@example.com".into(),
             accounts: BTreeMap::new(),
@@ -250,6 +274,65 @@ impl State {
         root
     }
 
+    /// Cria um Drive compartilhado com `member` dentro, e devolve o ID (o da pasta raiz). Com o
+    /// mesmo `request_id` de uma criação anterior, devolve o que já existe.
+    pub(crate) fn add_drive(
+        &mut self,
+        name: &str,
+        member: &str,
+        request_id: Option<&str>,
+    ) -> String {
+        if let Some(rid) = request_id
+            && let Some(drive) = self
+                .drives
+                .iter()
+                .find(|d| d.request_id.as_deref() == Some(rid))
+        {
+            return drive.id.clone();
+        }
+        let id = random_id(19);
+        self.insert(id.clone(), "", name, FOLDER_MIME, Vec::new(), member);
+        self.file_mut(&id).parents.clear();
+        self.drives.push(DriveRec {
+            id: id.clone(),
+            name: name.into(),
+            can_add_children: true,
+            members: vec![member.into()],
+            request_id: request_id.map(String::from),
+        });
+        id
+    }
+
+    /// Dá o Drive compartilhado `id` a `email`.
+    pub(crate) fn add_member(&mut self, id: &str, email: &str) {
+        let drive = self
+            .drives
+            .iter_mut()
+            .find(|d| d.id == id)
+            .unwrap_or_else(|| panic!("Drive compartilhado {id} não existe no Drive simulado"));
+        drive.members.push(email.into());
+    }
+
+    /// O Drive compartilhado onde o item está: o primeiro item acima dele (ou ele mesmo) cujo ID
+    /// é o de um drive.
+    pub(crate) fn drive_of(&self, f: &FileRec) -> Option<&str> {
+        let mut current = Some(f);
+        while let Some(file) = current {
+            if let Some(drive) = self.drives.iter().find(|d| d.id == file.id) {
+                return Some(&drive.id);
+            }
+            current = file.parents.first().and_then(|p| self.files.get(p));
+        }
+        None
+    }
+
+    /// Os Drives compartilhados de que `account` é membro.
+    pub(crate) fn drives_of<'a>(&'a self, account: &'a str) -> impl Iterator<Item = &'a DriveRec> {
+        self.drives
+            .iter()
+            .filter(move |d| d.members.iter().any(|m| m == account))
+    }
+
     pub(crate) fn root_of(&self, account: &str) -> &str {
         self.accounts
             .get(account)
@@ -266,9 +349,13 @@ impl State {
             .to_string()
     }
 
-    /// `account` vê o item: está no Meu Drive dela ou foi compartilhado com ela (ele ou uma pasta
-    /// acima). Com uma conta só, tudo.
+    /// `account` vê o item: está no Meu Drive dela, num Drive compartilhado de que é membro ou
+    /// foi compartilhado com ela (ele ou uma pasta acima). Com uma conta só, tudo o que não é de
+    /// Drive compartilhado.
     pub(crate) fn visible_to(&self, account: &str, f: &FileRec) -> bool {
+        if let Some(drive) = self.drive_of(f) {
+            return self.drives_of(account).any(|d| d.id == drive);
+        }
         if self.accounts.len() == 1 {
             return true;
         }
@@ -501,6 +588,9 @@ impl State {
             let link = self.origin.join(&format!("thumb/{}=s220", f.id));
             v["thumbnailLink"] = link.expect("caminho relativo válido").to_string().into();
         }
+        if let Some(drive) = self.drive_of(f) {
+            v["driveId"] = drive.into();
+        }
         if let Some((owner, shared_ms)) = &f.shared {
             v["sharedWithMeTime"] = rfc3339(*shared_ms).into();
             v["owners"] = json!([{ "displayName": owner }]);
@@ -526,8 +616,26 @@ impl State {
         (self.change_seq + 1).to_string()
     }
 
+    /// O item entra na listagem de `account` no escopo `scope`. A raiz do Drive não é um
+    /// arquivo da listagem.
+    pub(crate) fn listed_for(&self, account: &str, scope: &Scope, f: &FileRec) -> bool {
+        let drive = self.drive_of(f);
+        let in_scope = match scope {
+            Scope::MyDrive => drive.is_none(),
+            Scope::Drive(id) => drive == Some(id.as_str()),
+            Scope::Everything => true,
+        };
+        in_scope && drive != Some(f.id.as_str()) && self.visible_to(account, f)
+    }
+
     /// Mudanças a partir de `token`, uma por arquivo (o estado atual), em páginas.
-    pub(crate) fn changes_since(&self, account: &str, token: u64, page_size: usize) -> Value {
+    pub(crate) fn changes_since(
+        &self,
+        account: &str,
+        scope: &Scope,
+        token: u64,
+        page_size: usize,
+    ) -> Value {
         let mut seen = HashSet::new();
         let pending: Vec<_> = self
             .changes
@@ -537,7 +645,7 @@ impl State {
             .filter(|(_, id)| {
                 self.files
                     .get(id)
-                    .is_none_or(|f| self.visible_to(account, f))
+                    .is_none_or(|f| self.listed_for(account, scope, f))
             })
             .collect();
         let page = &pending[..pending.len().min(page_size)];

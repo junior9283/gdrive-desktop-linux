@@ -309,13 +309,15 @@ impl FakeDrive {
         self.shared.state().downloaded
     }
 
-    /// Quantas requisições começaram com `path_prefix` (caminho e consulta, como `/upload/…?uploadType=multipart`).
+    /// Quantas requisições casam com `path_prefix`: sem `?`, o caminho começa assim; com `?`
+    /// (como `/upload/…?uploadType=multipart`), o caminho é esse e os parâmetros pedidos estão
+    /// presentes, em qualquer ordem.
     pub fn requests(&self, path_prefix: &str) -> u64 {
-        self.shared
-            .state()
+        let state = self.shared.state();
+        state
             .request_log
             .iter()
-            .filter(|r| r.starts_with(path_prefix))
+            .filter(|r| request_matches(r, path_prefix))
             .count() as u64
     }
 
@@ -340,6 +342,21 @@ impl FakeDrive {
         }
     }
 
+    /// Faz de `email` membro do Drive compartilhado `id` (criado por `FakeAccount::add_shared_drive`):
+    /// ela passa a ver tudo dentro dele.
+    pub fn share_drive(&self, id: &str, email: &str) {
+        self.shared.state().add_member(id, email);
+    }
+
+    /// Troca o direito de criar itens dentro do Drive compartilhado `id` (padrão: pode).
+    pub fn set_drive_can_add_children(&self, id: &str, can: bool) {
+        let mut state = self.shared.state();
+        let drive = state.drives.iter_mut().find(|d| d.id == id);
+        drive
+            .unwrap_or_else(|| panic!("Drive compartilhado {id} não existe no Drive simulado"))
+            .can_add_children = can;
+    }
+
     /// O próximo login (tela de consentimento) entra na conta `email`, uma vez; depois volta a
     /// valer a principal.
     pub fn login_as(&self, email: &str) {
@@ -361,6 +378,19 @@ impl FakeDrive {
     pub fn set_token_lifetime(&self, secs: i64) {
         self.shared.state().token_lifetime_s = secs;
     }
+}
+
+/// `request` (caminho e query) casa com `wanted`: sem `?`, o caminho começa assim; com `?`, o
+/// caminho é exatamente o pedido e a query traz todos os parâmetros pedidos, em qualquer ordem.
+fn request_matches(request: &str, wanted: &str) -> bool {
+    let Some((wanted_path, wanted_query)) = wanted.split_once('?') else {
+        return request.starts_with(wanted);
+    };
+    let (path, query) = request.split_once('?').unwrap_or((request, ""));
+    path == wanted_path
+        && wanted_query
+            .split('&')
+            .all(|param| query.split('&').any(|p| p == param))
 }
 
 fn find_live(shared: &Shared, account: &str, name: &str) -> Vec<String> {
@@ -403,6 +433,12 @@ impl FakeAccount {
     /// IDs dos itens fora da lixeira com o nome `name`, que esta conta vê.
     pub fn find_live(&self, name: &str) -> Vec<String> {
         find_live(&self.shared, &self.email, name)
+    }
+
+    /// Cria um Drive compartilhado de que esta conta é membro e devolve o ID. A raiz é uma pasta
+    /// com esse ID, e o que for criado dentro dela leva `driveId`.
+    pub fn add_shared_drive(&self, name: &str) -> String {
+        self.shared.state().add_drive(name, &self.email, None)
     }
 
     /// Um token de acesso válido desta conta, sem passar pelo login.

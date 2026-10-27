@@ -373,3 +373,45 @@ async fn revoked_account_loses_access_and_refresh() {
         .unwrap();
     assert_eq!(refresh.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn shared_drive_items_need_include_items_from_all_drives() {
+    let fake = FakeDrive::start().await;
+    let ana = fake.add_account("ana@example.com");
+    let drive = ana.add_shared_drive("Equipe");
+    ana.add_file(&drive, "dentro.txt", vec![]);
+    ana.add_file(&ana.root_id(), "fora.txt", vec![]);
+    let names = |extra: &str| {
+        let url = fake
+            .base_url()
+            .join(&format!("files?pageSize=100&{extra}"))
+            .unwrap();
+        let token = ana.access_token();
+        async move {
+            let body: Value = client()
+                .get(url)
+                .bearer_auth(token)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let mut names: Vec<String> = body["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| f["name"].as_str().unwrap().to_string())
+                .collect();
+            names.sort();
+            names
+        }
+    };
+
+    assert_eq!(names("").await, ["fora.txt"]);
+    assert_eq!(
+        names("includeItemsFromAllDrives=true&supportsAllDrives=true").await,
+        ["dentro.txt", "fora.txt"],
+        "a raiz do drive não é um item da listagem"
+    );
+}

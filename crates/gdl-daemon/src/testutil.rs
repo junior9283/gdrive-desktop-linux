@@ -141,12 +141,17 @@ impl Harness {
 
     /// Login pelo D-Bus, com o teste fazendo o papel do navegador. Devolve `LoginFinished`.
     pub async fn login(&self) -> (bool, String, String) {
+        self.login_expecting("").await
+    }
+
+    /// Login que espera voltar como `expected` (vazio, conta nova).
+    pub async fn login_expecting(&self, expected: &str) -> (bool, String, String) {
         use futures_util::StreamExt;
 
         let mut finished = self.proxy.receive_login_finished().await.unwrap();
         let url = self
             .proxy
-            .begin_login("id-de-teste", "segredo")
+            .begin_login("id-de-teste", "segredo", expected)
             .await
             .unwrap();
         reqwest::get(url).await.unwrap();
@@ -162,6 +167,12 @@ impl Harness {
     pub async fn login_as(&self, email: &str) -> (bool, String, String) {
         self.fake.login_as(email);
         self.login().await
+    }
+
+    /// A conta `email` entra de novo (o navegador volta com ela): devolve `LoginFinished`.
+    pub async fn sign_in_again_as(&self, email: &str, expected: &str) -> (bool, String, String) {
+        self.fake.login_as(email);
+        self.login_expecting(expected).await
     }
 
     /// Entra na conta `email` e confere que deu certo.

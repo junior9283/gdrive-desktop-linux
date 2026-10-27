@@ -18,7 +18,7 @@ use rand::RngCore;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use url::Url;
 
@@ -302,14 +302,27 @@ pub trait AccessTokenProvider: Send + Sync {
     /// Renova depois de um 401 com o token `stale`. Se outra chamada já renovou, devolve o novo
     /// token sem ir de novo ao servidor.
     async fn refresh_now(&self, stale: &str) -> Result<String, AuthError>;
+    /// `true` enquanto o Google recusa o login da conta (só entrando de novo). O padrão é um
+    /// provedor que nunca é recusado.
+    fn signed_out(&self) -> watch::Receiver<bool> {
+        watch::channel(false).1
+    }
 }
 
-/// Tokens de uma conta, renovados 60 s antes de expirar.
+/// Credenciais e tokens de uma conta.
+struct Session {
+    creds: ClientCredentials,
+    tokens: TokenSet,
+}
+
+/// Tokens de uma conta, renovados 60 s antes de expirar. Quando o Google recusa a renovação, a
+/// sessão se perde (`signed_out` vira `true`) e toda chamada dá `AuthError::Revoked` na hora, sem
+/// ir à rede, até `replace` trazer um login novo.
 pub struct AccessTokens {
     http: reqwest::Client,
     token_url: Url,
-    creds: ClientCredentials,
-    tokens: tokio::sync::Mutex<TokenSet>,
+    session: tokio::sync::Mutex<Option<Session>>,
+    signed_out: watch::Sender<bool>,
 }
 
 impl AccessTokens {
@@ -317,29 +330,58 @@ impl AccessTokens {
         AccessTokens {
             http: http_client(),
             token_url,
-            creds,
-            tokens: tokio::sync::Mutex::new(tokens),
+            session: tokio::sync::Mutex::new(Some(Session { creds, tokens })),
+            signed_out: watch::Sender::new(false),
         }
     }
 
-    /// Os tokens atuais, para guardar no chaveiro.
-    pub async fn current(&self) -> TokenSet {
-        self.tokens.lock().await.clone()
+    /// Conta cujo login se perdeu (falta no chaveiro): já nasce recusada, até `replace`.
+    pub fn revoked(token_url: Url) -> AccessTokens {
+        AccessTokens {
+            http: http_client(),
+            token_url,
+            session: tokio::sync::Mutex::new(None),
+            signed_out: watch::Sender::new(true),
+        }
     }
 
-    /// Renova com o lock seguro, para chamadas paralelas não renovarem cada uma.
-    async fn refresh(&self, tokens: &mut TokenSet) -> Result<String, AuthError> {
-        let fresh = post_token(
+    /// Troca a sessão por um login novo da mesma conta.
+    pub async fn replace(&self, creds: ClientCredentials, tokens: TokenSet) {
+        let mut session = self.session.lock().await;
+        *session = Some(Session { creds, tokens });
+        self.signed_out.send_replace(false);
+    }
+
+    /// Os tokens atuais, para guardar no chaveiro; `None` sem sessão.
+    pub async fn current(&self) -> Option<TokenSet> {
+        self.session.lock().await.as_ref().map(|s| s.tokens.clone())
+    }
+
+    /// Renova com o lock seguro, para chamadas paralelas não renovarem cada uma. Se o Google
+    /// recusa, a sessão some.
+    async fn refresh(&self, guard: &mut Option<Session>) -> Result<String, AuthError> {
+        let session = guard.as_mut().ok_or(AuthError::Revoked)?;
+        let result = post_token(
             &self.http,
             &self.token_url,
             &[
                 ("grant_type", "refresh_token"),
-                ("refresh_token", &tokens.refresh_token),
-                ("client_id", &self.creds.client_id),
-                ("client_secret", &self.creds.client_secret),
+                ("refresh_token", &session.tokens.refresh_token),
+                ("client_id", &session.creds.client_id),
+                ("client_secret", &session.creds.client_secret),
             ],
         )
-        .await?;
+        .await;
+        let fresh = match result {
+            Ok(fresh) => fresh,
+            Err(AuthError::Revoked) => {
+                *guard = None;
+                self.signed_out.send_replace(true);
+                return Err(AuthError::Revoked);
+            }
+            Err(e) => return Err(e),
+        };
+        let tokens = &mut session.tokens;
         tokens.access_token = fresh.access_token;
         tokens.expires_at_ms = now_ms() + fresh.expires_in * 1000;
         if let Some(refresh) = fresh.refresh_token {
@@ -352,19 +394,25 @@ impl AccessTokens {
 #[async_trait]
 impl AccessTokenProvider for AccessTokens {
     async fn access_token(&self) -> Result<String, AuthError> {
-        let mut tokens = self.tokens.lock().await;
-        if tokens.expires_at_ms - REFRESH_MARGIN_MS > now_ms() {
-            return Ok(tokens.access_token.clone());
+        let mut guard = self.session.lock().await;
+        let session = guard.as_ref().ok_or(AuthError::Revoked)?;
+        if session.tokens.expires_at_ms - REFRESH_MARGIN_MS > now_ms() {
+            return Ok(session.tokens.access_token.clone());
         }
-        self.refresh(&mut tokens).await
+        self.refresh(&mut guard).await
     }
 
     async fn refresh_now(&self, stale: &str) -> Result<String, AuthError> {
-        let mut tokens = self.tokens.lock().await;
-        if tokens.access_token != stale {
-            return Ok(tokens.access_token.clone());
+        let mut guard = self.session.lock().await;
+        let session = guard.as_ref().ok_or(AuthError::Revoked)?;
+        if session.tokens.access_token != stale {
+            return Ok(session.tokens.access_token.clone());
         }
-        self.refresh(&mut tokens).await
+        self.refresh(&mut guard).await
+    }
+
+    fn signed_out(&self) -> watch::Receiver<bool> {
+        self.signed_out.subscribe()
     }
 }
 
@@ -515,7 +563,60 @@ mod tests {
         );
         assert_eq!(provider.access_token().await.unwrap(), fresh);
         assert_eq!(fake.requests("/token"), 2);
-        assert_eq!(provider.current().await.refresh_token, tokens.refresh_token);
+        assert_eq!(
+            provider.current().await.unwrap().refresh_token,
+            tokens.refresh_token
+        );
+    }
+
+    #[tokio::test]
+    async fn revoked_provider_fails_without_network_until_replaced() {
+        let fake = FakeDrive::start().await;
+        let provider = AccessTokens::revoked(fake.token_url());
+        assert!(*provider.signed_out().borrow());
+        assert!(matches!(
+            provider.access_token().await,
+            Err(AuthError::Revoked)
+        ));
+        assert!(matches!(
+            provider.refresh_now("velho").await,
+            Err(AuthError::Revoked)
+        ));
+        assert_eq!(fake.requests("/token"), 0);
+
+        let tokens = login(&fake).await;
+        provider.replace(creds(), tokens.clone()).await;
+
+        assert!(!*provider.signed_out().borrow());
+        assert_eq!(provider.access_token().await.unwrap(), tokens.access_token);
+    }
+
+    #[tokio::test]
+    async fn refused_refresh_makes_the_login_stay_revoked() {
+        let fake = FakeDrive::start().await;
+        fake.set_token_lifetime(30);
+        let tokens = login(&fake).await;
+        let provider = AccessTokens::new(creds(), tokens, fake.token_url());
+        let mut signed_out = provider.signed_out();
+        assert!(!*signed_out.borrow_and_update());
+        fake.revoke(&fake.email());
+        let asked = fake.requests("/token");
+
+        let first = provider.access_token().await;
+
+        assert!(matches!(first, Err(AuthError::Revoked)), "{first:?}");
+        assert_eq!(fake.requests("/token"), asked + 1);
+        assert!(signed_out.has_changed().unwrap() && *signed_out.borrow_and_update());
+        // Daí em diante falha na hora, sem pedir nada ao endpoint de token.
+        assert!(matches!(
+            provider.access_token().await,
+            Err(AuthError::Revoked)
+        ));
+        assert!(matches!(
+            provider.refresh_now("qualquer").await,
+            Err(AuthError::Revoked)
+        ));
+        assert_eq!(fake.requests("/token"), asked + 1);
     }
 
     #[tokio::test]

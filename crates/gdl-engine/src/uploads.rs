@@ -92,7 +92,7 @@ pub enum UploadOutcome {
     Preserved { path: PathBuf, reason: LostReason },
     /// Sem internet: tenta quando a rede voltar, sem contar tentativa.
     Offline,
-    /// Pasta-mãe ainda local: tenta depois, sem contar tentativa.
+    /// Pasta-mãe ainda local ou conta sem login: tenta depois, sem contar tentativa.
     Waiting,
     /// Falha passageira: tenta depois, pelo recuo.
     Retrying,
@@ -594,16 +594,22 @@ impl UploadWorker {
         }
         self.store
             .transition_local_state(&item.id, LocalState::Uploading, LocalState::Dirty)?;
-        let state = match e {
-            DriveError::Offline => ActivityState::UploadQueued,
-            _ => ActivityState::UploadFailed,
+        // Sem rede ou sem login, a fila espera o que a libera, sem contar tentativa.
+        let waits = match e {
+            DriveError::Offline => Some(UploadOutcome::Offline),
+            _ if *self.client.signed_out().borrow() => Some(UploadOutcome::Waiting),
+            _ => None,
+        };
+        let state = match waits {
+            Some(_) => ActivityState::UploadQueued,
+            None => ActivityState::UploadFailed,
         };
         self.note(&item, state, None);
         let now = now_ms();
-        if matches!(e, DriveError::Offline) {
+        if let Some(outcome) = waits {
             self.store
                 .wait_for_network(job.job_id, now + OFFLINE_WAIT_MS)?;
-            return Ok(UploadOutcome::Offline);
+            return Ok(outcome);
         }
         let delay = self.retry.delay(job.attempts).as_millis() as i64;
         // Falhas passageiras não entram na lista de erros.
@@ -1172,6 +1178,43 @@ mod tests {
 
         s.env.fake.clear_faults();
         s.env.store.postpone_job(job.job_id, 0).unwrap();
+        assert_eq!(s.run().await, Some(UploadOutcome::Uploaded(id.clone())));
+        assert_eq!(s.env.fake.content(&id.0), b"novo");
+    }
+
+    /// O Google recusou o login: o envio espera o login novo, sem contar tentativa, sem erro e
+    /// sem ir para o Lost and Found.
+    #[tokio::test]
+    async fn revoked_login_keeps_the_upload_waiting() {
+        let env = Env::new().await;
+        let id = ItemId(
+            env.fake
+                .add_file(&env.fake.root_id(), "a.txt", b"velho".to_vec()),
+        );
+        let s = setup(env).await;
+        s.edit(&id, b"novo").await;
+        let (tx, _) = broadcast::channel(16);
+        let revoked = UploadWorker::new(
+            s.env.store.clone(),
+            crate::testutil::revoked_client(&s.env.fake),
+            s.cache.clone(),
+            Kept::in_dir(s.env.dir()),
+            tx,
+        );
+
+        assert_eq!(
+            revoked.run_once().await.unwrap(),
+            Some(UploadOutcome::Waiting)
+        );
+
+        let job = s.env.store.next_job(i64::MAX).unwrap().unwrap();
+        assert_eq!(job.attempts, 0);
+        assert!(job.next_try_ms > now_ms(), "espera o login novo");
+        assert_eq!(s.env.item(&id.0).local_state, LocalState::Dirty);
+        assert!(s.preserved().is_empty());
+        assert_eq!(s.env.store.queue_stats().unwrap().failed, 0);
+        // Com o login de volta, o mesmo envio sobe.
+        s.env.store.wake_network_waiters(now_ms()).unwrap();
         assert_eq!(s.run().await, Some(UploadOutcome::Uploaded(id.clone())));
         assert_eq!(s.env.fake.content(&id.0), b"novo");
     }

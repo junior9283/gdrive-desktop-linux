@@ -64,6 +64,8 @@ pub struct Engine {
     pub(crate) events: broadcast::Sender<EngineEvent>,
     intervals: Intervals,
     paused: watch::Sender<bool>,
+    /// O Google recusa o login da conta (vem do provedor de tokens do cliente).
+    signed_out: watch::Receiver<bool>,
     /// Por que está pausado; `paused` é a soma dos motivos.
     pause_reasons: std::sync::Mutex<PauseReasons>,
     /// Já avisou desta pausa que uma gravação espera a sincronização voltar.
@@ -136,6 +138,13 @@ fn move_content(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::remove_dir(from)
 }
 
+/// Espera `rx` mudar; se o provedor de tokens foi embora, não muda mais.
+async fn changed(rx: &mut watch::Receiver<bool>) {
+    if rx.changed().await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
 impl Engine {
     /// Abre o motor da conta `account`: banco, cache e `Lost and Found` ficam em
     /// `<dados>/<conta>` (o cache vai para `ContentCachePath/<conta>` quando configurado), e o
@@ -160,6 +169,7 @@ impl Engine {
         }
         let store = Arc::new(Store::open(&data_dir.join("metadata.db"))?);
         let client = Arc::new(client);
+        let signed_out = client.signed_out();
         let (events, _) = broadcast::channel(64);
         let cache = BlockCache::new(
             store.clone(),
@@ -197,6 +207,7 @@ impl Engine {
             events,
             intervals: Intervals::default(),
             paused: watch::Sender::new(false),
+            signed_out,
             pause_reasons: Default::default(),
             saved_while_paused: AtomicBool::new(false),
         })
@@ -381,6 +392,12 @@ impl Engine {
         self.poller.is_offline()
     }
 
+    /// O Google recusou o login da conta: ela fica só com o que está no cache, e os envios
+    /// esperam, até o login voltar.
+    pub fn needs_sign_in(&self) -> bool {
+        *self.signed_out.borrow()
+    }
+
     pub fn summary(&self) -> Result<SyncSummary> {
         let queue = self.store.queue_stats()?;
         let downloads = self.store.count_incomplete_pinned()?;
@@ -389,6 +406,7 @@ impl Engine {
             pending_uploads: queue.pending,
             paused: self.is_paused(),
             offline: self.poller.is_offline(),
+            needs_sign_in: self.needs_sign_in(),
             last_sync_ms: self.poller.last_sync_ms(),
             // O mesmo que `errors().len()`, sem montar os caminhos.
             errors: queue.failed + self.lost_and_found().count() as u32,
@@ -408,6 +426,7 @@ impl Engine {
     pub async fn run(&self, shutdown: CancellationToken) {
         tokio::select! {
             () = shutdown.cancelled() => {}
+            () = self.announce_sign_in() => {}
             () = self.every(self.intervals.changes, true, || self.poller.poll()) => {}
             () = self.upload_loop() => {}
             () = self.every(self.intervals.maintenance, true, || self.maintain()) => {}
@@ -417,8 +436,27 @@ impl Engine {
         self.thumbs.stop();
     }
 
-    /// Roda `work` a cada `interval`; com `pausable`, não roda enquanto pausado. Pausar ou
-    /// retomar interrompe a espera.
+    /// Avisa (`NeedsSignIn`) quando o Google recusa o login da conta e quando ele volta; na
+    /// volta, libera os envios que esperavam por ele.
+    async fn announce_sign_in(&self) {
+        let mut signed_out = self.signed_out.clone();
+        let mut announced = false;
+        loop {
+            let now = *signed_out.borrow_and_update();
+            if now != announced {
+                announced = now;
+                if !now && let Err(e) = self.store.wake_network_waiters(now_ms()) {
+                    tracing::warn!(erro = %e, "falha ao retomar os envios que esperavam o login");
+                }
+                // Sem ninguém ouvindo, o aviso pode se perder.
+                let _ = self.events.send(EngineEvent::NeedsSignIn(now));
+            }
+            changed(&mut signed_out).await;
+        }
+    }
+
+    /// Roda `work` a cada `interval`; com `pausable`, não roda enquanto pausado nem sem login.
+    /// Pausar, retomar ou o login voltar interrompe a espera.
     async fn every<F: Future<Output = ()>>(
         &self,
         interval: Duration,
@@ -426,7 +464,7 @@ impl Engine {
         mut work: impl FnMut() -> F,
     ) {
         loop {
-            if !(pausable && self.is_paused()) {
+            if !(pausable && (self.is_paused() || self.needs_sign_in())) {
                 work().await;
             }
             self.sleep(interval).await;
@@ -435,9 +473,11 @@ impl Engine {
 
     async fn sleep(&self, interval: Duration) {
         let mut paused = self.paused.subscribe();
+        let mut signed_out = self.signed_out.clone();
         tokio::select! {
             () = tokio::time::sleep(interval) => {}
             _ = paused.changed() => {}
+            () = changed(&mut signed_out) => {}
         }
     }
 
@@ -464,10 +504,10 @@ impl Engine {
         }
     }
 
-    /// Sem pausa e com rede: sem rede, nenhum envio tenta, e a próxima consulta bem-sucedida
-    /// libera a fila.
+    /// Sem pausa, com rede e com login: sem rede, nenhum envio tenta, e a próxima consulta
+    /// bem-sucedida libera a fila; sem login, ela espera o login novo.
     fn may_upload(&self) -> bool {
-        !self.is_paused() && !self.poller.is_offline()
+        !self.is_paused() && !self.poller.is_offline() && !self.needs_sign_in()
     }
 
     /// Envia um atrás do outro enquanto houver envio pronto que nenhum outro esteja fazendo.
@@ -555,6 +595,69 @@ mod tests {
             assert_eq!(mode(&dir), 0o700, "{}", dir.display());
         }
         assert_eq!(mode(&engine.cache.local_path(&id)), 0o600);
+    }
+
+    /// Com o login recusado, os laços param; quando o login volta, a consulta de mudanças volta
+    /// na hora, sem esperar o intervalo (aqui, 60 s).
+    #[tokio::test]
+    async fn signing_in_again_wakes_the_loops_without_waiting_the_interval() {
+        use gdl_drive::oauth::AccessTokens;
+        use gdl_drive::token_store::{ClientCredentials, TokenSet};
+
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let creds = ClientCredentials {
+            client_id: "id".into(),
+            client_secret: "segredo".into(),
+        };
+        let tokens = |access: &str, expires_at_ms: i64| TokenSet {
+            access_token: access.into(),
+            refresh_token: "recusado".into(),
+            expires_at_ms,
+            email: "teste@example.com".into(),
+        };
+        let valid = || tokens(gdl_fake_drive::TEST_ACCESS_TOKEN, i64::MAX / 2);
+        let access = Arc::new(AccessTokens::new(creds.clone(), valid(), fake.token_url()));
+        let client = DriveClient::new(fake.base_url(), fake.upload_url(), access.clone());
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let (prefs, _) = load_preferences(&paths).unwrap();
+        let engine = Arc::new(
+            Engine::open(&paths, &prefs, "teste@example.com", client)
+                .unwrap()
+                .with_intervals(Intervals {
+                    changes: Duration::from_secs(60),
+                    ..fast()
+                }),
+        );
+        engine.ensure_indexed().await.unwrap();
+        // O token venceu e o Google não aceita renová-lo.
+        access.replace(creds.clone(), tokens("velho", 0)).await;
+        let mut events = engine.subscribe();
+        let shutdown = CancellationToken::new();
+        tokio::spawn({
+            let (engine, shutdown) = (engine.clone(), shutdown.clone());
+            async move { engine.run(shutdown).await }
+        });
+        wait_until("login recusado", || engine.needs_sign_in()).await;
+        assert!(engine.summary().unwrap().needs_sign_in);
+        let id = fake.add_file(&fake.root_id(), "novo.txt", b"x".to_vec());
+
+        access.replace(creds, valid()).await;
+
+        let id = gdl_store::ItemId(id);
+        wait_until("consulta depois do login", || {
+            engine.store.get(&id).unwrap().is_some()
+        })
+        .await;
+        assert!(!engine.needs_sign_in());
+        let mut seen = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let EngineEvent::NeedsSignIn(on) = event {
+                seen.push(on);
+            }
+        }
+        assert_eq!(seen, [true, false]);
+        shutdown.cancel();
     }
 
     #[tokio::test]

@@ -80,6 +80,7 @@ impl TrayView {
             "paused" => (still("gdl-paused"), i18n.tr_count("tray-paused", pending)),
             "offline" => (still("gdl-offline"), i18n.tr_count("tray-offline", pending)),
             "quota-full" => (still("gdl-error"), i18n.tr("tray-quota-full", &[])),
+            "needs-sign-in" => (still("gdl-error"), i18n.tr("tray-needs-sign-in", &[])),
             "error" => (still("gdl-error"), i18n.tr_count("tray-error", errors)),
             _ if accounts > 1 => (
                 still("gdl-synced"),
@@ -218,6 +219,12 @@ mod tests {
                 "gdl-error",
                 "Armazenamento cheio",
                 "Storage is full",
+            ),
+            (
+                status("needs-sign-in", 0, 0),
+                "gdl-error",
+                "Entre de novo na conta",
+                "Sign in to the account again",
             ),
             (
                 status("error", 0, 2),

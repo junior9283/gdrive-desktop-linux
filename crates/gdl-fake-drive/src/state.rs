@@ -576,6 +576,12 @@ impl State {
         Some(tokens)
     }
 
+    /// Esquece os tokens da conta: o acesso vira 401 e a renovação, `invalid_grant`.
+    pub(crate) fn revoke(&mut self, account: &str) {
+        self.access_tokens.retain(|_, (_, owner)| owner != account);
+        self.refresh_tokens.retain(|_, owner| owner != account);
+    }
+
     pub(crate) fn refresh(&mut self, refresh_token: &str) -> Option<Value> {
         let account = self.refresh_tokens.get(refresh_token)?.clone();
         Some(self.new_access_token(&account))

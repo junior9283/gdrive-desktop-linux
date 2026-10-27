@@ -19,6 +19,8 @@ pub const OPEN_LOST_FOUND: &str = "open-lost-found";
 pub const OPEN_CANCELED: &str = "open-canceled";
 /// Ação do aviso de gravação com a sincronização pausada que a retoma.
 pub const RESUME: &str = "resume";
+/// Ação do aviso de conta sem login que abre a janela no login dela.
+pub const SIGN_IN: &str = "sign-in";
 
 /// Os avisos que o usuário pode desligar (Preferências > Notificações); os outros avisam de
 /// algo que ele precisa saber e sempre aparecem.
@@ -117,6 +119,14 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
             "notify-offline-title",
             i18n.tr("notify-offline-body", &[]),
         ),
+        EngineEvent::NeedsSignIn(true) => Notification {
+            action: Some((SIGN_IN, i18n.tr("notify-signed-out-action", &[]))),
+            ..state(
+                "account-signed-out",
+                "notify-signed-out-title",
+                i18n.tr("notify-signed-out-body", &[]),
+            )
+        },
         EngineEvent::DiskLow { free_kb } => state(
             "disk-low",
             "notify-disk-low-title",
@@ -163,7 +173,9 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
                 i18n.tr("notify-canceled-body", &[("name", name)]),
             )
         },
-        EngineEvent::Offline(false) | EngineEvent::SyncStateChanged(_) => return None,
+        EngineEvent::Offline(false)
+        | EngineEvent::NeedsSignIn(false)
+        | EngineEvent::SyncStateChanged(_) => return None,
     })
 }
 
@@ -259,6 +271,7 @@ mod tests {
         let i18n = I18n::new("en");
         for event in [
             EngineEvent::Offline(true),
+            EngineEvent::NeedsSignIn(true),
             EngineEvent::DiskLow { free_kb: 2048 },
             EngineEvent::QuotaFull,
             EngineEvent::UploadFailed {
@@ -280,6 +293,7 @@ mod tests {
             assert!(!note.body.starts_with("notify-"), "{event:?} sem texto");
         }
         assert_eq!(for_event(&EngineEvent::Offline(false), &i18n), None);
+        assert_eq!(for_event(&EngineEvent::NeedsSignIn(false), &i18n), None);
         assert_eq!(
             for_event(&EngineEvent::SyncStateChanged(Default::default()), &i18n),
             None

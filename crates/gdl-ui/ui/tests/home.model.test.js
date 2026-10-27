@@ -55,6 +55,7 @@ test('cabeçalho para cada estado', () => {
   ]);
   assert.deepEqual(texts(pt, status('offline'))[0], 'Sem internet');
   assert.deepEqual(texts(pt, status('quota-full'))[0], 'Armazenamento cheio');
+  assert.deepEqual(texts(pt, status('needs-sign-in'))[0], 'Entre de novo na conta');
   assert.deepEqual(texts(pt, status('paused')), [
     'Sincronização pausada',
     'Última sincronização há 5 minutos',

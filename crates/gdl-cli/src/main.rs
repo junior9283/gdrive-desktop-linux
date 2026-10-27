@@ -297,7 +297,9 @@ async fn login(
         None => prompt(&i18n.tr("cli-client-secret", &[]), true)?,
     };
     let mut finished = proxy.receive_login_finished().await?;
-    let url = proxy.begin_login(client_id.trim(), secret.trim()).await?;
+    let url = proxy
+        .begin_login(client_id.trim(), secret.trim(), "")
+        .await?;
     println!("{}\n{url}", i18n.tr("cli-open-url", &[]));
     let signal = finished
         .next()

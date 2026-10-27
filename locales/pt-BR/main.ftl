@@ -24,6 +24,9 @@ reason-remote-deleted = o arquivo foi excluído na nuvem
 reason-no-permission = você não tem mais permissão para editá-lo
 notify-offline-title = Sem conexão
 notify-offline-body = O Google Drive volta a sincronizar quando a internet voltar. O que está disponível off-line continua abrindo.
+notify-signed-out-title = Entre de novo na conta
+notify-signed-out-body = O Google não aceita mais o acesso desta conta. Os arquivos que já estão neste computador continuam abrindo, e o que você gravar sobe depois que você entrar de novo.
+notify-signed-out-action = Entrar
 notify-disk-low-title = Disco quase cheio
 notify-disk-low-body = Restam { $free } MB livres. O Google Drive liberou o que pôde do cache.
 notify-quota-title = Armazenamento do Google cheio
@@ -100,6 +103,7 @@ tray-paused = { $count ->
    *[other] Pausado ({ $count } para sincronizar)
 }
 tray-quota-full = Armazenamento cheio
+tray-needs-sign-in = Entre de novo na conta
 tray-error = { $count ->
     [1] 1 arquivo não foi sincronizado
    *[other] { $count } arquivos não foram sincronizados

@@ -346,6 +346,12 @@ impl FakeDrive {
         self.shared.state().next_login = Some(email.into());
     }
 
+    /// O Google passa a recusar os tokens de `email` (acesso removido na conta): o token de
+    /// acesso dá 401 e a renovação dá `invalid_grant`, até um novo login.
+    pub fn revoke(&self, email: &str) {
+        self.shared.state().revoke(email);
+    }
+
     /// Emite um código de autorização ligado ao `code_challenge` (S256), como faria a tela de consentimento.
     pub fn issue_code(&self, code_challenge: &str) -> String {
         self.shared.state().issue_code(code_challenge)

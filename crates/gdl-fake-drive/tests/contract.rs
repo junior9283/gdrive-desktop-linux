@@ -317,3 +317,59 @@ async fn offline_refuses_requests_until_cleared() {
         StatusCode::OK
     );
 }
+
+#[tokio::test]
+async fn revoked_account_loses_access_and_refresh() {
+    let fake = FakeDrive::start().await;
+    let ana = fake.add_account("ana@example.com");
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(b"verificador"));
+    fake.login_as("ana@example.com");
+    let code = fake.issue_code(&challenge);
+    let tokens: Value = client()
+        .post(fake.token_url())
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("code_verifier", "verificador"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let about = |token: String| {
+        client()
+            .get(fake.base_url().join("about").unwrap())
+            .query(&[("fields", "user")])
+            .bearer_auth(token)
+            .send()
+    };
+    assert_eq!(
+        about(tokens["access_token"].as_str().unwrap().into())
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    fake.revoke(ana.email());
+
+    assert_eq!(
+        about(tokens["access_token"].as_str().unwrap().into())
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let refresh = client()
+        .post(fake.token_url())
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", tokens["refresh_token"].as_str().unwrap()),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refresh.status(), StatusCode::BAD_REQUEST);
+}

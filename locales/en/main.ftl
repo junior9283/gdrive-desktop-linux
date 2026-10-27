@@ -24,6 +24,9 @@ reason-remote-deleted = the file was deleted in the cloud
 reason-no-permission = you no longer have permission to edit it
 notify-offline-title = No connection
 notify-offline-body = Google Drive will sync again when you're back online. Files available offline still open.
+notify-signed-out-title = Sign in to the account again
+notify-signed-out-body = Google no longer accepts access for this account. Files already on this computer still open, and anything you save is uploaded after you sign in again.
+notify-signed-out-action = Sign in
 notify-disk-low-title = Disk almost full
 notify-disk-low-body = { $free } MB left. Google Drive freed what it could from the cache.
 notify-quota-title = Google storage is full
@@ -100,6 +103,7 @@ tray-paused = { $count ->
    *[other] Paused ({ $count } to sync)
 }
 tray-quota-full = Storage is full
+tray-needs-sign-in = Sign in to the account again
 tray-error = { $count ->
     [1] 1 file could not be synced
    *[other] { $count } files could not be synced

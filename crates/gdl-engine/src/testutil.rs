@@ -27,6 +27,24 @@ impl AccessTokenProvider for TestToken {
     }
 }
 
+/// Acesso que o Google recusou: a renovação dá `invalid_grant`.
+struct RevokedToken;
+
+#[async_trait::async_trait]
+impl AccessTokenProvider for RevokedToken {
+    async fn access_token(&self) -> Result<String, AuthError> {
+        Err(AuthError::Revoked)
+    }
+
+    async fn refresh_now(&self, _stale: &str) -> Result<String, AuthError> {
+        Err(AuthError::Revoked)
+    }
+
+    fn signed_out(&self) -> tokio::sync::watch::Receiver<bool> {
+        tokio::sync::watch::channel(true).1
+    }
+}
+
 /// Disco sempre com espaço.
 struct Plenty;
 
@@ -45,6 +63,15 @@ pub(crate) fn fast_client(fake: &FakeDrive, tries: u32) -> DriveClient {
             tries,
         },
     )
+}
+
+/// Cliente cujo login o Google já recusou.
+pub(crate) fn revoked_client(fake: &FakeDrive) -> Arc<DriveClient> {
+    Arc::new(DriveClient::new(
+        fake.base_url(),
+        fake.upload_url(),
+        Arc::new(RevokedToken),
+    ))
 }
 
 pub(crate) struct Env {

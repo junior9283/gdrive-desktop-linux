@@ -24,6 +24,7 @@ header-syncing = { $count ->
 }
 header-offline = No internet connection
 header-quota-full = Storage is full
+header-needs-sign-in = Sign in to the account again
 header-paused = Sync paused
 header-last-sync-now = Last synced less than a minute ago
 header-last-sync = Last synced { $ago }

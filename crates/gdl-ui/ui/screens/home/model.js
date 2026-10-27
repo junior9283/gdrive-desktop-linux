@@ -10,6 +10,7 @@ const TITLES = {
   syncing: 'header-syncing',
   offline: 'header-offline',
   'quota-full': 'header-quota-full',
+  'needs-sign-in': 'header-needs-sign-in',
   paused: 'header-paused',
 };
 

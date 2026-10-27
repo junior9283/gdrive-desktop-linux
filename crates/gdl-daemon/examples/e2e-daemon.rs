@@ -83,7 +83,7 @@ async fn main() -> Result<(), Error> {
     // O login pelo próprio D-Bus, com este programa no papel do navegador.
     let proxy = ServiceProxy::new(&zbus::Connection::session().await?).await?;
     let mut finished = proxy.receive_login_finished().await?;
-    let url = proxy.begin_login("id-de-teste", "segredo").await?;
+    let url = proxy.begin_login("id-de-teste", "segredo", "").await?;
     reqwest::get(url).await?;
     let signal_ok = tokio::time::timeout(Duration::from_secs(30), finished.next())
         .await?

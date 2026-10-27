@@ -29,16 +29,18 @@ impl Service {
 #[zbus::interface(name = "io.github.junior9283.GDriveDesktopLinux1.Service")]
 impl Service {
     /// Abre o login no navegador e devolve o endereço; o resultado vem em `LoginFinished`.
+    /// `expected`: o e-mail da conta que precisa entrar de novo; vazio, uma conta nova.
     async fn begin_login(
         &self,
         client_id: &str,
         client_secret: &str,
+        expected: &str,
     ) -> Result<String, ServiceError> {
         let creds = ClientCredentials {
             client_id: client_id.into(),
             client_secret: client_secret.into(),
         };
-        self.daemon.begin_login(creds).await
+        self.daemon.begin_login(creds, expected).await
     }
 
     async fn status(&self, account: &str) -> Result<Status, ServiceError> {

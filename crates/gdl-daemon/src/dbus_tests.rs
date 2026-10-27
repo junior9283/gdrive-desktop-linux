@@ -1552,7 +1552,7 @@ async fn fifth_account_is_refused() {
 
     let err = h
         .proxy
-        .begin_login("id-de-teste", "segredo")
+        .begin_login("id-de-teste", "segredo", "")
         .await
         .unwrap_err();
 
@@ -1590,7 +1590,7 @@ async fn disable_add_account_keeps_only_the_first() {
 
     let err = h
         .proxy
-        .begin_login("id-de-teste", "segredo")
+        .begin_login("id-de-teste", "segredo", "")
         .await
         .unwrap_err();
 
@@ -1752,4 +1752,181 @@ async fn logout_all_signs_out_every_account() {
 
     assert!(h.saved_accounts().is_empty());
     assert!(h.proxy.status("").await.unwrap().accounts.is_empty());
+}
+
+const ANA: &str = "ana@example.com";
+
+/// Espera a conta `email` aparecer em `Status` com o estado `state`.
+async fn account_state_until(h: &Harness, email: &str, state: &str) {
+    status_until(h, &format!("{email} em {state}"), |s| {
+        s.accounts
+            .iter()
+            .any(|a| a.email == email && a.state == state)
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn expired_account_does_not_stop_the_others() {
+    let h = Harness::new().await;
+    h.two_accounts(ANA).await;
+
+    h.fake.revoke(ANA);
+    account_state_until(&h, ANA, "needs-sign-in").await;
+
+    // O pior estado vale no agregado, e a outra conta segue como estava.
+    let all = h.proxy.status("").await.unwrap();
+    assert_eq!(all.state, "needs-sign-in");
+    assert_eq!(
+        h.proxy.status(&h.fake.email()).await.unwrap().state,
+        "synced"
+    );
+    // A conta que venceu avisa, com o botão "Entrar".
+    wait_until("aviso de conta sem login", || {
+        h.notes()
+            .iter()
+            .any(|n| n.actions.contains(&"sign-in".into()))
+    })
+    .await;
+    let note = h
+        .notes()
+        .into_iter()
+        .find(|n| n.actions.contains(&"sign-in".into()))
+        .unwrap();
+    assert!(note.body.contains("ana"), "{}", note.body);
+    // A primeira continua enviando.
+    let path = h.drive().join("depois.txt");
+    blocking(move || std::fs::write(path, b"ainda sobe"))
+        .await
+        .unwrap();
+    wait_until("envio da primeira conta", || {
+        !h.fake.find_live("depois.txt").is_empty()
+    })
+    .await;
+    // A que venceu espera: nada vai para o Lost and Found nem para a lista de erros.
+    let path = h.mount_of(ANA).join("Meu Drive").join("espera.txt");
+    blocking(move || std::fs::write(path, b"na fila"))
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    let ana = h.proxy.status(ANA).await.unwrap();
+    assert_eq!(ana.state, "needs-sign-in");
+    assert_eq!(ana.pending_uploads, 1);
+    assert_eq!(ana.errors, 0);
+    assert!(h.proxy.list_lost_and_found(ANA).await.unwrap().is_empty());
+    // O botão "Entrar" pede à janela o login dessa conta.
+    let listed = h.proxy.notifications().await.unwrap();
+    let signed_out = listed
+        .iter()
+        .find(|n| n.kind == "account-signed-out")
+        .unwrap();
+    assert_eq!(signed_out.account, ANA);
+    let before = h.opened().len();
+    h.proxy
+        .invoke_notification_action(signed_out.id, "sign-in")
+        .await
+        .unwrap();
+    wait_until("janela no login", || {
+        h.opened()[before..]
+            .iter()
+            .any(|o| o.contains("sign-in:ana@example.com"))
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn expired_account_stays_readable_from_the_cache() {
+    let h = Harness::new().await;
+    let ana = h.fake.add_account(ANA);
+    ana.add_file(&ana.root_id(), "da-ana.txt", b"no cache".to_vec());
+    h.logged_in().await;
+    h.logged_in_as(ANA).await;
+    let file = h.mount_of(ANA).join("Meu Drive").join("da-ana.txt");
+    let again = file.clone();
+    assert_eq!(
+        blocking(move || std::fs::read(file)).await.unwrap(),
+        b"no cache"
+    );
+
+    h.fake.revoke(ANA);
+    account_state_until(&h, ANA, "needs-sign-in").await;
+
+    assert_eq!(
+        blocking(move || std::fs::read(again)).await.unwrap(),
+        b"no cache"
+    );
+    assert!(h.mount_of(ANA).join("Meu Drive").is_dir());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn missing_token_resumes_the_others() {
+    let mut h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "da-primeira.txt", b"um".to_vec());
+    h.two_accounts(ANA).await;
+    h.tokens.delete(ANA).await.unwrap();
+
+    h.restart(None).await;
+
+    // Ela continua no arquivo e na lista, pedindo para entrar de novo; a outra sobe.
+    assert_eq!(h.saved_accounts(), [h.fake.email(), ANA.into()]);
+    let all = h.proxy.status("").await.unwrap();
+    let listed: Vec<_> = all
+        .accounts
+        .iter()
+        .map(|a| (a.email.as_str(), a.state.as_str()))
+        .collect();
+    assert_eq!(
+        listed,
+        [(h.fake.email().as_str(), "synced"), (ANA, "needs-sign-in")]
+    );
+    assert_eq!(all.state, "needs-sign-in");
+    let first = h.drive().join("da-primeira.txt");
+    assert_eq!(blocking(move || std::fs::read(first)).await.unwrap(), b"um");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn signing_in_again_resumes_the_queue() {
+    let h = Harness::new().await;
+    let ana = h.fake.add_account(ANA);
+    h.logged_in().await;
+    h.logged_in_as(ANA).await;
+    let before = h.tokens.load(ANA).await.unwrap().unwrap().1;
+    h.fake.revoke(ANA);
+    account_state_until(&h, ANA, "needs-sign-in").await;
+    let path = h.mount_of(ANA).join("Meu Drive").join("espera.txt");
+    blocking(move || std::fs::write(path, b"na fila"))
+        .await
+        .unwrap();
+
+    let (ok, email, error) = h.sign_in_again_as(ANA, ANA).await;
+
+    assert!(ok, "{error}");
+    assert_eq!(email, ANA);
+    assert_ne!(h.tokens.load(ANA).await.unwrap().unwrap().1, before);
+    wait_until("o envio que esperava", || {
+        !ana.find_live("espera.txt").is_empty()
+    })
+    .await;
+    account_state_until(&h, ANA, "synced").await;
+    // Continua a mesma montagem, e a conta não entrou duas vezes.
+    assert_eq!(h.saved_accounts(), [h.fake.email(), ANA.into()]);
+    assert_eq!(h.proxy.status("").await.unwrap().accounts.len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn signing_in_again_with_another_account_is_refused() {
+    let h = Harness::new().await;
+    h.two_accounts(ANA).await;
+    h.fake.revoke(ANA);
+    account_state_until(&h, ANA, "needs-sign-in").await;
+    let before = h.tokens.load(ANA).await.unwrap().unwrap().1;
+
+    let (ok, email, error) = h.sign_in_again_as(&h.fake.email(), ANA).await;
+
+    assert!(!ok);
+    assert_eq!(email, h.fake.email());
+    assert_eq!(error, "other-account");
+    assert_eq!(h.tokens.load(ANA).await.unwrap().unwrap().1, before);
+    assert_eq!(h.proxy.status(ANA).await.unwrap().state, "needs-sign-in");
 }

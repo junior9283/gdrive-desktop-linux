@@ -126,7 +126,7 @@ impl Bridge {
             };
         }
         let reply = match method {
-            "begin_login" => j!(s.begin_login(a.str("client_id")?, a.str("client_secret")?)),
+            "begin_login" => j!(s.begin_login(a.str("client_id")?, a.str("client_secret")?, "")),
             "status" => j!(s.status(a.account())),
             "account_info" => j!(s.account_info(a.account())),
             "activity" => j!(s.activity(a.account())),

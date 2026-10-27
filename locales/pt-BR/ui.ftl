@@ -24,6 +24,7 @@ header-syncing = { $count ->
 }
 header-offline = Sem internet
 header-quota-full = Armazenamento cheio
+header-needs-sign-in = Entre de novo na conta
 header-paused = Sincronização pausada
 header-last-sync-now = Última sincronização há menos de um minuto
 header-last-sync = Última sincronização { $ago }

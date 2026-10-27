@@ -210,6 +210,11 @@ impl DriveClient {
         request.body(reqwest::Body::wrap_stream(stream))
     }
 
+    /// `true` enquanto o Google recusa o login da conta (ver `AccessTokenProvider::signed_out`).
+    pub fn signed_out(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.tokens.signed_out()
+    }
+
     /// Troca o recuo (nos testes, para não esperar segundos).
     pub fn with_backoff(mut self, backoff: Backoff) -> DriveClient {
         self.backoff = backoff;

@@ -366,7 +366,14 @@ impl ServiceError {
 )]
 pub trait Service {
     /// Abre o login no navegador e devolve o endereço; o resultado vem em `LoginFinished`.
-    fn begin_login(&self, client_id: &str, client_secret: &str) -> Result<String, ServiceError>;
+    /// `expected`: o e-mail da conta que precisa entrar de novo; vazio, uma conta nova. Voltar
+    /// com outro e-mail dá `LoginFinished(false, e-mail, "other-account")`.
+    fn begin_login(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        expected: &str,
+    ) -> Result<String, ServiceError>;
     fn status(&self, account: &str) -> Result<Status, ServiceError>;
     fn account_info(&self, account: &str) -> Result<AccountInfo, ServiceError>;
     /// A atividade de sincronização, a mais recente primeiro (até 500 itens).

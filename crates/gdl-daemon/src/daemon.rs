@@ -50,7 +50,7 @@ use crate::menu::{self, Action};
 use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
-    self, Notification, Notifier, OPEN_CANCELED, OPEN_LOST_FOUND, OPTIONAL_KINDS, RESUME,
+    self, Notification, Notifier, OPEN_CANCELED, OPEN_LOST_FOUND, OPTIONAL_KINDS, RESUME, SIGN_IN,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -113,6 +113,8 @@ pub struct Config {
 struct Account {
     email: String,
     engine: Arc<Engine>,
+    /// Os tokens do motor: o login novo da conta entra aqui, sem desmontar nada.
+    access: Arc<AccessTokens>,
     mount_point: PathBuf,
     shutdown: CancellationToken,
     _session: fuser::BackgroundSession,
@@ -588,13 +590,16 @@ impl Daemon {
         self.migrate_current_account();
         let emails = self.saved_emails();
         let starts = emails.iter().enumerate().map(|(index, email)| async move {
-            match self.config.tokens.load(email).await.map_err(failed)? {
-                Some((creds, tokens)) => self
-                    .mount_account(creds, tokens, index == 0)
-                    .await
-                    .map(Some),
-                None => Ok(None),
-            }
+            let token_url = self.config.oauth.token.clone();
+            // Sem o login no chaveiro, a conta sobe só com o que está no cache e pede para
+            // entrar de novo.
+            let stored = self.config.tokens.load(email).await.map_err(failed)?;
+            let access = match stored {
+                Some((creds, tokens)) => AccessTokens::new(creds, tokens, token_url),
+                None => AccessTokens::revoked(token_url),
+            };
+            self.mount_account(email, Arc::new(access), index == 0)
+                .await
         });
         // Uma conta que não sobe não impede as outras. O arquivo não é regravado: a que não
         // subiu continua nele.
@@ -603,8 +608,7 @@ impl Daemon {
             .zip(futures_util::future::join_all(starts).await)
         {
             match started {
-                Ok(Some((account, moved))) => self.register_account(account, moved).await,
-                Ok(None) => {}
+                Ok((account, moved)) => self.register_account(account, moved).await,
                 Err(e) => {
                     tracing::warn!(erro = %e, conta = %email, "não deu para reconectar a conta");
                 }
@@ -698,6 +702,12 @@ impl Daemon {
         let folder = match key {
             RESUME => {
                 apply_paused(&*self.account_engine(account).await?, false);
+                return Ok(());
+            }
+            // A tela de login da conta é da janela; o serviço só pede para abri-la.
+            SIGN_IN => {
+                self.account_engine(account).await?;
+                self.open_screen(format!("sign-in:{account}"));
                 return Ok(());
             }
             OPEN_LOST_FOUND => KeptFolder::LostAndFound,
@@ -809,14 +819,22 @@ impl Daemon {
     pub async fn begin_login(
         self: &Arc<Self>,
         creds: ClientCredentials,
+        expected: &str,
     ) -> Result<String, ServiceError> {
-        let connected = self.accounts.lock().await.len();
-        if connected >= MAX_ACCOUNTS {
+        let (connected, resuming) = {
+            let accounts = self.accounts.lock().await;
+            let resuming = !expected.is_empty() && accounts.iter().any(|a| a.email == expected);
+            (accounts.len(), resuming)
+        };
+        // Entrar de novo numa conta que já está na lista não cria conta, então não esbarra nos
+        // limites.
+        if !resuming && connected >= MAX_ACCOUNTS {
             return Err(ServiceError::Refused("too-many-accounts".into()));
         }
-        if connected > 0 && self.prefs().disable_add_account {
+        if !resuming && connected > 0 && self.prefs().disable_add_account {
             return Err(ServiceError::Refused("add-account-disabled".into()));
         }
+        let expected = expected.to_string();
         let flow = LoginFlow::start(creds.clone(), self.config.oauth.clone())
             .await
             .map_err(failed)?;
@@ -824,7 +842,7 @@ impl Daemon {
         self.open(url.clone());
         let daemon = self.clone();
         let task = tokio::spawn(async move {
-            let (ok, email, error) = match daemon.finish_login(flow, creds).await {
+            let (ok, email, error) = match daemon.finish_login(flow, creds, &expected).await {
                 Ok(email) => (true, email, String::new()),
                 Err((email, error)) => (false, email, error),
             };
@@ -844,12 +862,14 @@ impl Daemon {
         Ok(url)
     }
 
-    /// Espera o navegador, confere se a conta é permitida, guarda os tokens e monta a conta.
-    /// O erro vem com o e-mail (se já conhecido) e a mensagem.
+    /// Espera o navegador, confere se a conta é permitida, guarda os tokens e monta a conta (ou,
+    /// com `expected`, retoma a que precisava entrar de novo, sem montar de novo). O erro vem com
+    /// o e-mail (se já conhecido) e a mensagem.
     async fn finish_login(
         self: &Arc<Self>,
         flow: LoginFlow,
         creds: ClientCredentials,
+        expected: &str,
     ) -> Result<String, (String, String)> {
         let tokens = flow
             .wait(LOGIN_TIMEOUT)
@@ -861,10 +881,13 @@ impl Daemon {
             let accounts = self.accounts.lock().await;
             (accounts.len(), accounts.iter().any(|a| a.email == email))
         };
-        if already {
+        if !expected.is_empty() && email != expected {
+            return Err((email, "other-account".into()));
+        }
+        if already && expected.is_empty() {
             return Err((email, "already-connected".into()));
         }
-        if connected >= MAX_ACCOUNTS {
+        if !already && connected >= MAX_ACCOUNTS {
             return Err((email, "too-many-accounts".into()));
         }
         if !self.allowed(&email) {
@@ -876,14 +899,34 @@ impl Daemon {
             .save(&email, &creds, &tokens)
             .await
             .map_err(|e| fail(&e))?;
+        if already {
+            self.resume_account(&email, creds, tokens).await;
+            return Ok(email);
+        }
         // A pasta preferida é da primeira conta, a que entra com a lista vazia.
+        let access = AccessTokens::new(creds, tokens, self.config.oauth.token.clone());
         let (account, moved) = self
-            .mount_account(creds, tokens, connected == 0)
+            .mount_account(&email, Arc::new(access), connected == 0)
             .await
             .map_err(|e| fail(&e))?;
         self.register_account(account, moved).await;
         self.save_accounts().await;
         Ok(email)
+    }
+
+    /// A conta que já está na lista entra de novo: o login novo vale para o motor que está de pé,
+    /// que retoma sozinho ao ver o login voltar.
+    async fn resume_account(&self, email: &str, creds: ClientCredentials, tokens: TokenSet) {
+        let access = {
+            let accounts = self.accounts.lock().await;
+            accounts
+                .iter()
+                .find(|a| a.email == email)
+                .map(|a| a.access.clone())
+        };
+        if let Some(access) = access {
+            access.replace(creds, tokens).await;
+        }
     }
 
     /// Abre o motor fora das threads do runtime: com `ContentCachePath` novo, ele primeiro muda
@@ -935,33 +978,31 @@ impl Daemon {
         }
     }
 
-    /// Abre o motor e monta a conta, sem pô-la na lista. `primary`: a pasta preferida; as
-    /// outras contas ficam em `<preferida> (<e-mail>)`. Devolve também se a pasta não é a
+    /// Abre o motor e monta a conta `email`, sem pô-la na lista. `primary`: a pasta preferida;
+    /// as outras contas ficam em `<preferida> (<e-mail>)`. Devolve também se a pasta não é a
     /// preferida (já tinha arquivos), para avisar o usuário.
     async fn mount_account(
         self: &Arc<Self>,
-        creds: ClientCredentials,
-        tokens: TokenSet,
+        email: &str,
+        access: Arc<AccessTokens>,
         primary: bool,
     ) -> Result<(Account, bool), ServiceError> {
-        let email = tokens.email.clone();
         let config = &self.config;
-        let access = AccessTokens::new(creds, tokens, config.oauth.token.clone());
         let client = DriveClient::new(
             config.api.base.clone(),
             config.api.upload.clone(),
-            Arc::new(access),
+            access.clone(),
         )
         .with_backoff(config.backoff)
         .with_bandwidth(self.bandwidth.clone());
         let prefs = self.prefs();
-        let engine = self.open_engine(&prefs, &email, client).await?;
+        let engine = self.open_engine(&prefs, email, client).await?;
         let engine = Arc::new(engine.with_intervals(config.intervals));
         engine.ensure_indexed().await.map_err(failed)?;
 
         let mut preferred = self.preferred_mount_point(&prefs);
         if !primary {
-            preferred = beside(&preferred, &email);
+            preferred = beside(&preferred, email);
         }
         let mount_point = mount::choose(&preferred).map_err(failed)?;
         let uid = rustix::process::getuid().as_raw();
@@ -981,14 +1022,15 @@ impl Daemon {
             let (engine, shutdown) = (engine.clone(), shutdown.clone());
             async move { engine.run(shutdown).await }
         });
-        self.forward_events(email.clone(), engine.subscribe(), shutdown.clone());
+        self.forward_events(email.into(), engine.subscribe(), shutdown.clone());
         self.forward_activity(engine.activity_changes(), shutdown.clone());
         let my_drive = mount_point.join(self.my_drive_name());
         self.forward_states(engine.clone(), my_drive, shutdown.clone());
         let moved = mount_point != preferred;
         let account = Account {
-            email,
+            email: email.into(),
             engine,
+            access,
             mount_point,
             _stop: shutdown.clone().drop_guard(),
             shutdown,
@@ -1106,7 +1148,9 @@ impl Daemon {
     async fn on_event(&self, email: &str, event: &EngineEvent) {
         if matches!(
             event,
-            EngineEvent::SyncStateChanged(_) | EngineEvent::Offline(_)
+            EngineEvent::SyncStateChanged(_)
+                | EngineEvent::Offline(_)
+                | EngineEvent::NeedsSignIn(_)
         ) {
             self.emit_status_changed().await;
         }

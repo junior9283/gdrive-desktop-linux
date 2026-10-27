@@ -8,6 +8,8 @@ pub struct SyncSummary {
     pub pending_uploads: u32,
     pub paused: bool,
     pub offline: bool,
+    /// O Google recusou o login da conta.
+    pub needs_sign_in: bool,
     pub last_sync_ms: Option<i64>,
     pub errors: u32,
     /// O último envio esbarrou na cota cheia (até um envio dar certo).
@@ -30,6 +32,8 @@ pub enum SyncState {
     Offline,
     QuotaFull,
     Error,
+    /// O login da conta venceu: nada sincroniza até ela entrar de novo.
+    NeedsSignIn,
 }
 
 impl SyncState {
@@ -42,14 +46,18 @@ impl SyncState {
             SyncState::Offline => "offline",
             SyncState::QuotaFull => "quota-full",
             SyncState::Error => "error",
+            SyncState::NeedsSignIn => "needs-sign-in",
         }
     }
 }
 
 impl SyncSummary {
-    /// Vale o primeiro que se aplicar: pausado, sem internet, cota cheia, sincronizando, erro.
+    /// Vale o primeiro que se aplicar: login vencido, pausado, sem internet, cota cheia,
+    /// sincronizando, erro.
     pub fn state(&self) -> SyncState {
-        if self.paused {
+        if self.needs_sign_in {
+            SyncState::NeedsSignIn
+        } else if self.paused {
             SyncState::Paused
         } else if self.offline {
             SyncState::Offline
@@ -81,6 +89,8 @@ pub enum EngineEvent {
         reason: LostReason,
     },
     Offline(bool),
+    /// O Google recusou (`true`) ou voltou a aceitar (`false`) o login da conta.
+    NeedsSignIn(bool),
     DiskLow {
         free_kb: u64,
     },
@@ -120,6 +130,14 @@ mod tests {
         };
         assert_eq!(
             with(|s| {
+                s.needs_sign_in = true;
+                s.paused = true;
+                s.errors = 1;
+            }),
+            SyncState::NeedsSignIn
+        );
+        assert_eq!(
+            with(|s| {
                 s.paused = true;
                 s.offline = true;
             }),
@@ -144,5 +162,7 @@ mod tests {
         assert_eq!(with(|s| s.errors = 1), SyncState::Error);
         assert_eq!(base.state(), SyncState::Synced);
         assert_eq!(SyncState::QuotaFull.as_str(), "quota-full");
+        assert!(SyncState::NeedsSignIn > SyncState::Error);
+        assert_eq!(SyncState::NeedsSignIn.as_str(), "needs-sign-in");
     }
 }

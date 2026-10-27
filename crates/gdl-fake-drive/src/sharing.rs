@@ -89,11 +89,6 @@ async fn create_permission(
         if let Some(field) = field {
             perm[field] = target.into();
         }
-        // Um acesso geral (domínio, qualquer pessoa) por item: o novo substitui o anterior.
-        if matches!(kind, "anyone" | "domain") {
-            file.permissions
-                .retain(|p| !matches!(p["type"].as_str(), Some("anyone" | "domain")));
-        }
         file.permissions.push(perm.clone());
         Json(perm).into_response()
     });

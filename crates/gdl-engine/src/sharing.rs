@@ -65,16 +65,19 @@ impl Engine {
     ) -> Result<()> {
         let kind = grantee.map(Grantee::kind);
         let perms = self.permissions(id).await?;
+        // Tira todos os de outro tipo antes de mexer no que fica (nenhum sobra por engano).
+        let mut same = None;
         for old in perms.iter().filter(|p| p.is_general()) {
-            if Some(old.kind.as_str()) == kind {
-                return self.set_share_role(id, &old.id, role).await;
+            match Some(old.kind.as_str()) == kind {
+                true => same = Some(&old.id),
+                false => self.unshare(id, &old.id).await?,
             }
-            self.unshare(id, &old.id).await?;
         }
-        if let Some(grantee) = grantee {
-            self.share(id, grantee, role, None).await?;
+        match (same, grantee) {
+            (Some(same), _) => self.set_share_role(id, same, role).await,
+            (None, Some(grantee)) => self.share(id, grantee, role, None).await.map(drop),
+            (None, None) => Ok(()),
         }
-        Ok(())
     }
 
     /// As versões do conteúdo, da mais nova para a mais antiga (a primeira é a atual).
@@ -187,6 +190,33 @@ mod tests {
 
         engine.set_general_access(&id, None, "").await.unwrap();
         assert!(general().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn changing_general_access_removes_every_other_kind() {
+        let fake = FakeDrive::start().await;
+        let id = ItemId(fake.add_file(&fake.root_id(), "a.txt", b"a".to_vec()));
+        let (engine, _tmp) = indexed_engine(&fake).await;
+        // O Drive aceita os dois acessos gerais ao mesmo tempo.
+        engine
+            .share(&id, &Grantee::Anyone, "reader", None)
+            .await
+            .unwrap();
+        let domain = Grantee::Domain("example.com".into());
+        engine.share(&id, &domain, "reader", None).await.unwrap();
+
+        engine
+            .set_general_access(&id, Some(&Grantee::Anyone), "writer")
+            .await
+            .unwrap();
+
+        let general: Vec<_> = fake
+            .permissions(&id.0)
+            .into_iter()
+            .filter(|p| matches!(p["type"].as_str(), Some("anyone" | "domain")))
+            .map(|p| (p["type"].clone(), p["role"].clone()))
+            .collect();
+        assert_eq!(general, [("anyone".into(), "writer".into())]);
     }
 
     #[tokio::test]

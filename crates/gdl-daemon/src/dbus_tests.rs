@@ -532,7 +532,17 @@ async fn disabled_kind_is_neither_shown_nor_listed() {
     assert!(!shortcut.enabled);
     assert!(!shortcut.label.is_empty());
     copy_gdoc(&h, "Copia1").await;
-    // Ligado de novo, o próximo aparece: os eventos chegam em ordem, então o primeiro já passou.
+    // O aviso é decidido quando o serviço trata o evento, não quando ele nasce: antes de religar,
+    // um aviso ligado gerado depois serve de barreira (os eventos são tratados em ordem).
+    h.proxy.pause().await.unwrap();
+    let barrier = h.drive().join("barreira.txt");
+    blocking(move || std::fs::write(barrier, b"x").unwrap()).await;
+    wait_until("aviso da pausa", || {
+        h.notes().iter().any(|n| n.body.contains("barreira.txt"))
+    })
+    .await;
+    h.proxy.resume().await.unwrap();
+    // Ligado de novo, o próximo aparece.
     h.proxy
         .set_notification_enabled("copied-as-shortcut", true)
         .await

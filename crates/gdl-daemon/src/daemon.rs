@@ -1116,6 +1116,7 @@ impl Daemon {
             engine.pause();
         }
         engine.ensure_indexed().await.map_err(failed)?;
+        folders::look_for_computers(&engine).await;
 
         let mut preferred = self.preferred_mount_point(&prefs);
         if is_beside {

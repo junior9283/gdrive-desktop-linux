@@ -191,6 +191,9 @@ pub struct StoredDrive {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriveRoot {
     MyDrive,
+    /// A pasta de apoio das pastas do computador: fica no Meu Drive, mas aparece na raiz da
+    /// montagem.
+    Computers,
     /// Um Drive compartilhado ligado, com o nome da pasta dele na montagem (já nome local).
     Shared {
         id: ItemId,

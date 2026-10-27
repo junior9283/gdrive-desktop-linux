@@ -24,6 +24,7 @@ pub(crate) const XATTRS: [(&str, XattrValue); 3] = [
 pub struct Layout {
     pub my_drive: String,
     pub shared_drives: String,
+    pub computers: String,
     pub trash: String,
     pub lost_found: String,
     pub canceled_uploads: String,
@@ -35,6 +36,7 @@ impl Layout {
         Layout {
             my_drive: i18n.tr("folder-my-drive", &[]),
             shared_drives: i18n.tr("folder-shared-drives", &[]),
+            computers: i18n.tr("computers-folder", &[]),
             trash: i18n.tr("folder-trash", &[]),
             lost_found: i18n.tr("folder-lost-found", &[]),
             canceled_uploads: i18n.tr("folder-canceled-uploads", &[]),
@@ -76,6 +78,7 @@ impl Layout {
     pub fn mounted(&self, mount: &Path, at: &DrivePath) -> PathBuf {
         let root = match &at.root {
             DriveRoot::MyDrive => PathBuf::from(&self.my_drive),
+            DriveRoot::Computers => PathBuf::from(&self.computers),
             DriveRoot::Shared { name, .. } => PathBuf::from(&self.shared_drives).join(name),
         };
         let mut path = mount.join(root);

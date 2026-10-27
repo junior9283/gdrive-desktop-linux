@@ -89,6 +89,62 @@ async fn same_named_drives_get_distinct_folders() {
     assert!(std::fs::metadata(shared.join("Equipe")).is_err());
 }
 
+/// A pasta de apoio "Computadores" com o computador `Notebook` (e `notas.txt` e um atalho nele);
+/// devolve o id dela.
+fn computers(fake: &FakeDrive) -> String {
+    let root = fake.root_id();
+    let support = fake.add_folder(&root, "Computadores");
+    let notebook = fake.add_folder(&support, "Notebook");
+    let notes = fake.add_file(&notebook, "notas.txt", b"notas".to_vec());
+    fake.add_shortcut(&notebook, "atalho", &notes);
+    support
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn computers_folder_appears_at_the_root() {
+    let fake = FakeDrive::start().await;
+    let support = computers(&fake);
+    let m = Mounted::new(fake).await;
+    m.engine
+        .store()
+        .set_computers_folder(&ItemId(support))
+        .unwrap();
+
+    assert!(names(&m.mnt).contains(&"Computadores".to_string()));
+    let notebook = m.mnt.join("Computadores/Notebook");
+    assert_eq!(names(&notebook), ["atalho", "notas.txt"]);
+    assert_eq!(std::fs::read(notebook.join("notas.txt")).unwrap(), b"notas");
+    let target = std::fs::read_link(notebook.join("atalho")).unwrap();
+    assert!(
+        target.starts_with("../../.shortcut-targets-by-id/"),
+        "o atalho sobe até a raiz da montagem: {target:?}"
+    );
+    assert_eq!(std::fs::read(notebook.join("atalho")).unwrap(), b"notas");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn support_folder_is_hidden_in_my_drive() {
+    let fake = FakeDrive::start().await;
+    let support = computers(&fake);
+    let empty = fake.add_folder(&fake.root_id(), "Vazia");
+    let m = Mounted::new(fake).await;
+    let store = m.engine.store();
+    store.set_computers_folder(&ItemId(support)).unwrap();
+
+    assert_eq!(names(&m.drive()), ["Vazia"]);
+    assert_eq!(
+        std::fs::metadata(m.drive().join("Computadores"))
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+    // Sem nada dentro, a pasta não aparece em lugar nenhum.
+    store.set_computers_folder(&ItemId(empty)).unwrap();
+    assert!(!names(&m.mnt).contains(&"Computadores".to_string()));
+    assert!(std::fs::metadata(m.mnt.join("Computadores")).is_err());
+    assert_eq!(names(&m.drive()), ["Computadores"]);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn readdir_and_stat_never_download_content() {
     let fake = FakeDrive::start().await;

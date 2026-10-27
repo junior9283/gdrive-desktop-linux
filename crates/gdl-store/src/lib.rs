@@ -141,6 +141,14 @@ fn drive_dir_names(drives: &[(String, String)]) -> Vec<Option<String>> {
         .collect()
 }
 
+/// O valor de `key` no kv, com a conexão já em mãos.
+fn kv_on(conn: &Connection, key: &str) -> Result<Option<String>> {
+    let value = conn
+        .query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get(0))
+        .optional()?;
+    Ok(value)
+}
+
 /// O nome da pasta de cada Drive compartilhado ligado que tem uma, pelo ID.
 fn enabled_drive_dirs(conn: &Connection) -> Result<HashMap<String, String>> {
     let mut stmt =
@@ -636,11 +644,7 @@ impl Store {
     }
 
     pub fn kv_get(&self, key: &str) -> Result<Option<String>> {
-        let value = self
-            .conn()
-            .query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get(0))
-            .optional()?;
-        Ok(value)
+        kv_on(&self.conn(), key)
     }
 
     pub fn kv_set(&self, key: &str, value: &str) -> Result<()> {
@@ -825,8 +829,15 @@ impl Store {
         let Some((top, None, _, inode)) = rows.first() else {
             return Ok(None);
         };
+        let mut rows = rows.as_slice();
         let root = if *inode == Inode::ROOT.0 {
-            DriveRoot::MyDrive
+            match rows.get(1) {
+                Some((id, ..)) if kv_on(&conn, folders::COMPUTERS_KEY)?.as_ref() == Some(id) => {
+                    rows = &rows[1..];
+                    DriveRoot::Computers
+                }
+                _ => DriveRoot::MyDrive,
+            }
         } else {
             match enabled_drive_dirs(&conn)?.remove(top) {
                 Some(name) => DriveRoot::Shared {
@@ -1332,6 +1343,42 @@ mod tests {
     }
 
     #[test]
+    fn path_of_starts_at_computers_for_what_is_inside_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .upsert_items(&[
+                Item {
+                    inode: Inode::ROOT,
+                    ..folder("root", None)
+                },
+                folder("apoio", Some("root")),
+                folder("Notebook", Some("apoio")),
+                item("a.txt", Some("Notebook")),
+            ])
+            .unwrap();
+        assert_eq!(
+            store.path_of(&id("a.txt")).unwrap().unwrap().root,
+            DriveRoot::MyDrive,
+            "antes de conhecer a pasta de apoio"
+        );
+
+        store.set_computers_folder(&id("apoio")).unwrap();
+        assert_eq!(store.computers_folder().unwrap(), Some(id("apoio")));
+        let computers = |path: &str| {
+            Some(DrivePath {
+                root: DriveRoot::Computers,
+                path: path.into(),
+            })
+        };
+        assert_eq!(
+            store.path_of(&id("a.txt")).unwrap(),
+            computers("Notebook/a.txt")
+        );
+        assert_eq!(store.path_of(&id("apoio")).unwrap(), computers(""));
+    }
+
+    #[test]
     fn path_of_reaches_enabled_shared_drives_only() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
@@ -1434,7 +1481,7 @@ mod tests {
         }
         let dir_of = |store: &Store| match store.path_of(&id("a.txt")).unwrap().unwrap().root {
             DriveRoot::Shared { name, .. } => name,
-            DriveRoot::MyDrive => unreachable!(),
+            DriveRoot::MyDrive | DriveRoot::Computers => unreachable!(),
         };
         let mut listed: Vec<String> = store
             .enabled_drive_roots()

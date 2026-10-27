@@ -103,6 +103,10 @@ impl Daemon {
         runners: &Arc<Runners>,
         shutdown: &CancellationToken,
     ) {
+        // Com a política, os pares ficam guardados mas não rodam.
+        if self.folders_refused().is_err() {
+            return;
+        }
         match engine.store().pairs() {
             Ok(pairs) => {
                 for pair in pairs.into_iter().filter(|p| p.kind == PairKind::Folder) {
@@ -196,9 +200,7 @@ impl Daemon {
         path: &str,
         merge: bool,
     ) -> Result<i64, ServiceError> {
-        if self.prefs().disable_mirrored_folders {
-            return Err(ServiceError::Refused("folders-disabled".into()));
-        }
+        self.folders_refused()?;
         let (engine, runners, shutdown) = self.folder_account(account).await?;
         let local = self.validated(path, None).await?;
         let remote = match self.existing_folder(&engine, &local).await? {
@@ -237,6 +239,7 @@ impl Daemon {
         id: i64,
         path: &str,
     ) -> Result<(), ServiceError> {
+        self.folders_refused()?;
         let (engine, runners, shutdown) = self.folder_account(account).await?;
         let local = self.validated(path, Some(id)).await?;
         let store = engine.store();
@@ -260,6 +263,14 @@ impl Daemon {
         let pair = pair.ok_or_else(|| ServiceError::NotFound(id.to_string()))?;
         self.start_folder(engine, runners, shutdown, pair);
         self.emit_local_folders_changed().await;
+        Ok(())
+    }
+
+    /// A política do administrador desliga as pastas do computador.
+    fn folders_refused(&self) -> Result<(), ServiceError> {
+        if self.prefs().disable_mirrored_folders {
+            return Err(ServiceError::Refused("folders-disabled".into()));
+        }
         Ok(())
     }
 
@@ -342,6 +353,10 @@ impl Daemon {
         let found = find_support(engine, COMPUTER, &self.config.computer.id).await?;
         if let Some(id) = &found {
             store.kv_set(COMPUTER_KEY, id).map_err(failed)?;
+            let computer = store.get(&ItemId(id.clone())).map_err(failed)?;
+            if let Some(computers) = computer.and_then(|i| i.parent) {
+                note_computers(engine, &computers.0)?;
+            }
         }
         Ok(found)
     }
@@ -352,7 +367,7 @@ impl Daemon {
             return Ok(id);
         }
         let client = engine.client();
-        let computers = match find_support(engine, ROLE.0, ROLE.1).await? {
+        let computers = match find_computers(engine).await? {
             Some(id) => id,
             None => {
                 let root = client.get("root").await.map_err(failed)?;
@@ -360,7 +375,9 @@ impl Daemon {
                 let made = client
                     .create_folder_with_props(&root.id, &name, &[ROLE])
                     .await;
-                remember(engine, made.map_err(failed)?)?
+                let id = remember(engine, made.map_err(failed)?)?;
+                note_computers(engine, &id)?;
+                id
             }
         };
         let computer = &self.config.computer;
@@ -402,6 +419,32 @@ async fn find_support(
     let found = engine.client().find_by_app_property(key, value).await;
     let first = found.map_err(failed)?.into_iter().next();
     first.map(|f| remember(engine, f)).transpose()
+}
+
+/// Na partida da conta: os backups (deste e de outros computadores) aparecem na montagem mesmo
+/// sem pares. Procura uma vez, enquanto a pasta não é conhecida; sem rede, fica para a próxima.
+pub(super) async fn look_for_computers(engine: &Engine) {
+    if !matches!(engine.store().computers_folder(), Ok(None)) {
+        return;
+    }
+    if let Err(e) = find_computers(engine).await {
+        tracing::warn!(erro = ?e, "falha ao procurar a pasta Computadores");
+    }
+}
+
+/// A pasta de apoio "Computadores" no Drive, gravada no banco para a montagem mostrar.
+async fn find_computers(engine: &Engine) -> Result<Option<String>, ServiceError> {
+    let found = find_support(engine, ROLE.0, ROLE.1).await?;
+    if let Some(id) = &found {
+        note_computers(engine, id)?;
+    }
+    Ok(found)
+}
+
+/// Grava a pasta de apoio, que a montagem mostra na raiz.
+fn note_computers(engine: &Engine, id: &str) -> Result<(), ServiceError> {
+    let store = engine.store();
+    store.set_computers_folder(&ItemId(id.into())).map_err(failed)
 }
 
 /// A pasta viva `name` dentro de `parent`, pelo banco.

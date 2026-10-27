@@ -399,10 +399,12 @@ impl Inner {
         let depth = if item.trashed {
             1
         } else {
+            // A pasta de apoio não é um nível: "Computadores" fica na raiz da montagem.
+            let support = self.engine.store().computers_folder().map_err(errno)?;
             let mut depth = 0;
             let mut parent = item.parent.clone();
             while let Some(id) = parent {
-                depth += 1;
+                depth += usize::from(support.as_ref() != Some(&id));
                 parent = self.item_by_id(&id)?.and_then(|p| p.parent);
             }
             depth
@@ -423,6 +425,7 @@ impl Inner {
             Node::MountRoot if name == OsStr::new(&self.kio.name) => {
                 return Ok(self.virtual_dir(&Node::KioTrash));
             }
+            Node::MountRoot if name == OsStr::new(&self.layout.computers) => self.computers()?,
             Node::MountRoot => {
                 let node = self.layout.lookup_root(name).ok_or(Errno::ENOENT)?;
                 return self.node_attr(&node);
@@ -455,13 +458,28 @@ impl Inner {
                 .filter(|t| OsStr::new(&t.local_name) == name),
             Node::Item(inode) => {
                 let dir = self.item(*inode)?;
-                store
+                let found = store
                     .lookup(&dir.id, name.to_str().ok_or(Errno::ENOENT)?)
-                    .map_err(errno)?
+                    .map_err(errno)?;
+                let support = store.computers_folder().map_err(errno)?;
+                found.filter(|i| support.as_ref() != Some(&i.id))
             }
             Node::KeptFile(..) | Node::KioInfoFile(_) => return Err(Errno::ENOTDIR),
         };
         self.item_attr(&item.ok_or(Errno::ENOENT)?)
+    }
+
+    /// A pasta de apoio "Computadores", quando conhecida, viva e com algum computador dentro.
+    fn computers(&self) -> Res<Option<Item>> {
+        let store = self.engine.store();
+        let Some(id) = store.computers_folder().map_err(errno)? else {
+            return Ok(None);
+        };
+        let item = self.item_by_id(&id)?.filter(|i| !i.trashed);
+        match item {
+            Some(item) if store.has_children(&id).map_err(errno)? => Ok(Some(item)),
+            _ => Ok(None),
+        }
     }
 
     fn trashed(&self) -> Res<Vec<Item>> {
@@ -503,6 +521,10 @@ impl Inner {
                     kind: FileType::Directory,
                     name: name.into(),
                 })
+                .chain(self.computers()?.map(|c| Entry {
+                    name: self.layout.computers.clone().into(),
+                    ..self.item_entry(c)
+                }))
                 .collect(),
             Node::SharedDrives => self
                 .engine
@@ -561,8 +583,15 @@ impl Inner {
                 if dir.kind != ItemKind::Folder {
                     return Err(Errno::ENOTDIR);
                 }
-                let children = self.engine.store().children(&dir.id).map_err(errno)?;
-                children.into_iter().map(|i| self.item_entry(i)).collect()
+                let store = self.engine.store();
+                let children = store.children(&dir.id).map_err(errno)?;
+                // A pasta de apoio aparece na raiz da montagem, não dentro do Meu Drive.
+                let support = store.computers_folder().map_err(errno)?;
+                children
+                    .into_iter()
+                    .filter(|i| support.as_ref() != Some(&i.id))
+                    .map(|i| self.item_entry(i))
+                    .collect()
             }
             Node::KeptFile(..) | Node::KioInfoFile(_) => return Err(Errno::ENOTDIR),
         })

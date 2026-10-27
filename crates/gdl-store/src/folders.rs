@@ -7,6 +7,9 @@ use rusqlite::{Row, params};
 
 use crate::{Item, ItemId, Result, Store, StoreError, item_from_row};
 
+/// Onde fica guardado o id da pasta de apoio "Computadores".
+pub(crate) const COMPUTERS_KEY: &str = "folders.computers";
+
 /// Para que serve o par.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairKind {
@@ -143,6 +146,15 @@ impl Store {
         )?;
         let rows = stmt.query_map([pair], synced_from_row)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// A pasta de apoio "Computadores" desta conta, quando já conhecida.
+    pub fn computers_folder(&self) -> Result<Option<ItemId>> {
+        Ok(self.kv_get(COMPUTERS_KEY)?.map(ItemId))
+    }
+
+    pub fn set_computers_folder(&self, id: &ItemId) -> Result<()> {
+        self.kv_set(COMPUTERS_KEY, &id.0)
     }
 
     /// O item `item` está na base do par (sincronizado por ele).

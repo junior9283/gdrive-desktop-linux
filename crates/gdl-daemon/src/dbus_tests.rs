@@ -2524,6 +2524,27 @@ async fn added_folder_syncs_to_computers() {
         again.refusal, "nested",
         "a mesma pasta não entra duas vezes"
     );
+    let mounted = h.drive().parent().unwrap().join(format!(
+        "Computadores/{}/Documentos/a.txt",
+        crate::testutil::COMPUTER_NAME
+    ));
+    wait_until("a.txt em Computadores na montagem", || mounted.exists()).await;
+    assert!(!h.drive().join("Computadores").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn other_computers_show_in_the_mount() {
+    let h = Harness::new().await;
+    let root = h.fake.root_id();
+    let computers = h.fake.add_folder(&root, "Computadores");
+    h.fake
+        .set_app_properties(&computers, &[("gdl.role", "computers")]);
+    let other = h.fake.add_folder(&computers, "Outro PC");
+    h.fake.add_file(&other, "b.txt", b"b".to_vec());
+    h.logged_in().await;
+
+    let mounted = h.drive().parent().unwrap().join("Computadores/Outro PC/b.txt");
+    wait_until("o backup do outro computador", || mounted.exists()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2601,6 +2622,44 @@ async fn disable_mirrored_folders_refuses() {
         "{err:?}"
     );
     assert!(h.proxy.local_folders().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disable_mirrored_folders_stops_existing_folders() {
+    let mut h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    let id = h
+        .proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("pasta no Drive", || {
+        h.fake.find_live("Documentos").len() == 1
+    })
+    .await;
+
+    h.restart(Some("DisableMirroredFolders = true")).await;
+    std::fs::write(docs.join("depois.txt"), b"dois").unwrap();
+    let refused = |e: &ServiceError| matches!(e, ServiceError::Refused(r) if r == "folders-disabled");
+    let moved = local_folder(&h, "Outra");
+    let err = h
+        .proxy
+        .relocate_local_folder("", id, moved.to_str().unwrap())
+        .await
+        .unwrap_err();
+    assert!(refused(&err), "{err:?}");
+
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    assert!(
+        h.fake.find_live("depois.txt").is_empty(),
+        "o par não roda com a política"
+    );
+    assert_eq!(
+        h.proxy.local_folders().await.unwrap().len(),
+        1,
+        "o par continua guardado"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

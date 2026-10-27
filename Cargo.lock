@@ -1650,6 +1650,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gdl-folders"
+version = "0.8.0"
+dependencies = [
+ "gdl-store",
+]
+
+[[package]]
 name = "gdl-fs"
 version = "0.8.0"
 dependencies = [

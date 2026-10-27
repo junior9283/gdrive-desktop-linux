@@ -15,6 +15,7 @@ gdl-store = { path = "crates/gdl-store" }
 gdl-drive = { path = "crates/gdl-drive" }
 gdl-fake-drive = { path = "crates/gdl-fake-drive" }
 gdl-engine = { path = "crates/gdl-engine" }
+gdl-folders = { path = "crates/gdl-folders" }
 gdl-fs = { path = "crates/gdl-fs" }
 gdl-daemon = { path = "crates/gdl-daemon" }
 gdl-ipc = { path = "crates/gdl-ipc" }

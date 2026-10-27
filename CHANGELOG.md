@@ -7,6 +7,37 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.8.0] - 2026-10-27
+
+### Adicionado
+- Várias contas: até 4 ao mesmo tempo, cada uma com a própria pasta (a primeira continua em
+  `~/Google Drive`, as outras em `~/Google Drive (<e-mail>)`), o próprio cache e a própria fila.
+  O menu da conta lista as contas, troca a conta mostrada, adiciona outra (reaproveitando o
+  Client ID da primeira) e mostra "Entrar de novo" na conta cujo acesso expirou. As outras seguem
+  sincronizando enquanto isso.
+- "Desconectar todas as contas" em "Mais opções", com o mesmo fluxo de desconexão.
+- Política `DisableAddAccount`; recusa com mensagem própria para conta já conectada, máximo de
+  contas atingido e login feito com outra conta no "entrar de novo".
+- Drives compartilhados na pasta "Drives compartilhados" de cada conta, com ícones de status,
+  menu, miniaturas, pesquisa e Compartilhar. Drives com o mesmo nome ganham pastas distintas.
+- Janela "Gerenciar drives compartilhados" (Preferências e menu do botão direito): ligar e
+  desligar cada drive, com Salvar e Cancelar, e criar um Drive compartilhado novo.
+- Mover um arquivo para um Drive compartilhado avisa que quem vê o arquivo muda; mover uma pasta
+  do Meu Drive para um drive é recusado com um aviso que orienta a fazer isso pela web.
+- "Adicionar atalho ao Drive" no menu do botão direito e em "Compartilhados comigo", escolhendo a
+  pasta: o Meu Drive ou um Drive compartilhado que aceita itens novos, descendo pelas subpastas.
+- A bandeja diz com quantas contas está conectada; "Pausar" e "Retomar" valem para todas.
+
+### Mudado
+- O D-Bus recebe a conta nos métodos que não trazem caminho, e `Status` lista as contas.
+  A linha de comando ganha `--account <e-mail>`.
+
+### Corrigido
+- Um arquivo aberto podia dar erro de leitura logo depois que o envio terminava e o id
+  provisório virava o id do Drive.
+- O número de envios pendentes contava as tarefas da fila, não os arquivos (um arquivo editado
+  duas vezes contava dois).
+
 ## [0.7.0] - 2026-10-27
 
 ### Adicionado

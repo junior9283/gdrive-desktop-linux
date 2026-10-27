@@ -4,7 +4,7 @@
 
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.7.0-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.8.0-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-pr%C3%A9via-orange)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
@@ -35,19 +35,20 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 
 | Área | Situação |
 |---|---|
-| **Pasta do Drive** | ✅ Todo o Meu Drive em `~/Google Drive/Meu Drive`; os arquivos ficam na nuvem e são baixados só quando você abre (e só os trechos lidos). |
+| **Pasta do Drive** | ✅ Todo o Meu Drive em `~/Google Drive/Meu Drive` e os Drives compartilhados em `~/Google Drive/Drives compartilhados`; os arquivos ficam na nuvem e são baixados só quando você abre (e só os trechos lidos). |
 | **Off-line** | ✅ "Disponível off-line" em arquivos e pastas; as alterações feitas sem internet sobem quando a conexão volta. |
 | **Sincronização** | ✅ Envio e recebimento automáticos, fila que sobrevive a reinícios, conflitos guardados no Lost and Found, lixeira, limites de banda e pausa. |
 | **Documentos Google** | ✅ Docs, Planilhas e Apresentações aparecem na pasta e abrem no navegador com duplo clique. |
 | **Bandeja e janela** | ✅ Ícone na bandeja, janela principal, atividade com progresso, pesquisa rápida, erros, arquivos off-line, preferências, notificações e menu da conta com foto e uso do espaço. |
 | **Primeiro uso** | ✅ Guia do Client ID dentro do app, com botões que abrem cada página do Google Cloud. |
 | **Miniaturas** | ✅ As imagens aparecem com miniatura no Dolphin e em outros gerenciadores, usando as miniaturas do próprio Google, sem baixar os arquivos. |
-| **Menu do botão direito** | ✅ Abrir no navegador, copiar link (com o aviso de quem pode abrir), off-line / só on-line, novo Documento, Planilha ou Apresentação, atualizar e lixeira, no Dolphin, Nautilus, Nemo, Caja, Thunar e COSMIC Files. |
+| **Menu do botão direito** | ✅ Abrir no navegador, copiar link (com o aviso de quem pode abrir), adicionar atalho ao Drive, off-line / só on-line, novo Documento, Planilha ou Apresentação, atualizar e lixeira, no Dolphin, Nautilus, Nemo, Caja, Thunar e COSMIC Files. |
 | **Compartilhar e versões** | ✅ Pelo menu do botão direito: janela Compartilhar (pessoas, papéis, acesso geral e link), Gerenciar versões (baixar, restaurar, manter para sempre) e arquivos do Office abertos no Docs, Planilhas ou Apresentações. |
 | **Instalação e remoção** | ✅ Pacotes `.deb`, `.rpm`, Arch e `.tar.gz`, e um desinstalador com a opção de apagar também os dados do computador. |
 | **Ícones de status** | ✅ Na nuvem, off-line, sincronizando e em conflito, no Dolphin. A pasta do Drive fica fora do indexador do KDE (Baloo), que baixaria tudo para ler. |
 | **Backup e espelho** | 🔜 Backup de pastas do computador para o Drive e o modo espelho (cópia completa no computador). |
-| **Contas** | 🔜 Várias contas Google ao mesmo tempo e Drives compartilhados. |
+| **Contas** | ✅ Até 4 contas Google ao mesmo tempo, cada uma com a própria pasta, trocadas pelo menu da conta. |
+| **Drives compartilhados** | ✅ Na pasta de cada conta, com a janela "Gerenciar drives compartilhados" para escolher quais aparecem e criar um novo. |
 
 A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 
@@ -57,13 +58,15 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 |---|---|
 | ![Guia do Client ID no primeiro uso](docs/imagens/primeiro-uso.png) | ![Lista de envios e downloads com o status de cada um](docs/imagens/atividade.png) |
 | **Menu da conta** | **Pesquisa rápida** |
-| ![Menu da conta com a foto, o e-mail e o uso do espaço](docs/imagens/menu-da-conta.png) | ![Pesquisa rápida com três resultados](docs/imagens/pesquisa.png) |
+| ![Menu da conta com a foto, o uso do espaço e "Adicionar outra conta"](docs/imagens/menu-da-conta.png) | ![Pesquisa rápida com três resultados](docs/imagens/pesquisa.png) |
 | **Arquivos off-line** | **Preferências** |
 | ![Uso do disco e itens off-line](docs/imagens/arquivos-off-line.png) | ![Aba Google Drive das preferências](docs/imagens/preferencias.png) |
 | **Sobre** | **Desinstalar** |
 | ![Tela Sobre com a versão e a licença](docs/imagens/sobre.png) | ![Janela que pergunta se apaga também os dados do computador](docs/imagens/desinstalar.png) |
 | **Compartilhar** | **Gerenciar versões** |
 | ![Janela Compartilhar com as pessoas, os papéis e o acesso geral](docs/imagens/compartilhar.png) | ![Versões guardadas de um arquivo, da atual para a mais antiga](docs/imagens/versoes.png) |
+| **Gerenciar drives compartilhados** | **Adicionar atalho ao Drive** |
+| ![Lista de Drives compartilhados com uma chave para cada um](docs/imagens/drives-compartilhados.png) | ![Escolha da pasta do atalho: o Meu Drive e os Drives compartilhados](docs/imagens/adicionar-atalho.png) |
 
 ## Como funciona
 
@@ -161,16 +164,20 @@ como é o padrão no Linux; quem instalou pelo `.tar.gz` também pode rodar `./u
 guia a criação do seu Client ID parte por parte, com botões que abrem cada página do Google Cloud
 e copiam os valores (o mesmo passo a passo do [guia](docs/guia-client-id.md)). Depois, cole o
 Client ID e o segredo e entre pelo navegador. A pasta aparece em `~/Google Drive/Meu Drive`.
+Outras contas entram pelo menu da conta ("Adicionar outra conta") e ganham a própria pasta,
+`~/Google Drive (<e-mail>)`.
 
 Na bandeja: estado da sincronização, pausar/retomar, pesquisa (também pelo atalho global, se o
 portal do KDE aceitar), lista de erros, arquivos off-line, preferências e sair. A janela
 principal tem o Início, a atividade com progresso e "Cancelar envio", os compartilhados comigo e
 o histórico de notificações.
 
-**Menu do botão direito:** nos arquivos e pastas do Meu Drive aparece o submenu **Google Drive**,
-com abrir no navegador, copiar link, Disponível off-line / Somente on-line (marcado conforme o
-estado atual), novo Documento, Planilha ou Apresentação Google na pasta, atualizar a pasta e ver
-a lixeira. Fora do Meu Drive ele não aparece.
+**Menu do botão direito:** nos arquivos e pastas do Meu Drive e dos Drives compartilhados aparece
+o submenu **Google Drive**, com abrir no navegador, compartilhar, copiar link, gerenciar versões,
+adicionar atalho ao Drive, Disponível off-line / Somente on-line (marcado conforme o estado
+atual), novo Documento, Planilha ou Apresentação Google na pasta, atualizar a pasta e ver a
+lixeira. Na pasta "Drives compartilhados" ele cria um drive novo e abre "Gerenciar drives
+compartilhados". Fora da pasta do Drive ele não aparece.
 
 | Gerenciador | Como funciona |
 |---|---|
@@ -182,11 +189,11 @@ Também há uma CLI:
 
 | Comando | O que faz |
 |---|---|
-| `login` / `status` | entra na conta / conta, pasta, envios pendentes |
+| `login` / `status [--account <e-mail>]` | entra numa conta / conta, pasta, envios pendentes |
 | `pin <caminho>` / `unpin <caminho>` | deixa disponível off-line / só on-line |
 | `pause` / `resume` | pausa e retoma a sincronização |
 | `lost-and-found` | lista as edições guardadas por conflito |
-| `logout [--finish \| --move <pasta> \| --discard]` | sai da conta, decidindo o que fazer com envios pendentes (o Lost and Found nunca é apagado) |
+| `logout [--account <e-mail> \| --all] [--finish \| --move <pasta> \| --discard]` | sai de uma conta ou de todas, decidindo o que fazer com envios pendentes (o Lost and Found nunca é apagado) |
 | `open-pointer <arquivo>` | abre um `.gdoc`, `.gsheet`… no navegador (usado pelo duplo clique) |
 | `menu-action <ação> <caminho>…` | faz uma ação do menu do botão direito (usado pelo COSMIC Files) |
 | `uninstall [--purge] [--yes]` | desinstala o app; `--purge` apaga também os dados deste computador (desconecte a conta antes) |
@@ -197,8 +204,9 @@ Limitações conhecidas:
   o conteúdo não se perde, mas no Drive o arquivo ganha um ID novo e o antigo vai para a lixeira
   (links compartilhados do antigo deixam de valer). Com `set backupcopy=yes` o ID se mantém.
 - Uma pasta criada aqui que ainda não subiu, mandada para a lixeira, some só deste computador.
-- Ainda sem os ícones de status no gerenciador de arquivos, backup de pastas, modo espelho e várias
-  contas (veja o roteiro abaixo).
+- Uma conta que ainda não terminou a primeira leitura do Drive e não consegue subir na partida
+  (sem internet ou com o login expirado) fica fora da lista até a próxima partida.
+- Ainda sem backup de pastas e modo espelho (veja o roteiro abaixo).
 
 Roteiro de teste manual (e o que já foi conferido): [docs/testes](docs/testes/README.md).
 
@@ -215,8 +223,8 @@ Cada etapa sai funcionando antes da próxima.
 | 0.4 | Instaladores para as distribuições e desinstalador |
 | 0.5 | Menu do botão direito em todos os gerenciadores |
 | 0.6 | Desempenho: CPU parada, pastas grandes, download e envios em paralelo |
-| 0.7 | Dolphin completo: ícones de status, janelas de compartilhar e de versões ← **estamos aqui** |
-| 0.8 | Várias contas e Drives compartilhados |
+| 0.7 | Dolphin completo: ícones de status, janelas de compartilhar e de versões |
+| 0.8 | Várias contas e Drives compartilhados ← **estamos aqui** |
 | 0.9 | Backup de pastas, pastas conectadas e modo espelho |
 | 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes |
 | 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) |

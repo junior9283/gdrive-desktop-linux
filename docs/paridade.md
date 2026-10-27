@@ -1,16 +1,16 @@
 # Matriz de paridade
 
 Situação de cada item do catálogo da [especificação](superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md)
-(seção 6) no código, conferida na versão 0.7.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
+(seção 6) no código, conferida na versão 0.8.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
 **FEITO** ou registrados em "Diferenças conhecidas" no README como risco aceito.
 
 Legenda: **FEITO**, **PARCIAL** (existe, mas incompleto), **FALTA**.
 
 | Seções | FEITO | PARCIAL | FALTA |
 |---|---|---|---|
-| 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 35 | 9 | 27 |
-| 6.7–6.11 (janela principal, bandeja, pesquisa, Preferências, primeiro uso) | 57 | 4 | 18 |
-| 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 40 | 6 | 29 |
+| 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 45 | 8 | 18 |
+| 6.7–6.11 (janela principal, bandeja, pesquisa, Preferências, primeiro uso) | 61 | 1 | 17 |
+| 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 43 | 5 | 27 |
 
 Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packaging/nfpm.yaml`,
 `.github/workflows/release.yml`).
@@ -20,13 +20,13 @@ Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packagin
 | Versão | Entrega |
 |---|---|
 | 0.7 | Dolphin completo: ícones de status, submenu completo (abrir no Docs/Planilhas/Apresentações, copiar link dizendo o tipo de acesso), janelas "Compartilhar" e "Gerenciar versões", exclusão do Baloo ✅ |
-| 0.8 | Várias contas (até 4), uma montagem por conta, `DisableAddAccount`; Drives compartilhados na montagem, "Gerenciar drives compartilhados" e criar drive; "Adicionar atalho" no menu, escolhendo o local |
+| 0.8 | Várias contas (até 4), uma montagem por conta, `DisableAddAccount`; Drives compartilhados na montagem, "Gerenciar drives compartilhados" e criar drive; "Adicionar atalho" no menu, escolhendo o local ✅ |
 | 0.9 | Backup de pastas ("Meu computador"), pastas conectadas e "Computadores", modo Espelho com troca entre modos, dispositivos removíveis e NAS |
 | 0.10 | Diagnóstico, registro detalhado e feedback; notificações restantes e aviso de nova versão; servidor MCP; políticas restantes; ransomware e recuperação do banco |
 | 1.0 | Matriz toda conferida, "Diferenças conhecidas" no README |
 
 
-Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: o app é de **uma conta só** (`daemon.rs`: `account: Mutex<Option<Account>>`), só Meu Drive, sem espelho, sem backup de pastas, sem Drives compartilhados.
+Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: até 4 contas, cada uma com a própria montagem (Meu Drive e Drives compartilhados); ainda sem espelho e sem backup de pastas.
 
 ### 6.1 Contas e login
 
@@ -36,25 +36,25 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: o 
 | Tempo limite de 5 min | FEITO | `daemon.rs:56` `LOGIN_TIMEOUT = 300 s`; `LoginError::Timeout` |
 | Botão "Gerar link" | FEITO | `locales/pt-BR/ui.ftl:235` `onboarding-generate-link`; `oauth.rs:197` `auth_url` |
 | Página de resultado própria | FEITO | `oauth.rs:261` `result_page` (login-success/login-failure) |
-| Até 4 contas simultâneas | FALTA | Só uma conta (`daemon.rs:251`); sem montagem por conta, sem `~/Google Drive (<e-mail>)` |
-| Adicionar, alternar, reautenticar, desconectar uma/todas | PARCIAL | Só login e logout da conta única (`daemon.rs:1334`); falta adicionar/alternar/reautenticar |
-| Erros com mensagem própria | PARCIAL | Existem Timeout, Denied, sem refresh token, "Sem conexão" (`oauth.rs:87`). Falta: conta já conectada, máximo atingido, conta bloqueada/desativada pela organização, "login demorando" |
+| Até 4 contas simultâneas | FEITO | `daemon/accounts.rs` (`MAX_ACCOUNTS = 4`), uma montagem por conta (`<pasta> (<e-mail>)` a partir da segunda); testes `second_account_mounts_beside_the_first`, `fifth_account_is_refused` |
+| Adicionar, alternar, reautenticar, desconectar uma/todas | FEITO | `home/account.js` (lista de contas, trocar, "Adicionar outra conta", "Entrar de novo"), `more.js` "Desconectar todas as contas" (`LogoutAll`); testes `signing_in_again_resumes_the_queue`, `logout_of_one_keeps_the_other_mounted` |
+| Erros com mensagem própria | PARCIAL | Timeout, Denied, sem refresh token, "Sem conexão", conta já conectada, máximo atingido, outra conta no "entrar de novo" e `DisableAddAccount` (`onboarding-login-failed-*`). Falta: conta bloqueada/desativada pela organização, "login demorando" |
 | Refresh token no Secret Service | FEITO | `gdl-drive/src/token_store.rs` (chaveiro do sistema) |
 | Fluxo de desconexão (contagem, 3 escolhas, confirmação, aviso off-line, progresso) | FEITO | `ui/screens/home/disconnect.js` (finish/move/discard com checkbox de confirmação, `disconnect-offline-warning`, `disconnect-progress`); `daemon.rs:logout` |
 | Política `AllowedAccountsPattern` | FEITO | `daemon.rs:781` `allowed()`; teste em `dbus_tests.rs` |
-| Política `DisableAddAccount` | FALTA | Chave declarada em `gdl-common/src/config.rs:113`, mas nenhum código a lê |
+| Política `DisableAddAccount` | FEITO | `begin_login` recusa `add-account-disabled` com uma conta conectada; o menu esconde "Adicionar outra conta" (`can_add_account`); teste `disable_add_account_keeps_only_the_first` |
 
 ### 6.2 Pasta do Drive: Stream e Espelho
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Stream: montagem FUSE por conta | PARCIAL | FUSE funcional (`gdl-fs/src/fs.rs`), mas só 1 conta |
+| Stream: montagem FUSE por conta | FEITO | `gdl-fs/src/fs.rs`, uma montagem por conta (`engine_at` acha a conta pelo caminho) |
 | Local padrão e `DefaultMountPoint`, aviso/alternativo se ocupado | FEITO | `daemon/mount.rs`, `daemon.rs:834` (`mount-moved`), teste `busy_mount_point_falls_back_to_numbered_folder`. O padrão por e-mail depende de multi-conta |
-| Conteúdo da montagem | PARCIAL | `gdl-fs/src/layout.rs`: Meu Drive, lixeira, Lost and Found, Uploads cancelados, `.shortcut-targets-by-id`. Faltam `Drives compartilhados` e `Computadores` (README admite) |
+| Conteúdo da montagem | PARCIAL | `gdl-fs/src/layout.rs`: Meu Drive, Drives compartilhados, lixeira, Lost and Found, Uploads cancelados, `.shortcut-targets-by-id`. Falta `Computadores` (0.9) |
 | Nomes pelo idioma / `DisableLocalizedVirtualFolders` | PARCIAL | Nomes via i18n (`Layout::new`); a política está em `config.rs:116` mas não é lida (nunca força inglês) |
 | "Locais" do Dolphin (`ShowMountPointInSidebar`) | FEITO | `gdl-daemon/src/desktop.rs`, `daemon.rs:477` |
 | Modo Espelho (pasta real, inotify + changes.list) | FALTA | Só texto desabilitado em `ui/screens/preferences.js:151` ("Chega numa próxima versão"); sem inotify/watcher |
-| Drives compartilhados sempre em Stream | FALTA | Não há suporte a Drives compartilhados |
+| Drives compartilhados sempre em Stream | FEITO | Os drives ficam na montagem (`Node::SharedDrives`); não há modo Espelho para eles |
 | Troca Espelho <-> Stream com salvaguardas | FALTA | Depende do Espelho |
 | Sem limite de 4 GB | FEITO | Sem limite no FUSE; upload retomável (`uploads.rs`) |
 | Documentos Google como ponteiros, abrir no navegador, copiar cria atalho + aviso | FEITO | `gdl-common/src/gdocs.rs`, `gdl-engine/src/gdocs.rs`, `gdl-cli open-pointer`, `notify-shortcut-*` |
@@ -96,7 +96,7 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: o 
 | Detecção de ransomware (entropia, pausa, aviso com 3 opções) | FALTA | Nenhuma ocorrência de entropia/ransomware no código |
 | Limites do Drive em mensagens claras | PARCIAL | Cota cheia, limite diário de upload e sem permissão têm categoria e texto (`errors.rs`, `client.rs:120-123`). `DownloadQuotaExceeded` é mapeado mas sem mensagem própria. Faltam 100 níveis de pasta e 500 mil itens em Drive compartilhado |
 | Lista de erros: categorias, paginação, ações por item | FEITO | `ui/screens/errors.js` + `errors/model.js` (10 por página, Abrir pasta, Tentar de novo) |
-| Lista de erros: aviso de erros em outra conta + trocar de conta | FALTA | Depende de multi-conta |
+| Lista de erros: aviso de erros em outra conta + trocar de conta | PARCIAL | Avisos levam a conta (`Notification.account`) e o e-mail no corpo com mais de uma conta; a lista de erros ainda não avisa erros de outra conta |
 
 ### 6.5 Backup de pastas do computador e dispositivos
 
@@ -119,15 +119,15 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: o 
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Drives compartilhados aparecem na montagem | FALTA | `layout.rs` não tem a pasta; `gdl-drive/src/client.rs` sem `drives.list`/`supportsAllDrives` |
-| Tela "Gerenciar drives compartilhados" (ligar/desligar, salvar/cancelar) | FALTA | Não existe tela |
+| Drives compartilhados aparecem na montagem | FEITO | `layout.rs` (`Drives compartilhados/<nome>`), `client.rs` (`supportsAllDrives`, `drives`); nomes repetidos ganham o fim do id (`drive_dir_names`); testes `shared_drive_folder_lists_enabled_drives`, `same_named_drives_get_distinct_folders` |
+| Tela "Gerenciar drives compartilhados" (ligar/desligar, salvar/cancelar) | FEITO | `ui/screens/shared-drives.js` (Preferências e menu na pasta "Drives compartilhados"); desligar com envio pendente é recusado; e2e `shared_drives_screen_saves_and_creates` |
 | Aviso de drive com alta atividade | FALTA | Não existe |
-| Criar Drive compartilhado (tela e menu de contexto, nome único) | FALTA | Não existe (menu em `gdl-daemon/src/menu.rs` só cobre itens do Meu Drive) |
+| Criar Drive compartilhado (tela e menu de contexto, nome único) | FEITO | `CreateSharedDrive` (nome único com " (2)"), "Novo Drive compartilhado" na tela e no menu da pasta "Drives compartilhados"; teste `new_drive_names_are_unique` |
 | "Compartilhados comigo": lista com data | FEITO | `ipc SharedItem.shared_ms`, `ui/screens/home/shared.js`, `search.rs:74` |
-| "Adicionar atalho" no local escolhido | PARCIAL | `search.rs:80 add_shortcut` põe sempre no Meu Drive (`shortcut-added = Atalho adicionado ao Meu Drive`); não escolhe o local |
+| "Adicionar atalho" no local escolhido | FEITO | Tela `shortcut.js` (Meu Drive e drives que aceitam itens, descendo pelas pastas), aberta pelo menu e por "Compartilhados comigo"; teste `shortcut_goes_to_the_chosen_folder`, e2e `shortcut_screen_picks_a_folder` |
 | "Abrir na web" | FEITO | `shared.js:23` (`open_item` target `web`) |
-| Avisos ao mover entre Drives compartilhados/pastas compartilhadas (com "não mostrar de novo") | FALTA | Nenhum aviso de mudança de permissão no `fs.rs` rename |
-| Mover pasta do Meu Drive para Drive compartilhado: não suportado e orienta web | FALTA | Sem tratamento |
+| Avisos ao mover entre Drives compartilhados/pastas compartilhadas (com "não mostrar de novo") | PARCIAL | Mover arquivo para um drive avisa `moved-to-shared-drive` (família que pode ser desligada); falta o aviso ao mover para pastas compartilhadas por outras pessoas |
+| Mover pasta do Meu Drive para Drive compartilhado: não suportado e orienta web | FEITO | `Engine::move_item` (`FolderCrossDrive` → `EPERM`) e aviso `folder-move-unsupported`; teste `moving_a_folder_into_a_shared_drive_is_refused` |
 
 
 Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,main,hotkey}.rs`. Textos: `locales/*/{main,ui}.ftl`.
@@ -140,8 +140,8 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | "Última sincronização há…" | FEITO | `home/model.js` `lastSync` |
 | Botão Pausar/Retomar | FEITO | `home.js` `togglePause` |
 | Campo "Pesquisar no Google Drive" | FEITO | `home.js` `layout` (input `.search`, Enter abre tela `search`) |
-| Menu da conta: foto + uso de armazenamento | FEITO (1 conta) | `home/account.js` `accountMenu` (avatar, nome, e-mail, uso/total) |
-| Adicionar conta / trocar de conta | FALTA | Sem código multi-conta; `accountMenu` só tem Gerenciar armazenamento, Desconectar, Privacidade, Termos. `tray/main.rs:139` passa contas = 0 ou 1 |
+| Menu da conta: foto + uso de armazenamento | FEITO | `home/account.js` `accountMenu` (avatar, nome, e-mail, uso/total) |
+| Adicionar conta / trocar de conta | FEITO | `home/account.js` (lista com foto, e-mail e estado; trocar; adicionar); e2e `account_menu_switches_and_adds_accounts` |
 | Desconectar | FEITO | `home/disconnect.js` (com escolhas p/ pendências) |
 | Gerenciar armazenamento, Privacidade, Termos | FEITO | `account.js` (`openLink('storage'/'privacy'/'terms')`) |
 | Início: cartão Precisa de atenção | FEITO | `home/start.js` `attention` |
@@ -163,7 +163,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Mais opções: registro detalhado liga/desliga | FALTA | Ausente |
 | Mais opções: gerar informações de diagnóstico | FALTA | Ausente (grep sem resultado) |
 | Mais opções: Redefinir preferências | FEITO | `more.js` `reset` -> `reset_preferences` |
-| Mais opções: Desconectar todas as contas | PARCIAL | Só "Desconectar" (conta única, `more.js`) |
+| Mais opções: Desconectar todas as contas | FEITO | `more.js` `disconnect-all` → `logout_all`, com o fluxo de desconexão |
 | Mais opções: Sair com confirmação se sincronizando | FEITO | `more.js` `quit` |
 | Extra (fora da spec): preferências de notificação | FEITO | `more.js` + `notification-settings.js` |
 | Atalho de teclado que foca o painel de status | FEITO | `home.js` `wire`: Ctrl+Shift+Alt+G -> `ui.header.focus()` |
@@ -175,7 +175,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | StatusNotifierItem via ksni | FEITO | `gdl-tray/src/main.rs` (impl `ksni::Tray`) |
 | Ícones: sincronizado, sincronizando (animado), erro, pausado, sem internet, sem login | FEITO | `tray/model.rs` `SYNC_ICONS`/`STILL_ICONS`; SVGs `assets/icons/hicolor/scalable/status/gdl-*.svg`; `animated()`/`icon_at` |
 | Tooltips: Tudo sincronizado, Sincronizando N, Sem internet (N), Pausado (N), Armazenamento cheio, Não fez login | FEITO | `model.rs` `from_status`; `main.ftl` tray-* |
-| Tooltip "Conectado com N contas" | PARCIAL | Chave `tray-accounts` e ramo `accounts > 1` existem, mas `main.rs:139` passa só 0/1 (sem multi-conta) |
+| Tooltip "Conectado com N contas" | FEITO | `tray/model.rs` (`status.accounts.len() > 1`) |
 | Clique esquerdo abre a janela principal | FEITO | `model.rs` `click: Action::Open("home")` (sem login: onboarding) |
 | Menu direito: Abrir pasta, Abrir no navegador, Pesquisar, Pausar/Retomar | FEITO | `model.rs` `items` |
 | Menu direito: Arquivos off-line, Lista de erros (contagem), Preferências, Sobre, Sair | FEITO | `model.rs` `items` |
@@ -193,7 +193,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Sugestões recentes com campo vazio | FEITO | `search.js` `ask` -> `recent_items`; `search-recent` |
 | Mensagem "Nenhum item corresponde a…" | FEITO | `search.js` `search-none` |
 | Abrir resultado pela montagem (arquivo ou pasta) | FEITO | `search.js` `open` -> `open_item target:'file'` |
-| "Na conta selecionada" | PARCIAL | Só há uma conta |
+| "Na conta selecionada" | FEITO | `api.call` leva a conta mostrada (`state.js` `currentAccount`) |
 
 ### 6.10 Preferências
 
@@ -249,13 +249,13 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Compartilhar | FEITO | `Action::Share` abre a janela `share:<id>` (`ui/screens/share.js`). |
 | Copiar link (com aviso público/domínio/restrito) | FEITO | `Action::CopyLink` + `notify_link_copied` (`daemon/sharing.rs`, textos `notify-link-*`). |
 | Acesso off-line / Somente on-line (marca mista) | FEITO | `menu.rs:44-46,103-111` (`Offline::Mixed`), plugin Dolphin `gdrivemenu.cpp:93`. |
-| Adicionar atalho ao Google Drive | PARCIAL | Método D-Bus `add_shortcut` existe (`dbus.rs:161`, tela "Compartilhados"), mas não está no menu do botão direito. |
+| Adicionar atalho ao Google Drive | FEITO | `menu.rs` `Action::AddShortcut` (itens que não são atalhos) abre a tela `shortcut` |
 | Gerenciar versões | FEITO | `Action::Versions` abre a janela `versions:<id>` (só arquivos com versões). |
 | Ver lixeira | FEITO | `Action::Trash` (`menu.rs:51,153`). |
 | Atualizar pasta | FEITO | `Action::Refresh`. |
 | Enviar ou sincronizar esta pasta (fora da montagem) | FALTA | Sem ação; backup/sincronização de pastas é 🔜 no README. |
 | Adicionar ao espelho da conta 1–4 | FALTA | Sem modo espelho nem várias contas. |
-| Gerenciar / Criar drive compartilhado | FALTA | Sem Drives compartilhados (README 🔜). |
+| Gerenciar / Criar drive compartilhado | FEITO | `menu.rs` `NewSharedDrive`/`ManageSharedDrives` na pasta "Drives compartilhados" |
 | Criar novo documento, planilha, apresentação | FEITO | `Action::NewDocument/NewSpreadsheet/NewPresentation`, `menu.rs:47-49,67-77`. |
 | Perguntar ao Gemini (web) | FALTA | Nenhuma ação no menu (só cartão Gemini na janela principal). |
 | Miniaturas sem baixar (thumbnailLink) | FEITO | `crates/gdl-engine/src/thumbs/{seeder,freedesktop}.rs` (semeia o cache freedesktop com o `thumbnailLink`; não é um thumbnailer KIO próprio). |
@@ -312,7 +312,7 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | ContentCacheMaxKbytes | FEITO | `engine.rs:168`. |
 | DefaultMountPoint | FEITO | `daemon.rs:1032-1035`, `mount.rs`. |
 | DefaultWebBrowser | FEITO | `gdl-common/src/browser.rs`, `config.rs:204`. |
-| DisableAddAccount | FALTA | Só lida em `config.rs:113`; sem consumidor (e sem várias contas). |
+| DisableAddAccount | FEITO | `begin_login` e `can_add_account` |
 | DisableExternalMediaSync | FALTA | Sem consumidor. |
 | DisableLocalizedVirtualFolders | FALTA | Sem consumidor. |
 | DisableMirroredMyDrive | FALTA | Sem consumidor (sem espelho). |

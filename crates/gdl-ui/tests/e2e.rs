@@ -1037,12 +1037,19 @@ async fn screenshots_for_the_readme() {
         ("preferences", "p.path", "Google Drive", "preferencias"),
         ("about", ".about-version", "0.", "sobre"),
         ("uninstall", ".uninstall", "", "desinstalar"),
+        (
+            "shared-drives",
+            ".drive-list",
+            "Equipe",
+            "drives-compartilhados",
+        ),
     ] {
         let session = Session::open(screen).await;
         session.wait_text(css, wanted).await;
         save(&session, name).await;
     }
     let (report, notes) = (item_id("relatório.pdf").await, item_id("notas.txt").await);
+    let sheet = item_id("Planilha.gsheet").await;
     for (screen, css, wanted, name) in [
         (
             format!("share:{report}"),
@@ -1055,6 +1062,12 @@ async fn screenshots_for_the_readme() {
             ".version-list",
             "Atual",
             "versoes",
+        ),
+        (
+            format!("shortcut:{sheet}"),
+            ".folder-list",
+            "Equipe",
+            "adicionar-atalho",
         ),
     ] {
         let session = Session::open(&screen).await;

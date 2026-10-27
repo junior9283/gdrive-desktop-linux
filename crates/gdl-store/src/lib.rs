@@ -231,6 +231,16 @@ impl Store {
         Ok(found)
     }
 
+    /// `parent` tem alguma subpasta fora da lixeira.
+    pub fn has_subfolders(&self, parent: &ItemId) -> Result<bool> {
+        let found = self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM items WHERE parent = ?1 AND trashed = 0 AND kind = 'folder')",
+            [&parent.0],
+            |r| r.get(0),
+        )?;
+        Ok(found)
+    }
+
     pub fn trashed(&self) -> Result<Vec<Item>> {
         self.query_items(select_items!("WHERE trashed = 1 ORDER BY local_name"), [])
     }

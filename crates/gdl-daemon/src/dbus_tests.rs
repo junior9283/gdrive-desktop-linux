@@ -675,10 +675,14 @@ async fn shared_with_me_lists_and_adds_shortcut() {
     };
     assert!(!exists().await);
 
-    h.proxy.add_shortcut("", &shared).await.unwrap();
+    h.proxy.add_shortcut("", &shared, "").await.unwrap();
 
     assert!(exists().await, "o atalho aparece no Meu Drive");
-    let err = h.proxy.add_shortcut("", "nao-existe").await.unwrap_err();
+    let err = h
+        .proxy
+        .add_shortcut("", "nao-existe", "")
+        .await
+        .unwrap_err();
     assert_eq!(err.short_name(), "NotFound", "{err}");
 }
 
@@ -1134,8 +1138,8 @@ async fn menu_shows_only_inside_my_drive_with_offline_marks() {
 
     let file_menu = h.proxy.menu(&[&path("Pasta/a.txt")]).await.unwrap();
     assert_eq!(
-        ids(&file_menu)[..4],
-        ["open-web", "share", "copy-link", "versions"]
+        ids(&file_menu)[..5],
+        ["open-web", "share", "copy-link", "add-shortcut", "versions"]
     );
     assert_eq!(state(&file_menu, "offline"), "on");
     assert_eq!(state(&file_menu, "online-only"), "off");
@@ -1235,7 +1239,7 @@ async fn menu_actions_link_pin_create_refresh_and_trash() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn menu_opens_share_versions_and_office_editor() {
+async fn menu_opens_share_versions_shortcut_and_office_editor() {
     let h = Harness::new().await;
     let id = h
         .fake
@@ -1247,14 +1251,15 @@ async fn menu_opens_share_versions_and_office_editor() {
     assert_eq!(ids[..2], ["open-web", "open-sheets"]);
     let before = h.opened().len();
 
-    for action in ["share", "versions", "open-sheets"] {
+    for action in ["share", "versions", "add-shortcut", "open-sheets"] {
         h.proxy.menu_action(action, &[&path]).await.unwrap();
     }
-    wait_until("três aberturas", || h.opened().len() == before + 3).await;
+    wait_until("quatro aberturas", || h.opened().len() == before + 4).await;
     let opened = h.opened().split_off(before);
     for wanted in [
         format!("--open share:{}/{id}", h.fake.email()),
         format!("--open versions:{}/{id}", h.fake.email()),
+        format!("--open shortcut:{}/{id}", h.fake.email()),
         format!("https://docs.google.com/spreadsheets/d/{id}/edit?rtpof=true"),
     ] {
         assert!(opened.contains(&wanted), "{wanted} em {opened:?}");
@@ -2001,6 +2006,39 @@ fn in_team(mount: &std::path::Path, path: &str) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shortcut_goes_to_the_chosen_folder() {
+    let h = Harness::new().await;
+    let plan = team_drive(&h);
+    h.logged_in().await;
+    h.logged_in_as(ANA).await;
+
+    // No alto, o Meu Drive (com o nome da pasta da montagem) e o Drive compartilhado.
+    let roots = h.proxy.folders(ANA, "").await.unwrap();
+    let names: Vec<_> = roots.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Meu Drive", "Equipe"]);
+    assert!(roots[1].has_children);
+    let inside = h.proxy.folders(ANA, &roots[1].id).await.unwrap();
+    let names: Vec<_> = inside.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Planos"]);
+
+    h.proxy
+        .add_shortcut(ANA, &plan, &roots[1].id)
+        .await
+        .unwrap();
+
+    let path = h
+        .mount_of(ANA)
+        .join("Drives compartilhados/Equipe/plano.txt");
+    assert!(
+        blocking(move || path.symlink_metadata().is_ok()).await,
+        "o atalho na pasta escolhida, na montagem da conta pedida"
+    );
+    // Só pasta é destino.
+    let err = h.proxy.add_shortcut(ANA, &plan, &plan).await.unwrap_err();
+    assert_eq!(err.short_name(), "NotFound", "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn menu_works_inside_a_shared_drive() {
     let h = Harness::new().await;
     let file = team_drive(&h);
@@ -2015,7 +2053,10 @@ async fn menu_works_inside_a_shared_drive() {
     let folder_menu = h.proxy.menu(&[&folder]).await.unwrap();
 
     let ids: Vec<_> = file_menu.iter().map(|e| e.id.as_str()).collect();
-    assert_eq!(ids[..4], ["open-web", "share", "copy-link", "versions"]);
+    assert_eq!(
+        ids[..5],
+        ["open-web", "share", "copy-link", "add-shortcut", "versions"]
+    );
     assert!(folder_menu.iter().any(|e| e.id == "new-document"));
     // A raiz do drive também é uma pasta do menu; a pasta virtual que os reúne tem o menu dela.
     let team = in_team(&mount, "");

@@ -148,10 +148,12 @@ window-uninstall = Desinstalar o Google Drive
 window-share = Compartilhar
 window-versions = Gerenciar versões
 window-shared-drives = Drives compartilhados
+window-shortcut = Adicionar atalho ao Drive
 
 ## Menu "Google Drive" do botão direito nos gerenciadores de arquivos.
 menu-open-web = Abrir no navegador
 menu-copy-link = Copiar link
+menu-add-shortcut = Adicionar atalho ao Drive
 menu-open-docs = Abrir com Documentos Google
 menu-open-sheets = Abrir com Planilhas Google
 menu-open-slides = Abrir com Apresentações Google

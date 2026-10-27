@@ -24,6 +24,8 @@ pub enum Action {
     NewPresentation,
     Refresh,
     Trash,
+    /// Abre a tela de escolher a pasta do atalho.
+    AddShortcut,
     /// Só na pasta "Drives compartilhados": abre a tela para criar um Drive.
     NewSharedDrive,
     /// Só na pasta "Drives compartilhados": abre a tela de ligar e desligar os Drives.
@@ -37,7 +39,7 @@ pub struct NewFile {
 }
 
 impl Action {
-    pub const ALL: [Action; 16] = [
+    pub const ALL: [Action; 17] = [
         Action::OpenWeb,
         Action::OpenDocs,
         Action::OpenSheets,
@@ -54,7 +56,18 @@ impl Action {
         Action::Trash,
         Action::NewSharedDrive,
         Action::ManageSharedDrives,
+        Action::AddShortcut,
     ];
+
+    /// A tela que a ação abre para o item escolhido (`<tela>:<conta>/<id>`), se abrir uma.
+    pub fn screen(self) -> Option<&'static str> {
+        match self {
+            Action::Share => Some("share"),
+            Action::Versions => Some("versions"),
+            Action::AddShortcut => Some("shortcut"),
+            _ => None,
+        }
+    }
 
     /// `(id, chave do rótulo)`.
     fn names(self) -> (&'static str, &'static str) {
@@ -73,6 +86,7 @@ impl Action {
             Action::NewPresentation => ("new-presentation", "menu-new-presentation"),
             Action::Refresh => ("refresh", "menu-refresh"),
             Action::Trash => ("trash", "menu-trash"),
+            Action::AddShortcut => ("add-shortcut", "menu-add-shortcut"),
             Action::NewSharedDrive => ("new-shared-drive", "menu-new-shared-drive"),
             Action::ManageSharedDrives => ("manage-shared-drives", "menu-manage-shared-drives"),
         }
@@ -137,6 +151,8 @@ impl Action {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Picked {
     pub is_folder: bool,
+    /// Atalho para outro item: não ganha atalho dele mesmo.
+    pub is_shortcut: bool,
     /// Tem endereço na web (itens ainda não enviados não têm).
     pub has_link: bool,
     /// Arquivo comum já no Drive, com versões guardadas (pastas e documentos Google não têm).
@@ -189,6 +205,9 @@ pub fn entries(picked: &[Picked]) -> Vec<(Option<Action>, &'static str)> {
         list.push((Some(Action::OpenWeb), ""));
         list.extend(p.editor.map(|e| (Some(Action::open_with(e)), "")));
         list.extend([(Some(Action::Share), ""), (Some(Action::CopyLink), "")]);
+        if !p.is_shortcut {
+            list.push((Some(Action::AddShortcut), ""));
+        }
         if p.has_versions {
             list.push((Some(Action::Versions), ""));
         }
@@ -221,6 +240,7 @@ mod tests {
 
     const FILE: Picked = Picked {
         is_folder: false,
+        is_shortcut: false,
         has_link: true,
         has_versions: true,
         editor: None,
@@ -251,6 +271,7 @@ mod tests {
                 "open-web",
                 "share",
                 "copy-link",
+                "add-shortcut",
                 "versions",
                 "-",
                 "offline",
@@ -275,6 +296,18 @@ mod tests {
         );
         let folder = ids(&entries(&[FOLDER]));
         assert!(folder.contains(&"share") && !folder.contains(&"versions"));
+    }
+
+    #[test]
+    fn a_shortcut_offers_no_shortcut_of_itself() {
+        let shortcut = Picked {
+            is_shortcut: true,
+            has_versions: false,
+            ..FILE
+        };
+        assert!(!ids(&entries(&[shortcut])).contains(&"add-shortcut"));
+        assert!(ids(&entries(&[FOLDER])).contains(&"add-shortcut"));
+        assert!(!ids(&entries(&[FILE, FILE])).contains(&"add-shortcut"));
     }
 
     #[test]

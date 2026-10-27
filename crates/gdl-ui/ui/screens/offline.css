@@ -51,18 +51,6 @@
   border: 1px solid var(--md-outline-variant);
 }
 
-.crumbs {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.crumbs button:disabled {
-  color: var(--md-on-surface);
-  opacity: 1;
-}
-
 .offline .items {
   flex: 1;
   overflow-y: auto;

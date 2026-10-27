@@ -75,6 +75,19 @@ button.filled:hover {
   gap: 8px;
 }
 
+/* A trilha de pastas (`crumbs`). */
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.crumbs button:disabled {
+  color: var(--md-on-surface);
+  opacity: 1;
+}
+
 /* Rodapé de Cancelar e Salvar (`saveFooter`) e a linha de erro de um campo. */
 .save-footer {
   align-items: center;
@@ -286,6 +299,34 @@ select:disabled {
   background: var(--md-on-surface);
   color: var(--md-surface);
   z-index: 20;
+}
+
+/* Tela de escolha numa lista (Drives compartilhados, Adicionar atalho): o texto e a lista (que
+   rola, `.pick-list`) no alto, o rodapé com os botões embaixo. */
+.pick-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.pick-screen main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 24px;
+}
+
+.pick-screen h1,
+.pick-screen main > p {
+  margin: 0;
+}
+
+.pick-list {
+  flex: 1;
+  overflow: auto;
+  min-height: 64px;
 }
 
 /* Listas de itens (nome cortado com reticências) e paginação. */

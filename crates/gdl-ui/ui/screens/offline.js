@@ -2,7 +2,7 @@
 // off-line pasta a pasta (com o caminho de volta no alto), "Remover acesso off-line" por item e
 // as ações de cache. A lógica da barra fica em `offline/model.js`.
 
-import { attempt, confirmDialog, el, icon, stylesheet, toast } from '../components.js';
+import { attempt, confirmDialog, crumbs, el, stylesheet, toast } from '../components.js';
 import { formatSize } from '../format.js';
 import { segments } from './offline/model.js';
 
@@ -72,14 +72,8 @@ function drawUsage(summary) {
 
 // "Arquivos off-line › Pasta › Subpasta": cada parte volta para aquela pasta.
 function drawCrumbs() {
-  const { t } = screen.ctx;
-  const steps = [{ id: '', name: t('offline-title') }, ...screen.trail];
-  screen.crumbs.replaceChildren(...steps.flatMap((step, i) => {
-    const last = i === steps.length - 1;
-    const button = el('button', { class: 'text', 'aria-current': last ? 'location' : false, disabled: last }, step.name);
-    button.addEventListener('click', () => go(screen.trail.slice(0, i)));
-    return i ? [icon('chevron_right'), button] : [button];
-  }));
+  const steps = [{ name: screen.ctx.t('offline-title') }, ...screen.trail];
+  screen.crumbs.replaceChildren(...crumbs(steps, (i) => go(screen.trail.slice(0, i))));
 }
 
 function go(trail) {

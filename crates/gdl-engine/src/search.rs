@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use gdl_drive::client::{SEARCH_LIMIT, SharedFile};
-use gdl_store::{Inode, Item, ItemId};
+use gdl_store::{Inode, Item, ItemId, ItemKind};
 
 use crate::engine::Engine;
 use crate::{EngineError, Result};
@@ -76,17 +76,78 @@ impl Engine {
         Ok(self.client.shared_with_me().await?)
     }
 
-    /// "Adicionar atalho ao Drive" de um item compartilhado: o atalho vai para a raiz do Meu
-    /// Drive, com o nome do item.
-    pub async fn add_shortcut(&self, target: &ItemId) -> Result<Item> {
+    /// "Adicionar atalho ao Drive": o atalho para `target`, com o nome dele, vai para `folder` (uma
+    /// pasta da montagem onde a conta pode criar) ou, sem ela, para a raiz do Meu Drive.
+    pub async fn add_shortcut(&self, target: &ItemId, folder: Option<&ItemId>) -> Result<Item> {
+        let folder = match folder {
+            Some(id) => self
+                .store
+                .get(id)?
+                .filter(|f| self.takes_shortcuts(f).unwrap_or(false))
+                .ok_or(EngineError::NotFound)?,
+            None => self.my_drive_root()?,
+        };
         let remote = self.client.get(&target.0).await?;
-        let root = self
-            .store
-            .by_inode(Inode::ROOT)?
-            .ok_or(EngineError::NotIndexed)?;
         let name = gdl_common::names::to_local(&remote.name);
-        self.create_shortcut(&root.id, &name, target).await
+        self.create_shortcut(&folder.id, &name, target).await
     }
+
+    /// As pastas de "Adicionar atalho": sem `parent`, o Meu Drive (sem nome: quem mostra dá o
+    /// dele) e os Drives compartilhados ligados que aceitam itens novos; com ele, as subpastas.
+    pub fn shortcut_folders(&self, parent: Option<&ItemId>) -> Result<Vec<FolderChoice>> {
+        let folders = match parent {
+            None => {
+                let my_drive = self.my_drive_root()?;
+                let drives = self.store.enabled_drive_roots()?.into_iter();
+                std::iter::once((None, my_drive))
+                    .chain(
+                        drives
+                            .filter(|(_, root)| root.can_edit)
+                            .map(|(name, root)| (Some(name), root)),
+                    )
+                    .collect()
+            }
+            Some(parent) => self
+                .store
+                .children(parent)?
+                .into_iter()
+                .filter(|f| f.kind == ItemKind::Folder)
+                .map(|f| (Some(f.local_name.clone()), f))
+                .collect::<Vec<_>>(),
+        };
+        folders
+            .into_iter()
+            .map(|(name, folder)| {
+                Ok(FolderChoice {
+                    has_children: self.store.has_subfolders(&folder.id)?,
+                    id: folder.id,
+                    name,
+                })
+            })
+            .collect()
+    }
+
+    fn my_drive_root(&self) -> Result<Item> {
+        self.store
+            .by_inode(Inode::ROOT)?
+            .ok_or(EngineError::NotIndexed)
+    }
+
+    /// Pasta da montagem, fora da lixeira, onde a conta pode criar.
+    fn takes_shortcuts(&self, folder: &Item) -> Result<bool> {
+        Ok(folder.kind == ItemKind::Folder
+            && !folder.trashed
+            && folder.can_edit
+            && self.store.path_of(&folder.id)?.is_some())
+    }
+}
+
+/// Uma pasta de destino de "Adicionar atalho"; `name` `None` é o Meu Drive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderChoice {
+    pub id: ItemId,
+    pub name: Option<String>,
+    pub has_children: bool,
 }
 
 #[cfg(test)]
@@ -205,7 +266,10 @@ mod tests {
         let (engine, _tmp) = indexed_engine(&fake).await;
         assert_eq!(engine.shared_with_me().await.unwrap()[0].owner, "Ana Souza");
 
-        let shortcut = engine.add_shortcut(&ItemId(shared.clone())).await.unwrap();
+        let shortcut = engine
+            .add_shortcut(&ItemId(shared.clone()), None)
+            .await
+            .unwrap();
 
         assert_eq!(shortcut.local_name, "Orçamento.xlsx");
         assert_eq!(shortcut.parent, Some(ItemId(fake.root_id())));
@@ -213,6 +277,77 @@ mod tests {
             fake.find_live("Orçamento.xlsx").len(),
             2,
             "o original e o atalho"
+        );
+    }
+
+    #[tokio::test]
+    async fn shortcut_goes_to_the_chosen_folder() {
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let shared = fake.add_shared_file("Orçamento.xlsx", "Ana Souza", b"x".to_vec());
+        let plans = fake.add_folder(&fake.root_id(), "Planos");
+        let notes = fake.add_file(&fake.root_id(), "notas.txt", b"n".to_vec());
+        let locked = fake.add_folder(&fake.root_id(), "Fechada");
+        fake.make_read_only(&locked);
+        let (engine, _tmp) = indexed_engine(&fake).await;
+
+        let shortcut = engine
+            .add_shortcut(&ItemId(shared), Some(&ItemId(plans.clone())))
+            .await
+            .unwrap();
+
+        assert_eq!(shortcut.parent, Some(ItemId(plans)));
+        // Só pasta é destino.
+        let refused = engine
+            .add_shortcut(&ItemId(notes.clone()), Some(&ItemId(notes.clone())))
+            .await
+            .unwrap_err();
+        assert!(matches!(refused, EngineError::NotFound), "{refused}");
+        // Nem pasta onde a conta não pode criar.
+        let refused = engine
+            .add_shortcut(&ItemId(notes), Some(&ItemId(locked)))
+            .await
+            .unwrap_err();
+        assert!(matches!(refused, EngineError::NotFound), "{refused}");
+    }
+
+    #[tokio::test]
+    async fn shortcut_folders_are_my_drive_and_the_drives_that_take_new_items() {
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let plans = fake.add_folder(&fake.root_id(), "Planos");
+        fake.add_folder(&plans, "2026");
+        let empty = fake.add_folder(&fake.root_id(), "Vazia");
+        fake.add_file(&empty, "só arquivo.txt", b"a".to_vec());
+        fake.add_file(&fake.root_id(), "notas.txt", b"n".to_vec());
+        let ana = fake.add_account("ana@example.com");
+        let team = ana.add_shared_drive("Equipe");
+        let read_only = ana.add_shared_drive("Arquivo");
+        for drive in [&team, &read_only] {
+            fake.share_drive(drive, &fake.email());
+        }
+        fake.set_drive_can_add_children(&read_only, false);
+        let (engine, _tmp) = indexed_engine(&fake).await;
+
+        let roots = engine.shortcut_folders(None).unwrap();
+        let named: Vec<_> = roots.iter().map(|f| f.name.as_deref()).collect();
+        assert_eq!(named, [None, Some("Equipe")], "Meu Drive primeiro");
+        assert_eq!(roots[0].id, ItemId(fake.root_id()));
+
+        let inside = engine.shortcut_folders(Some(&roots[0].id)).unwrap();
+        assert_eq!(
+            inside,
+            [
+                FolderChoice {
+                    id: ItemId(plans),
+                    name: Some("Planos".into()),
+                    has_children: true,
+                },
+                FolderChoice {
+                    id: ItemId(empty),
+                    name: Some("Vazia".into()),
+                    has_children: false,
+                },
+            ],
+            "só pastas; a seta só onde há subpasta"
         );
     }
 }

@@ -119,7 +119,13 @@ offline-manage = Manage offline files
 shared-empty = Nothing has been shared with you.
 shared-by = { $owner } · { $date }
 shared-add-shortcut = Add shortcut to Drive
-shortcut-added = Shortcut added to My Drive
+shortcut-title = Add shortcut to Drive
+shortcut-text = Choose the folder for the shortcut. The item stays where it is; the shortcut only points to it.
+shortcut-places = Places
+shortcut-no-subfolders = This folder has no subfolders.
+shortcut-no-places = There is no folder where this account can create the shortcut.
+shortcut-add = Add shortcut
+shortcut-missing = No item to create the shortcut for.
 
 notifications-empty = No notifications.
 notification-dismiss = Dismiss

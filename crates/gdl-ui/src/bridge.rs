@@ -169,7 +169,10 @@ impl Bridge {
             "open_item" => j!(s.open_item(a.account(), a.str("item_id")?, a.str("target")?)),
             "web_link" => j!(s.web_link(a.account(), a.str("item_id")?)),
             "shared_with_me" => j!(s.shared_with_me(a.account())),
-            "add_shortcut" => j!(s.add_shortcut(a.account(), a.str("item_id")?)),
+            "add_shortcut" => {
+                j!(s.add_shortcut(a.account(), a.str("item_id")?, a.str_or_empty("folder_id")))
+            }
+            "folders" => j!(s.folders(a.account(), a.str_or_empty("parent_id"))),
             "sharing" => j!(s.sharing(a.account(), a.str("item_id")?)),
             "share_add" => j!(s.share_add(
                 a.account(),

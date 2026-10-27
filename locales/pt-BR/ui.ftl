@@ -119,7 +119,13 @@ offline-manage = Gerenciar arquivos off-line
 shared-empty = Nenhum item foi compartilhado com você.
 shared-by = { $owner } · { $date }
 shared-add-shortcut = Adicionar atalho ao Drive
-shortcut-added = Atalho adicionado ao Meu Drive
+shortcut-title = Adicionar atalho ao Drive
+shortcut-text = Escolha a pasta onde o atalho vai ficar. O item continua onde está; o atalho só aponta para ele.
+shortcut-places = Locais
+shortcut-no-subfolders = Esta pasta não tem subpastas.
+shortcut-no-places = Não há pasta onde esta conta possa criar o atalho.
+shortcut-add = Adicionar atalho
+shortcut-missing = Nenhum item para criar o atalho.
 
 notifications-empty = Nenhuma notificação.
 notification-dismiss = Dispensar

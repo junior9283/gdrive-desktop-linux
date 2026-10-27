@@ -299,6 +299,15 @@ pub struct SharedDriveItem {
     pub enabled: bool,
 }
 
+/// Uma pasta de destino de "Adicionar atalho ao Drive" (`Folders`).
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct FolderItem {
+    pub id: String,
+    pub name: String,
+    /// Tem subpastas (a tela mostra a seta para entrar).
+    pub has_children: bool,
+}
+
 /// Um item do menu "Google Drive" do botão direito (`Menu`), na ordem de exibição.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct MenuEntry {
@@ -428,8 +437,16 @@ pub trait Service {
     fn open_item(&self, account: &str, item_id: &str, target: &str) -> Result<(), ServiceError>;
     fn web_link(&self, account: &str, item_id: &str) -> Result<String, ServiceError>;
     fn shared_with_me(&self, account: &str) -> Result<Vec<SharedItem>, ServiceError>;
-    /// Cria no Meu Drive um atalho para o item compartilhado.
-    fn add_shortcut(&self, account: &str, item_id: &str) -> Result<(), ServiceError>;
+    /// Cria um atalho para o item na pasta `folder_id` (vazio = a raiz do Meu Drive).
+    fn add_shortcut(
+        &self,
+        account: &str,
+        item_id: &str,
+        folder_id: &str,
+    ) -> Result<(), ServiceError>;
+    /// As pastas onde um atalho pode ir: com `parent_id` vazio, o Meu Drive e os Drives
+    /// compartilhados que aceitam itens novos; senão, as subpastas dele.
+    fn folders(&self, account: &str, parent_id: &str) -> Result<Vec<FolderItem>, ServiceError>;
     /// Quem tem acesso ao item.
     fn sharing(&self, account: &str, item_id: &str) -> Result<Sharing, ServiceError>;
     /// Dá acesso às pessoas (`emails`) com o papel; `notify` manda o aviso com a mensagem.

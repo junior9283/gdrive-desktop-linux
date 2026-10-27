@@ -1,6 +1,8 @@
-// Compartilhados comigo: quem compartilhou e quando, com "Adicionar atalho" e "Abrir na web".
+// Compartilhados comigo: quem compartilhou e quando, com "Adicionar atalho" (a tela de escolher a
+// pasta) e "Abrir na web".
 
-import { attempt, el, toast } from '../../components.js';
+import { attempt, el } from '../../components.js';
+import { currentAccount } from '../../state.js';
 
 export async function render({ api, t, locale }) {
   const items = await api.call('shared_with_me');
@@ -17,8 +19,8 @@ export async function render({ api, t, locale }) {
           el('span', { class: 'name' }, item.name),
           el('span', { class: 'meta' }, t('shared-by', { owner: item.owner, date: date.format(item.shared_ms) }))),
         el('div', { class: 'row-actions' },
-          el('button', { class: 'text', onclick: () =>
-            attempt(api.call('add_shortcut', { item_id: item.id }), () => toast(t('shortcut-added'))) }, t('shared-add-shortcut')),
+          el('button', { class: 'text add-shortcut', onclick: () =>
+            api.openScreen('shortcut', `${currentAccount()}/${item.id}`) }, t('shared-add-shortcut')),
           el('button', { class: 'text', onclick: () =>
             attempt(api.call('open_item', { item_id: item.id, target: 'web' })) }, t('row-open-web'))),
       ),

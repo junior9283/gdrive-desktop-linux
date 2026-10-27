@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
-    AccountInfo, ActivityItem, MenuEntry, NotificationItem, NotificationSetting, OfflineEntry,
-    OfflineSummary, Pref, SearchResult, ServiceError, SharedDriveItem, SharedItem, Sharing, Status,
-    SyncErrorItem, Versions,
+    AccountInfo, ActivityItem, FolderItem, MenuEntry, NotificationItem, NotificationSetting,
+    OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError, SharedDriveItem, SharedItem,
+    Sharing, Status, SyncErrorItem, Versions,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -170,9 +170,24 @@ impl Service {
         self.daemon.shared_with_me(account).await
     }
 
-    /// Cria no Meu Drive um atalho para o item compartilhado.
-    async fn add_shortcut(&self, account: &str, item_id: &str) -> Result<(), ServiceError> {
-        self.daemon.add_shortcut(account, item_id).await
+    /// Cria um atalho para o item na pasta `folder_id` (vazio = a raiz do Meu Drive).
+    async fn add_shortcut(
+        &self,
+        account: &str,
+        item_id: &str,
+        folder_id: &str,
+    ) -> Result<(), ServiceError> {
+        self.daemon.add_shortcut(account, item_id, folder_id).await
+    }
+
+    /// As pastas onde um atalho pode ir: com `parent_id` vazio, o Meu Drive e os Drives
+    /// compartilhados que aceitam itens novos; senão, as subpastas dele.
+    async fn folders(
+        &self,
+        account: &str,
+        parent_id: &str,
+    ) -> Result<Vec<FolderItem>, ServiceError> {
+        self.daemon.folders(account, parent_id).await
     }
 
     async fn sharing(&self, account: &str, item_id: &str) -> Result<Sharing, ServiceError> {

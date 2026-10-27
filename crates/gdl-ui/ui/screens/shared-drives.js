@@ -28,10 +28,10 @@ function draw() {
   const { t } = screen.ctx;
   const ui = screen.ui;
   ui.error = el('p', { class: 'field-error', role: 'alert' });
-  ui.list = el('ul', { class: 'list drive-list' });
+  ui.list = el('ul', { class: 'list pick-list drive-list' });
   ui.footer = saveFooter(t, { onSave: save, onCancel: reset });
   screen.root.replaceChildren(
-    el('div', { class: 'shared-drives' },
+    el('div', { class: 'pick-screen shared-drives' },
       el('main', {},
         el('h1', {}, t('shared-drives-title')),
         el('p', { class: 'meta' }, t('shared-drives-text')),

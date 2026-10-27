@@ -148,10 +148,12 @@ window-uninstall = Uninstall Google Drive
 window-share = Share
 window-versions = Manage versions
 window-shared-drives = Shared drives
+window-shortcut = Add shortcut to Drive
 
 ## The "Google Drive" right-click menu in file managers.
 menu-open-web = Open in browser
 menu-copy-link = Copy link
+menu-add-shortcut = Add shortcut to Drive
 menu-open-docs = Open with Google Docs
 menu-open-sheets = Open with Google Sheets
 menu-open-slides = Open with Google Slides

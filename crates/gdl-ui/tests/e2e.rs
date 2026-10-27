@@ -898,6 +898,40 @@ async fn shared_drives_screen_saves_and_creates() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn shortcut_screen_picks_a_folder() {
+    let service = service().await;
+    let id = item_id("Planilha.gsheet").await;
+    let session = Session::open(&format!("shortcut:{id}")).await;
+    let places = session.wait_text(".folder-list", "Equipe").await;
+    assert!(places.contains("Meu Drive"), "{places}");
+    let blocked = session
+        .eval("return document.querySelector('.add').disabled")
+        .await;
+    assert_eq!(
+        blocked,
+        json!(true),
+        "na lista de locais não há pasta escolhida"
+    );
+
+    // Entra no Drive compartilhado (sem subpastas) e cria o atalho nele.
+    session.click(".folder-list li:last-child .folder").await;
+    session.wait_text(".crumbs", "Equipe").await;
+    session.click(".add").await;
+
+    let path = until("o atalho no Drive compartilhado", async || {
+        let found = service.search("", "Planilha").await.unwrap();
+        found
+            .into_iter()
+            .map(|r| r.path)
+            .find(|p| p.contains("Drives compartilhados/Equipe/"))
+    })
+    .await;
+    // O atalho leva o nome do item, sem a extensão do documento Google (é um link).
+    assert!(path.ends_with("Equipe/Planilha"), "{path}");
+}
+
 /// A bandeja do `scripts/e2e.sh`, encerrada no fim do teste.
 struct TrayProcess(std::process::Child);
 

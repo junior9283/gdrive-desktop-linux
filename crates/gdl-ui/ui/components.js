@@ -176,6 +176,18 @@ export function saveFooter(t, { onSave, onCancel }) {
   };
 }
 
+// A trilha "Início › Pasta › Subpasta" (`steps`: `[{ name }]`, o início primeiro): cada parte,
+// menos a última, volta para ela (`go(i)`, com `i` as pastas da trilha que ficam). Vai num
+// elemento `.crumbs`.
+export function crumbs(steps, go) {
+  return steps.flatMap((step, i) => {
+    const last = i === steps.length - 1;
+    const button = el('button', { class: 'text', 'aria-current': last ? 'location' : false, disabled: last }, step.name);
+    button.addEventListener('click', () => go(i));
+    return i ? [icon('chevron_right'), button] : [button];
+  });
+}
+
 // Aviso curto no rodapé da janela.
 export function toast(text) {
   const note = el('div', { class: 'toast', role: 'status' }, text);

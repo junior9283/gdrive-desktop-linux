@@ -1,0 +1,14 @@
+/* Adicionar atalho (o layout é o de `.pick-screen`, em base.css): cada pasta é um botão com o
+   ícone, o nome e, se tiver subpastas, a seta. */
+
+.folder-list button.folder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: start;
+}
+
+.folder-list .name {
+  flex: 1;
+}

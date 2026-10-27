@@ -37,9 +37,9 @@ use zbus::object_server::SignalEmitter;
 
 use gdl_ipc::launcher::Launcher;
 use gdl_ipc::{
-    AccountInfo, AccountSummary, ActivityItem, MenuEntry, NotificationItem, NotificationSetting,
-    OBJECT_PATH, OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError, SharedDriveItem,
-    SharedItem, Status, SyncErrorItem,
+    AccountInfo, AccountSummary, ActivityItem, FolderItem, MenuEntry, NotificationItem,
+    NotificationSetting, OBJECT_PATH, OfflineEntry, OfflineSummary, Pref, SearchResult,
+    ServiceError, SharedDriveItem, SharedItem, Status, SyncErrorItem,
 };
 
 use crate::cosmic;
@@ -235,6 +235,7 @@ fn picked(engine: &Engine, item: &Item, office: bool) -> Result<menu::Picked, Se
     let is_file = has_link && item.kind == ItemKind::File;
     Ok(menu::Picked {
         is_folder,
+        is_shortcut: matches!(item.kind, ItemKind::Shortcut { .. }),
         has_link,
         has_versions: is_file,
         editor: OfficeEditor::for_name(&item.local_name).filter(|_| is_file && office),
@@ -1600,13 +1601,37 @@ impl Daemon {
             .collect())
     }
 
-    pub async fn add_shortcut(&self, account: &str, item_id: &str) -> Result<(), ServiceError> {
+    pub async fn add_shortcut(
+        &self,
+        account: &str,
+        item_id: &str,
+        folder_id: &str,
+    ) -> Result<(), ServiceError> {
         let engine = self.account_engine(account).await?;
+        let folder = (!folder_id.is_empty()).then(|| ItemId(folder_id.into()));
         engine
-            .add_shortcut(&ItemId(item_id.into()))
+            .add_shortcut(&ItemId(item_id.into()), folder.as_ref())
             .await
             .map(drop)
             .map_err(|e| engine_error(e, item_id))
+    }
+
+    pub async fn folders(
+        &self,
+        account: &str,
+        parent_id: &str,
+    ) -> Result<Vec<FolderItem>, ServiceError> {
+        let engine = self.account_engine(account).await?;
+        let parent = (!parent_id.is_empty()).then(|| ItemId(parent_id.into()));
+        let folders = engine.shortcut_folders(parent.as_ref()).map_err(failed)?;
+        Ok(folders
+            .into_iter()
+            .map(|f| FolderItem {
+                id: f.id.0,
+                name: f.name.unwrap_or_else(|| self.layout.my_drive.clone()),
+                has_children: f.has_children,
+            })
+            .collect())
     }
 
     pub async fn shared_drives(&self, account: &str) -> Result<Vec<SharedDriveItem>, ServiceError> {
@@ -1739,12 +1764,9 @@ impl Daemon {
                     .ok_or_else(invalid)?;
                 self.open(editor.url(&item.id.0));
             }
-            Action::Share | Action::Versions => {
+            Action::Share | Action::Versions | Action::AddShortcut => {
                 let (engine, item) = single()?;
-                let screen = match action {
-                    Action::Share => "share",
-                    _ => "versions",
-                };
+                let screen = action.screen().ok_or_else(invalid)?;
                 let account = self.email_of(engine).await;
                 self.open_screen(format!("{screen}:{account}/{}", item.id.0));
             }

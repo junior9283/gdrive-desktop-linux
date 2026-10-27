@@ -135,6 +135,8 @@ pub(crate) struct StatusFault {
 pub(crate) struct Session {
     /// Arquivo a atualizar; `None` cria um novo.
     pub(crate) target: Option<String>,
+    /// Quem abriu a sessão (a URL dela não leva o token).
+    pub(crate) account: String,
     pub(crate) meta: Value,
     pub(crate) data: Vec<u8>,
     /// Requisição dona da sessão agora; a substituída para de gravar.
@@ -160,15 +162,23 @@ pub(crate) struct State {
     /// Corpo de cada miniatura cortado no meio (`Fault::CutThumbBody`).
     pub(crate) thumb_cut: bool,
     pub(crate) files: BTreeMap<String, FileRec>,
+    /// A conta principal (a dos auxiliares do `FakeDrive` e do `TEST_ACCESS_TOKEN`).
     pub(crate) root_id: String,
     pub(crate) email: String,
+    /// Todas as contas, com a raiz do Meu Drive de cada uma (inclusive a principal).
+    pub(crate) accounts: BTreeMap<String, String>,
+    /// Conta do próximo login (`FakeDrive::login_as`); sem ela, a principal.
+    pub(crate) next_login: Option<String>,
     clock_ms: i64,
     change_seq: u64,
     changes: Vec<(u64, String)>,
     pub(crate) sessions: HashMap<String, SessionRef>,
-    codes: HashMap<String, String>,
-    access_tokens: HashMap<String, i64>,
-    refresh_tokens: HashSet<String>,
+    /// Código de autorização → (desafio S256, conta).
+    codes: HashMap<String, (String, String)>,
+    /// Token de acesso → (validade, conta).
+    access_tokens: HashMap<String, (i64, String)>,
+    /// Refresh token → conta.
+    refresh_tokens: HashMap<String, String>,
     pub(crate) token_lifetime_s: i64,
     pub(crate) fault: Option<StatusFault>,
     /// Avisos por e-mail de compartilhamento: (e-mail, mensagem).
@@ -207,13 +217,15 @@ impl State {
             files: BTreeMap::new(),
             root_id: String::new(),
             email: "teste@example.com".into(),
+            accounts: BTreeMap::new(),
+            next_login: None,
             clock_ms: 0,
             change_seq: 0,
             changes: vec![],
             sessions: HashMap::new(),
             codes: HashMap::new(),
             access_tokens: HashMap::new(),
-            refresh_tokens: HashSet::new(),
+            refresh_tokens: HashMap::new(),
             token_lifetime_s: 3599,
             fault: None,
             share_emails: vec![],
@@ -224,9 +236,56 @@ impl State {
             generated_ids: HashSet::new(),
             lose_responses: 0,
         };
-        state.root_id = state.add("", "My Drive", FOLDER_MIME, Vec::new(), None);
-        state.file_mut(&state.root_id.clone()).parents.clear();
+        let email = state.email.clone();
+        state.root_id = state.add_account(&email);
         state
+    }
+
+    /// Cria a conta `email` com o Meu Drive vazio e devolve a raiz dele.
+    pub(crate) fn add_account(&mut self, email: &str) -> String {
+        let root = random_id(28);
+        self.accounts.insert(email.into(), root.clone());
+        self.insert(root.clone(), "", "My Drive", FOLDER_MIME, Vec::new(), email);
+        self.file_mut(&root).parents.clear();
+        root
+    }
+
+    pub(crate) fn root_of(&self, account: &str) -> &str {
+        self.accounts
+            .get(account)
+            .map_or(&self.root_id, String::as_str)
+    }
+
+    /// O dono de um item novo em `parent`: o do pai (a principal, sem pai).
+    fn owner_under(&self, parent: &str) -> String {
+        self.files
+            .get(parent)
+            .and_then(|f| f.permissions.iter().find(|p| p["role"] == "owner"))
+            .and_then(|p| p["emailAddress"].as_str())
+            .unwrap_or(&self.email)
+            .to_string()
+    }
+
+    /// `account` vê o item: está no Meu Drive dela ou foi compartilhado com ela (ele ou uma pasta
+    /// acima). Com uma conta só, tudo.
+    pub(crate) fn visible_to(&self, account: &str, f: &FileRec) -> bool {
+        if self.accounts.len() == 1 {
+            return true;
+        }
+        let root = self.root_of(account);
+        let mut current = Some(f);
+        while let Some(file) = current {
+            let mine = file.id == root
+                || file
+                    .permissions
+                    .iter()
+                    .any(|p| p["emailAddress"].as_str() == Some(account));
+            if mine {
+                return true;
+            }
+            current = file.parents.first().and_then(|p| self.files.get(p));
+        }
+        false
     }
 
     /// Relógio que sempre avança, para a ordem de criação ser estável.
@@ -236,7 +295,16 @@ impl State {
     }
 
     pub(crate) fn resolve<'a>(&'a self, id: &'a str) -> &'a str {
-        if id == "root" { &self.root_id } else { id }
+        self.resolve_for(&self.email, id)
+    }
+
+    /// `id`, com o apelido `root` trocado pela raiz do Meu Drive de `account`.
+    pub(crate) fn resolve_for<'a>(&'a self, account: &str, id: &'a str) -> &'a str {
+        if id == "root" {
+            self.root_of(account)
+        } else {
+            id
+        }
     }
 
     pub(crate) fn file_mut(&mut self, id: &str) -> &mut FileRec {
@@ -258,7 +326,10 @@ impl State {
         content: Vec<u8>,
         target: Option<String>,
     ) -> String {
-        self.insert(random_id(28), parent, name, mime, content, target)
+        let owner = self.owner_under(parent);
+        let id = self.insert(random_id(28), parent, name, mime, content, &owner);
+        self.file_mut(&id).shortcut_target = target;
+        id
     }
 
     fn insert(
@@ -268,13 +339,13 @@ impl State {
         name: &str,
         mime: &str,
         content: Vec<u8>,
-        target: Option<String>,
+        owner: &str,
     ) -> String {
         let now = self.tick();
         let md5 = md5_hex(&content);
         let owner = json!({
             "id": "owner", "type": "user", "role": "owner",
-            "emailAddress": self.email, "displayName": "Usuário de teste",
+            "emailAddress": owner, "displayName": "Usuário de teste",
         });
         self.files.insert(
             id.clone(),
@@ -290,7 +361,7 @@ impl State {
                 modified_ms: now,
                 trashed: false,
                 can_edit: true,
-                shortcut_target: target,
+                shortcut_target: None,
                 shared: None,
                 permissions: vec![owner],
                 old_revisions: vec![],
@@ -375,8 +446,14 @@ impl State {
         ids
     }
 
-    /// Cria um arquivo a partir dos metadados de `files.create` ou de um upload.
-    pub(crate) fn create(&mut self, meta: &Value, content: Vec<u8>) -> Result<String, IdRefused> {
+    /// Cria um arquivo de `account` a partir dos metadados de `files.create` ou de um upload; sem
+    /// `parents`, no Meu Drive dela.
+    pub(crate) fn create(
+        &mut self,
+        account: &str,
+        meta: &Value,
+        content: Vec<u8>,
+    ) -> Result<String, IdRefused> {
         let id = match self.check_requested_id(meta)? {
             Some(id) => {
                 self.generated_ids.remove(&id);
@@ -386,7 +463,7 @@ impl State {
         };
         let parent = meta["parents"][0]
             .as_str()
-            .unwrap_or(&self.root_id)
+            .unwrap_or(self.root_of(account))
             .to_string();
         let mime = meta["mimeType"]
             .as_str()
@@ -396,7 +473,8 @@ impl State {
             .as_str()
             .map(String::from);
         let name = meta["name"].as_str().unwrap_or("Sem título").to_string();
-        let id = self.insert(id, &parent, &name, &mime, content, target);
+        let id = self.insert(id, &parent, &name, &mime, content, account);
+        self.file_mut(&id).shortcut_target = target;
         self.apply_meta(&id, meta);
         Ok(id)
     }
@@ -438,8 +516,10 @@ impl State {
     }
 
     /// Metadados de `id` (aceita o apelido `root`), ou `None` se não existir.
-    pub(crate) fn file_json(&self, id: &str) -> Option<Value> {
-        self.files.get(self.resolve(id)).map(|f| self.to_json(f))
+    pub(crate) fn file_json(&self, account: &str, id: &str) -> Option<Value> {
+        self.files
+            .get(self.resolve_for(account, id))
+            .map(|f| self.to_json(f))
     }
 
     pub(crate) fn start_page_token(&self) -> String {
@@ -447,13 +527,18 @@ impl State {
     }
 
     /// Mudanças a partir de `token`, uma por arquivo (o estado atual), em páginas.
-    pub(crate) fn changes_since(&self, token: u64, page_size: usize) -> Value {
+    pub(crate) fn changes_since(&self, account: &str, token: u64, page_size: usize) -> Value {
         let mut seen = HashSet::new();
         let pending: Vec<_> = self
             .changes
             .iter()
             .filter(|(seq, _)| *seq >= token)
             .filter(|(_, id)| seen.insert(id.as_str()))
+            .filter(|(_, id)| {
+                self.files
+                    .get(id)
+                    .is_none_or(|f| self.visible_to(account, f))
+            })
             .collect();
         let page = &pending[..pending.len().min(page_size)];
         let changes: Vec<Value> = page
@@ -469,36 +554,35 @@ impl State {
         }
     }
 
+    /// Código para a conta do próximo login (`next_login`, que vale uma vez) ou a principal.
     pub(crate) fn issue_code(&mut self, challenge: &str) -> String {
         let code = random_id(32);
-        self.codes.insert(code.clone(), challenge.into());
+        let account = self.next_login.take().unwrap_or_else(|| self.email.clone());
+        self.codes.insert(code.clone(), (challenge.into(), account));
         code
     }
 
     /// Troca o código por tokens se o `code_verifier` bater com o desafio S256.
     pub(crate) fn exchange_code(&mut self, code: &str, verifier: &str) -> Option<Value> {
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-        if self.codes.get(code) != Some(&challenge) {
+        if self.codes.get(code).is_none_or(|(c, _)| *c != challenge) {
             return None;
         }
-        self.codes.remove(code);
+        let (_, account) = self.codes.remove(code)?;
         let refresh = random_id(40);
-        self.refresh_tokens.insert(refresh.clone());
-        let mut tokens = self.new_access_token();
+        self.refresh_tokens.insert(refresh.clone(), account.clone());
+        let mut tokens = self.new_access_token(&account);
         tokens["refresh_token"] = refresh.into();
         Some(tokens)
     }
 
     pub(crate) fn refresh(&mut self, refresh_token: &str) -> Option<Value> {
-        self.refresh_tokens
-            .contains(refresh_token)
-            .then(|| self.new_access_token())
+        let account = self.refresh_tokens.get(refresh_token)?.clone();
+        Some(self.new_access_token(&account))
     }
 
-    fn new_access_token(&mut self) -> Value {
-        let token = random_id(40);
-        self.access_tokens
-            .insert(token.clone(), now_ms() + self.token_lifetime_s * 1000);
+    fn new_access_token(&mut self, account: &str) -> Value {
+        let token = self.mint_token(account);
         json!({
             "access_token": token,
             "expires_in": self.token_lifetime_s,
@@ -507,12 +591,24 @@ impl State {
         })
     }
 
-    pub(crate) fn token_is_valid(&self, token: &str) -> bool {
-        token == crate::TEST_ACCESS_TOKEN
-            || self
-                .access_tokens
-                .get(token)
-                .is_some_and(|&exp| exp > now_ms())
+    /// A conta do token de acesso, se ele vale.
+    pub(crate) fn account_of(&self, token: &str) -> Option<String> {
+        if token == crate::TEST_ACCESS_TOKEN {
+            return Some(self.email.clone());
+        }
+        self.access_tokens
+            .get(token)
+            .filter(|(exp, _)| *exp > now_ms())
+            .map(|(_, account)| account.clone())
+    }
+
+    /// Um token de acesso válido para `account`, sem passar pelo login.
+    pub(crate) fn mint_token(&mut self, account: &str) -> String {
+        let token = random_id(40);
+        let expires = now_ms() + self.token_lifetime_s * 1000;
+        self.access_tokens
+            .insert(token.clone(), (expires, account.into()));
+        token
     }
 }
 

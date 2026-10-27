@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, Query, Request, State};
+use axum::extract::{Extension, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Redirect, Response};
@@ -18,6 +18,10 @@ use crate::state::{self, IdRefused, Session, SessionRef, Shared, parse_query, ra
 
 pub(crate) type Shr = State<Arc<Shared>>;
 pub(crate) type Params = Query<HashMap<String, String>>;
+
+/// A conta dona do token da requisição (posta pelo `require_token`).
+#[derive(Clone)]
+pub(crate) struct Me(pub(crate) String);
 
 /// Rotas em três grupos: a API exige token; a continuação do upload retomável não (a URL da
 /// sessão já é a credencial), mas sofre as mesmas falhas; o OAuth não sofre nenhuma das duas.
@@ -119,17 +123,19 @@ async fn injected_status(State(shared): Shr, req: Request, next: Next) -> Respon
     resp
 }
 
-async fn require_token(State(shared): Shr, req: Request, next: Next) -> Response {
-    let token = req
+async fn require_token(State(shared): Shr, mut req: Request, next: Next) -> Response {
+    let account = req
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "));
-    let valid = token.is_some_and(|t| shared.state().token_is_valid(t));
-    if valid {
-        next.run(req).await
-    } else {
-        api_error(401, "authError", "Invalid Credentials")
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .and_then(|t| shared.state().account_of(t));
+    match account {
+        Some(account) => {
+            req.extensions_mut().insert(Me(account));
+            next.run(req).await
+        }
+        None => api_error(401, "authError", "Invalid Credentials"),
     }
 }
 
@@ -154,12 +160,17 @@ pub(crate) fn bad_json() -> Response {
     api_error(400, "parseError", "JSON inválido")
 }
 
-async fn about(State(shared): Shr) -> Json<Value> {
+async fn about(State(shared): Shr, Extension(me): Extension<Me>) -> Json<Value> {
     let state = shared.state();
-    let usage: usize = state.files.values().map(|f| f.content.len()).sum();
+    let usage: usize = state
+        .files
+        .values()
+        .filter(|f| state.visible_to(&me.0, f))
+        .map(|f| f.content.len())
+        .sum();
     Json(json!({
         "user": {
-            "emailAddress": state.email,
+            "emailAddress": me.0,
             "displayName": "Pessoa de Teste",
             "photoLink": shared.origin.join("photo.png").unwrap().to_string(),
         },
@@ -167,7 +178,7 @@ async fn about(State(shared): Shr) -> Json<Value> {
     }))
 }
 
-async fn list(State(shared): Shr, Query(params): Params) -> Response {
+async fn list(State(shared): Shr, Extension(me): Extension<Me>, Query(params): Params) -> Response {
     let clauses = match parse_query(params.get("q").map_or("", String::as_str)) {
         Ok(c) => c,
         Err(e) => return api_error(400, "invalid", &e),
@@ -179,10 +190,11 @@ async fn list(State(shared): Shr, Query(params): Params) -> Response {
         .unwrap_or(0);
     // Como no Drive real, o compartilhado comigo (sem pai no Meu Drive) também vem na listagem.
     let mut state = shared.state();
+    let my_root = state.root_of(&me.0);
     let mut hits = state
         .files
         .values()
-        .filter(|f| f.id != state.root_id)
+        .filter(|f| f.id != my_root && state.visible_to(&me.0, f))
         .filter(|f| clauses.iter().all(|c| c.matches(f)))
         .skip(offset);
     let files: Vec<Value> = hits.by_ref().take(size).map(|f| state.to_json(f)).collect();
@@ -202,6 +214,7 @@ async fn list(State(shared): Shr, Query(params): Params) -> Response {
 
 async fn get_file(
     State(shared): Shr,
+    Extension(me): Extension<Me>,
     Path(id): Path<String>,
     Query(params): Params,
     headers: HeaderMap,
@@ -209,10 +222,10 @@ async fn get_file(
     let mut state = shared.state();
     if params.get("alt").map(String::as_str) != Some("media") {
         return state
-            .file_json(&id)
+            .file_json(&me.0, &id)
             .map_or_else(|| not_found(&id), |v| Json(v).into_response());
     }
-    let Some(file) = state.files.get(state.resolve(&id)) else {
+    let Some(file) = state.files.get(state.resolve_for(&me.0, &id)) else {
         return not_found(&id);
     };
     if !file.has_content() {
@@ -269,12 +282,12 @@ fn parse_range(value: &str) -> Option<(u64, Option<u64>)> {
     ))
 }
 
-async fn create(State(shared): Shr, body: Bytes) -> Response {
+async fn create(State(shared): Shr, Extension(me): Extension<Me>, body: Bytes) -> Response {
     let Some(meta) = json_body(&body) else {
         return bad_json();
     };
     let mut state = shared.state();
-    match state.create(&meta, Vec::new()) {
+    match state.create(&me.0, &meta, Vec::new()) {
         Ok(id) => Json(state.to_json(&state.files[&id])).into_response(),
         Err(e) => refused(e),
     }
@@ -292,6 +305,7 @@ async fn generate_ids(State(shared): Shr, Query(params): Params) -> Response {
 
 async fn update(
     State(shared): Shr,
+    Extension(me): Extension<Me>,
     Path(id): Path<String>,
     Query(params): Params,
     body: Bytes,
@@ -300,7 +314,7 @@ async fn update(
         return bad_json();
     };
     let mut state = shared.state();
-    let id = state.resolve(&id).to_string();
+    let id = state.resolve_for(&me.0, &id).to_string();
     let Some(file) = state.files.get_mut(&id) else {
         return not_found(&id);
     };
@@ -322,11 +336,20 @@ async fn start_page_token(State(shared): Shr) -> Json<Value> {
     Json(json!({ "startPageToken": shared.state().start_page_token() }))
 }
 
-async fn changes(State(shared): Shr, Query(params): Params) -> Response {
+async fn changes(
+    State(shared): Shr,
+    Extension(me): Extension<Me>,
+    Query(params): Params,
+) -> Response {
     let Some(token) = params.get("pageToken").and_then(|t| t.parse().ok()) else {
         return api_error(400, "required", "pageToken obrigatório");
     };
-    Json(shared.state().changes_since(token, page_size(&params))).into_response()
+    Json(
+        shared
+            .state()
+            .changes_since(&me.0, token, page_size(&params)),
+    )
+    .into_response()
 }
 
 /// Separa um corpo `multipart/related` em metadados (JSON) e conteúdo.
@@ -360,12 +383,13 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 /// Upload que cria arquivo (`POST /upload/drive/v3/files`).
 async fn upload_create(
     State(shared): Shr,
+    Extension(me): Extension<Me>,
     Query(params): Params,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     counted_upload(&shared, || {
-        upload_start(&shared, None, &params, &headers, body)
+        upload_start(&shared, &me, None, &params, &headers, body)
     })
     .await
 }
@@ -373,13 +397,14 @@ async fn upload_create(
 /// Upload que troca o conteúdo (`PATCH /upload/drive/v3/files/{id}`).
 async fn upload_update(
     State(shared): Shr,
+    Extension(me): Extension<Me>,
     Path(id): Path<String>,
     Query(params): Params,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     counted_upload(&shared, || {
-        upload_start(&shared, Some(id), &params, &headers, body)
+        upload_start(&shared, &me, Some(id), &params, &headers, body)
     })
     .await
 }
@@ -408,6 +433,7 @@ async fn counted_upload(shared: &Shared, respond: impl FnOnce() -> Response) -> 
 
 fn upload_start(
     shared: &Shared,
+    me: &Me,
     target: Option<String>,
     params: &HashMap<String, String>,
     headers: &HeaderMap,
@@ -420,16 +446,16 @@ fn upload_start(
         },
         Some("media") => (json!({}), body.to_vec()),
         Some("resumable") => match json_body(&body) {
-            Some(meta) => return start_resumable(shared, target, meta),
+            Some(meta) => return start_resumable(shared, me, target, meta),
             None => return bad_json(),
         },
         _ => return api_error(400, "invalid", "uploadType inválido"),
     };
-    finish_upload(&mut shared.state(), target, &meta, content)
+    finish_upload(&mut shared.state(), &me.0, target, &meta, content)
 }
 
 /// Abre uma sessão retomável e devolve a URL dela no `Location`.
-fn start_resumable(shared: &Shared, target: Option<String>, meta: Value) -> Response {
+fn start_resumable(shared: &Shared, me: &Me, target: Option<String>, meta: Value) -> Response {
     let mut state = shared.state();
     if let Some(id) = &target
         && !state.files.contains_key(id)
@@ -450,6 +476,7 @@ fn start_resumable(shared: &Shared, target: Option<String>, meta: Value) -> Resp
         sid,
         Arc::new(tokio::sync::Mutex::new(Session {
             target,
+            account: me.0.clone(),
             meta,
             data: vec![],
             owner: 0,
@@ -460,6 +487,7 @@ fn start_resumable(shared: &Shared, target: Option<String>, meta: Value) -> Resp
 
 fn finish_upload(
     state: &mut state::State,
+    account: &str,
     target: Option<String>,
     meta: &Value,
     content: Vec<u8>,
@@ -472,7 +500,7 @@ fn finish_upload(
             state.apply_meta(&id, meta);
             id
         }
-        None => match state.create(meta, content) {
+        None => match state.create(account, meta, content) {
             Ok(id) => id,
             Err(e) => return refused(e),
         },
@@ -559,7 +587,8 @@ async fn upload_chunk(
     let mut state = shared.state();
     state.sessions.remove(&sid);
     let data = std::mem::take(&mut session.data);
-    finish_upload(&mut state, session.target.take(), &session.meta, data)
+    let target = session.target.take();
+    finish_upload(&mut state, &session.account, target, &session.meta, data)
 }
 
 /// A sessão, se `me` ainda for a requisição dona dela.
@@ -676,6 +705,6 @@ async fn thumb(State(shared): Shr, Path(spec): Path<String>) -> Response {
     ([(header::CONTENT_TYPE, "image/png")], png.clone()).into_response()
 }
 
-async fn userinfo(State(shared): Shr) -> Json<Value> {
-    Json(json!({ "email": shared.state().email, "email_verified": true }))
+async fn userinfo(Extension(me): Extension<Me>) -> Json<Value> {
+    Json(json!({ "email": me.0, "email_verified": true }))
 }

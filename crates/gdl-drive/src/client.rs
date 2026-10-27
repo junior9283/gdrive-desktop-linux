@@ -947,6 +947,44 @@ mod tests {
         client_with_token(fake, TEST_ACCESS_TOKEN)
     }
 
+    /// Duas contas no mesmo Drive simulado: cada token vê só a árvore da sua conta.
+    #[tokio::test]
+    async fn two_accounts_see_their_own_trees() {
+        let fake = FakeDrive::start().await;
+        fake.add_file(&fake.root_id(), "da-principal.txt", b"a".to_vec());
+        let ana = fake.add_account("ana@example.com");
+        ana.add_file(&ana.root_id(), "da-ana.txt", b"b".to_vec());
+        let names = |c: DriveClient| async move {
+            let mut names = vec![];
+            c.list_all(|page| -> Result<()> {
+                names.extend(page.into_iter().map(|f| f.name));
+                Ok(())
+            })
+            .await
+            .unwrap();
+            (c.about().await.unwrap().email, names)
+        };
+
+        let primary = names(client(&fake)).await;
+        let other = names(client_with_token(&fake, &ana.access_token())).await;
+
+        assert_eq!(
+            primary,
+            (fake.email(), vec!["da-principal.txt".to_string()])
+        );
+        assert_eq!(
+            other,
+            (
+                "ana@example.com".to_string(),
+                vec!["da-ana.txt".to_string()]
+            )
+        );
+        assert_eq!(client(&fake).get("root").await.unwrap().id, fake.root_id());
+        let ana_client = client_with_token(&fake, &ana.access_token());
+        assert_eq!(ana_client.get("root").await.unwrap().id, ana.root_id());
+        assert_eq!(ana.find_live("da-principal.txt"), Vec::<String>::new());
+    }
+
     #[test]
     fn search_query_is_escaped() {
         assert_eq!(

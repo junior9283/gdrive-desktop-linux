@@ -223,9 +223,9 @@ impl FakeDrive {
 
     /// Metadados como a API devolve.
     pub fn meta(&self, id: &str) -> Value {
-        self.shared
-            .state()
-            .file_json(id)
+        let state = self.shared.state();
+        state
+            .file_json(&state.email, id)
             .unwrap_or_else(|| panic!("arquivo {id} não existe no Drive simulado"))
     }
 
@@ -325,15 +325,25 @@ impl FakeDrive {
         state.method_log.iter().filter(|m| *m == method).count() as u64
     }
 
-    /// IDs dos itens fora da lixeira com o nome `name`.
+    /// IDs dos itens fora da lixeira com o nome `name`, que a conta principal vê.
     pub fn find_live(&self, name: &str) -> Vec<String> {
-        let state = self.shared.state();
-        state
-            .files
-            .values()
-            .filter(|f| f.name == name && !f.trashed)
-            .map(|f| f.id.clone())
-            .collect()
+        find_live(&self.shared, &self.email(), name)
+    }
+
+    /// Outra conta no mesmo Drive, com o Meu Drive vazio. Os arquivos são do mesmo universo: um
+    /// item compartilhado com ela aparece para as duas.
+    pub fn add_account(&self, email: &str) -> FakeAccount {
+        self.shared.state().add_account(email);
+        FakeAccount {
+            shared: self.shared.clone(),
+            email: email.into(),
+        }
+    }
+
+    /// O próximo login (tela de consentimento) entra na conta `email`, uma vez; depois volta a
+    /// valer a principal.
+    pub fn login_as(&self, email: &str) {
+        self.shared.state().next_login = Some(email.into());
     }
 
     /// Emite um código de autorização ligado ao `code_challenge` (S256), como faria a tela de consentimento.
@@ -344,5 +354,53 @@ impl FakeDrive {
     /// Validade, em segundos, dos próximos tokens de acesso emitidos.
     pub fn set_token_lifetime(&self, secs: i64) {
         self.shared.state().token_lifetime_s = secs;
+    }
+}
+
+fn find_live(shared: &Shared, account: &str, name: &str) -> Vec<String> {
+    let state = shared.state();
+    state
+        .files
+        .values()
+        .filter(|f| f.name == name && !f.trashed && state.visible_to(account, f))
+        .map(|f| f.id.clone())
+        .collect()
+}
+
+/// Uma conta além da principal (`FakeDrive::add_account`).
+pub struct FakeAccount {
+    shared: Arc<Shared>,
+    email: String,
+}
+
+impl FakeAccount {
+    pub fn email(&self) -> &str {
+        &self.email
+    }
+
+    pub fn root_id(&self) -> String {
+        self.shared.state().root_of(&self.email).to_string()
+    }
+
+    pub fn add_folder(&self, parent: &str, name: &str) -> String {
+        self.shared
+            .state()
+            .add(parent, name, FOLDER_MIME, Vec::new(), None)
+    }
+
+    pub fn add_file(&self, parent: &str, name: &str, bytes: Vec<u8>) -> String {
+        self.shared
+            .state()
+            .add(parent, name, "application/octet-stream", bytes, None)
+    }
+
+    /// IDs dos itens fora da lixeira com o nome `name`, que esta conta vê.
+    pub fn find_live(&self, name: &str) -> Vec<String> {
+        find_live(&self.shared, &self.email, name)
+    }
+
+    /// Um token de acesso válido desta conta, sem passar pelo login.
+    pub fn access_token(&self) -> String {
+        self.shared.state().mint_token(&self.email)
     }
 }

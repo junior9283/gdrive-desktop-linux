@@ -268,13 +268,15 @@ impl Drop for Harness {
 }
 
 /// Espera sem bloquear o runtime.
-pub(crate) async fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+pub(crate) async fn wait_until(what: &str, done: impl FnMut() -> bool) {
+    wait_until_within(Duration::from_secs(10), what, done).await;
+}
+
+/// `wait_until` com outro limite.
+pub(crate) async fn wait_until_within(limit: Duration, what: &str, mut done: impl FnMut() -> bool) {
     let start = std::time::Instant::now();
     while !done() {
-        assert!(
-            start.elapsed() < Duration::from_secs(10),
-            "esperando: {what}"
-        );
+        assert!(start.elapsed() < limit, "esperando: {what}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }

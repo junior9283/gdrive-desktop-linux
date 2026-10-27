@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use gdl_fake_drive::Fault;
 
-use crate::testutil::{Harness, blocking, wait_until};
+use crate::testutil::{Harness, blocking, status_until, wait_until, wait_until_within};
 
 const MIB: usize = 1024 * 1024;
 const FLAP_FILES: usize = 200;
@@ -59,15 +59,16 @@ async fn network_flaps_during_many_writes_all_arrive() {
             std::thread::sleep(Duration::from_millis(5));
         }
     });
-    // A rede cai e volta enquanto os arquivos são gravados e até metade deles ter subido.
+    // A rede cai e volta enquanto os arquivos são gravados e até metade deles subir, ou por 30 s
+    // numa máquina carregada: aqui se cobra não perder nem duplicar, não a vazão.
     let arrived = || {
         (0..FLAP_FILES)
             .filter(|&i| !h.fake.find_live(&flap_name(i)).is_empty())
             .count()
     };
     let start = std::time::Instant::now();
-    while !writes.is_finished() || arrived() < FLAP_FILES / 2 {
-        assert!(start.elapsed() < Duration::from_secs(30), "envios parados");
+    let flapping = || start.elapsed() < Duration::from_secs(30) && arrived() < FLAP_FILES / 2;
+    while !writes.is_finished() || flapping() {
         h.fake.inject(Fault::Offline);
         tokio::time::sleep(Duration::from_millis(200)).await;
         h.fake.clear_faults();
@@ -75,13 +76,19 @@ async fn network_flaps_during_many_writes_all_arrive() {
     }
     writes.await.unwrap();
 
-    wait_until("os 200 arquivos no Drive, sem cópias", || {
-        (0..FLAP_FILES).all(|i| h.fake.find_live(&flap_name(i)).len() == 1)
+    // Numa máquina carregada, o resto dos 200 leva mais que os 10 s de `wait_until`.
+    wait_until_within(Duration::from_secs(60), "os 200 arquivos no Drive", || {
+        arrived() == FLAP_FILES
     })
     .await;
+    status_until(&h, "fila vazia", |s| s.pending_uploads == 0).await;
     for i in 0..FLAP_FILES {
-        let id = h.fake.find_live(&flap_name(i)).remove(0);
-        assert_eq!(h.fake.content(&id), format!("conteúdo {i}").into_bytes());
+        let ids = h.fake.find_live(&flap_name(i));
+        assert_eq!(ids.len(), 1, "{}: uma cópia só", flap_name(i));
+        assert_eq!(
+            h.fake.content(&ids[0]),
+            format!("conteúdo {i}").into_bytes()
+        );
     }
 }
 

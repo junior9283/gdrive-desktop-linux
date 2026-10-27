@@ -36,6 +36,29 @@ async fn create_write_close_uploads_new_file() {
     assert_eq!(std::fs::read(&path).unwrap(), b"escrito no linux");
 }
 
+/// Um programa que deixou o arquivo aberto enquanto ele subia continua lendo depois que o ID
+/// temporário vira o do Drive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_file_still_reads_after_the_upload_finishes() {
+    use std::io::{Read, Seek};
+    let m = Mounted::new(FakeDrive::start().await).await;
+    m.fake
+        .inject(Fault::DelayUploads(Duration::from_millis(300)));
+    m.run_engine();
+    let path = m.drive().join("aberto.txt");
+    std::fs::write(&path, b"lido depois do envio").unwrap();
+    let mut open = std::fs::File::open(&path).unwrap();
+    assert!(xattr(&path, "user.gdl.id").starts_with("local:"));
+
+    wait_until("ID do Drive", || {
+        !xattr(&path, "user.gdl.id").starts_with("local:")
+    });
+    let mut read = Vec::new();
+    open.rewind().unwrap();
+    open.read_to_end(&mut read).unwrap();
+    assert_eq!(read, b"lido depois do envio");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn edit_existing_file_updates_same_id() {
     let fake = FakeDrive::start().await;

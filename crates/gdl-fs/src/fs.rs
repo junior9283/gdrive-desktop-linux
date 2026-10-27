@@ -162,8 +162,13 @@ pub(crate) struct Inner {
 /// Arquivo aberto: de onde vem o conteúdo, decidido uma vez no `open`.
 pub(crate) enum OpenFile {
     /// Conteúdo do Drive pelo cache, com o fim da última leitura para reconhecer leitura
-    /// sequencial neste handle.
-    Drive { id: ItemId, last_end: Option<u64> },
+    /// sequencial neste handle. O ID é o último conhecido do inode: o temporário de um item novo
+    /// vira o do Drive quando o envio termina, com o arquivo ainda aberto.
+    Drive {
+        inode: Inode,
+        id: ItemId,
+        last_end: Option<u64>,
+    },
     /// Documento Google: o JSON do ponteiro, montado na abertura.
     Pointer(Bytes),
     /// Arquivo que só existe neste computador (cópias guardadas, `.trashinfo` do KIO).
@@ -648,6 +653,7 @@ impl Inner {
                 )))
             }
             ItemKind::File => Ok(OpenFile::Drive {
+                inode: item.inode,
                 id: item.id,
                 last_end: None,
             }),
@@ -667,10 +673,14 @@ impl Inner {
     fn read(&self, fh: u64, offset: u64, size: u32) -> Res<Bytes> {
         let end = offset.saturating_add(size.into());
         // Decide com o mapa travado; a leitura em si acontece fora da trava.
-        let (id, sequential) = match lock(&self.files).get_mut(&fh).ok_or(Errno::EBADF)? {
-            OpenFile::Drive { id, last_end } => {
+        let (inode, id, sequential) = match lock(&self.files).get_mut(&fh).ok_or(Errno::EBADF)? {
+            OpenFile::Drive {
+                inode,
+                id,
+                last_end,
+            } => {
                 let sequential = last_end.replace(end) == Some(offset);
-                (id.clone(), sequential)
+                (*inode, id.clone(), sequential)
             }
             OpenFile::Pointer(json) => return Ok(slice(json, offset, size)),
             OpenFile::Local(file) | OpenFile::Write { file, .. } => {
@@ -681,9 +691,21 @@ impl Inner {
             }
         };
         let cache = self.engine.cache();
-        self.rt
-            .block_on(cache.read_hinted(&id, offset, size, Some(sequential)))
-            .map_err(errno)
+        let read = |id: &ItemId| {
+            self.rt
+                .block_on(cache.read_hinted(id, offset, size, Some(sequential)))
+        };
+        let result = read(&id).or_else(|e| match self.item(inode) {
+            // O envio terminou e o conteúdo mudou de nome: lê pelo ID novo, que o handle guarda.
+            Ok(now) if now.id != id => {
+                if let Some(OpenFile::Drive { id, .. }) = lock(&self.files).get_mut(&fh) {
+                    *id = now.id.clone();
+                }
+                read(&now.id)
+            }
+            _ => Err(e),
+        });
+        result.map_err(errno)
     }
 
     /// Cota em blocos de 4096 bytes. Nunca espera a rede: responde com o último valor conhecido

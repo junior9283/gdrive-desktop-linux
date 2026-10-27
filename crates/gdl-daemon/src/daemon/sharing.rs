@@ -48,7 +48,7 @@ impl Daemon {
     }
 
     pub async fn sharing(&self, item_id: &str) -> Result<Sharing, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let item = live_item(&engine, item_id)?;
         let perms = engine
             .permissions(&item.id)
@@ -119,7 +119,7 @@ impl Daemon {
         if emails.is_empty() || emails.iter().any(|e| !e.contains('@')) {
             return Err(ServiceError::InvalidArgs("e-mail inválido".into()));
         }
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let id = ItemId(item_id.into());
         for email in emails {
             let who = Grantee::Person(email.into());
@@ -137,7 +137,7 @@ impl Daemon {
         permission_id: &str,
         role: &str,
     ) -> Result<(), ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let id = ItemId(item_id.into());
         let done = match role {
             "" => engine.unshare(&id, permission_id).await,
@@ -174,7 +174,7 @@ impl Daemon {
         if grantee.is_some() {
             check_role(role)?;
         }
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         engine
             .set_general_access(&ItemId(item_id.into()), grantee.as_ref(), role)
             .await
@@ -182,7 +182,7 @@ impl Daemon {
     }
 
     pub async fn versions(&self, item_id: &str) -> Result<Versions, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let item = live_item(&engine, item_id)?;
         let list = engine
             .revisions(&item.id)
@@ -212,7 +212,7 @@ impl Daemon {
         item_id: &str,
         version_id: &str,
     ) -> Result<String, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let item = live_item(&engine, item_id)?;
         let fail = |e| engine_error(e, item_id);
         // A data da versão (para o nome) e o conteúdo, pedidos juntos.
@@ -250,7 +250,7 @@ impl Daemon {
         item_id: &str,
         version_id: &str,
     ) -> Result<(), ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         engine
             .restore_revision(&ItemId(item_id.into()), version_id)
             .await
@@ -263,7 +263,7 @@ impl Daemon {
         version_id: &str,
         keep: bool,
     ) -> Result<(), ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         engine
             .keep_revision(&ItemId(item_id.into()), version_id, keep)
             .await

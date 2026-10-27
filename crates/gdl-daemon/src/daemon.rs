@@ -55,7 +55,9 @@ use crate::notify::{
 
 /// Quanto o login espera o retorno do navegador.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
-/// Arquivo (em `data_dir`) com a conta conectada, para reconectar na próxima partida.
+/// Contas conectadas, um e-mail por linha, na ordem em que foram adicionadas.
+const ACCOUNTS: &str = "accounts";
+/// Arquivo da 0.7 (uma só conta); migrado para `accounts` ao iniciar.
 const CURRENT_ACCOUNT: &str = "current-account";
 /// Intervalo mínimo entre dois sinais `ActivityChanged`.
 const ACTIVITY_SIGNAL_GAP: Duration = Duration::from_millis(250);
@@ -274,7 +276,7 @@ pub struct Daemon {
     saving: tokio::sync::Mutex<()>,
     exit: watch::Sender<Option<Exit>>,
     i18n: I18n,
-    account: tokio::sync::Mutex<Option<Account>>,
+    accounts: tokio::sync::Mutex<Vec<Account>>,
     conn: OnceLock<Connection>,
     notifier: OnceLock<Notifier>,
     history: History,
@@ -309,7 +311,7 @@ impl Daemon {
             saving: tokio::sync::Mutex::default(),
             exit: watch::Sender::new(None),
             config,
-            account: tokio::sync::Mutex::default(),
+            accounts: tokio::sync::Mutex::default(),
             conn: OnceLock::new(),
             notifier: OnceLock::new(),
             login: Mutex::default(),
@@ -526,25 +528,72 @@ impl Daemon {
         self.with_account(|a| a.engine.clone()).await
     }
 
-    fn current_account_file(&self) -> PathBuf {
-        self.config.paths.data_dir.join(CURRENT_ACCOUNT)
+    fn accounts_file(&self) -> PathBuf {
+        self.config.paths.data_dir.join(ACCOUNTS)
     }
 
-    /// Reconecta a conta da execução anterior, se houver.
-    pub async fn resume_saved_account(self: &Arc<Self>) -> Result<(), ServiceError> {
-        let Ok(email) = std::fs::read_to_string(self.current_account_file()) else {
-            return Ok(());
-        };
-        let saved = self
-            .config
-            .tokens
-            .load(email.trim())
+    /// Grava a lista de contas (vazia, o arquivo some), para a próxima execução reconectá-las.
+    /// Uma falha só vai para o log: a conta continua conectada nesta execução.
+    async fn save_accounts(&self) {
+        let emails: Vec<String> = self
+            .accounts
+            .lock()
             .await
-            .map_err(failed)?;
-        match saved {
-            Some((creds, tokens)) => self.start_account(creds, tokens).await,
-            None => Ok(()),
+            .iter()
+            .map(|a| a.email.clone())
+            .collect();
+        let path = self.accounts_file();
+        let saved = if emails.is_empty() {
+            gdl_common::fs::remove_file_if_exists(&path)
+        } else {
+            gdl_common::paths::create_private_dir(&self.config.paths.data_dir)
+                .and_then(|()| gdl_common::fs::write_atomic(&path, emails.join("\n").as_bytes()))
+        };
+        if let Err(e) = saved {
+            tracing::warn!(erro = %e, "não deu para guardar a lista de contas");
         }
+    }
+
+    /// Troca o `current-account` da 0.7 (uma conta só) pelo `accounts`, se ainda não houver.
+    fn migrate_current_account(&self) {
+        let legacy = self.config.paths.data_dir.join(CURRENT_ACCOUNT);
+        if self.accounts_file().exists() {
+            return;
+        }
+        let Ok(email) = std::fs::read_to_string(&legacy) else {
+            return;
+        };
+        if gdl_common::fs::write_atomic(&self.accounts_file(), email.trim().as_bytes()).is_ok() {
+            let _ = std::fs::remove_file(&legacy);
+        }
+    }
+
+    /// Os e-mails guardados, na ordem em que as contas foram adicionadas.
+    fn saved_emails(&self) -> Vec<String> {
+        std::fs::read_to_string(self.accounts_file())
+            .unwrap_or_default()
+            .lines()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(String::from)
+            .collect()
+    }
+
+    /// Reconecta as contas da execução anterior, se houver.
+    pub async fn resume_saved_accounts(self: &Arc<Self>) -> Result<(), ServiceError> {
+        self.migrate_current_account();
+        // Uma conta que não sobe não impede as outras.
+        for email in self.saved_emails() {
+            let started = match self.config.tokens.load(&email).await.map_err(failed) {
+                Ok(Some((creds, tokens))) => self.start_account(creds, tokens).await,
+                Ok(None) => Ok(()),
+                Err(e) => Err(e),
+            };
+            if let Err(e) = started {
+                tracing::warn!(erro = %e, conta = %email, "não deu para reconectar a conta");
+            }
+        }
+        Ok(())
     }
 
     /// Desmonta e para o motor (o serviço está saindo).
@@ -620,7 +669,7 @@ impl Daemon {
             OPEN_CANCELED => KeptFolder::CanceledUploads,
             _ => return Err(ServiceError::InvalidArgs(key.into())),
         };
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         self.open_local(engine.kept().get(folder).dir());
         Ok(())
     }
@@ -862,9 +911,6 @@ impl Daemon {
             mount_point.clone(),
         );
         let session = gdl_fs::mount(fs, &mount_point).map_err(failed)?;
-        gdl_common::paths::create_private_dir(&config.paths.data_dir)
-            .and_then(|()| std::fs::write(self.current_account_file(), &email))
-            .map_err(failed)?;
 
         // Daqui em diante nada falha: o motor só roda com a conta guardada em `account`.
         let shutdown = CancellationToken::new();
@@ -877,7 +923,7 @@ impl Daemon {
         let my_drive = mount_point.join(self.my_drive_name());
         self.forward_states(engine.clone(), my_drive, shutdown.clone());
         let moved = mount_point != preferred;
-        *self.account.lock().await = Some(Account {
+        self.accounts.lock().await.push(Account {
             email,
             engine,
             mount_point: mount_point.clone(),
@@ -885,6 +931,7 @@ impl Daemon {
             shutdown,
             _session: session,
         });
+        self.save_accounts().await;
         self.apply_sidebar(&mount_point);
         self.apply_baloo(&mount_point);
         self.apply_metered(self.is_metered()).await;
@@ -996,12 +1043,12 @@ impl Daemon {
         }
     }
 
+    /// Desmonta e para todas as contas, sem mexer na lista guardada (o serviço vai voltar a
+    /// elas); quem sai de uma conta é `sign_out`, que atualiza a lista.
     async fn stop_account(&self) {
-        let account = self.account.lock().await.take();
-        if let Some(account) = account {
-            // Desmontar espera as threads do FUSE terminarem.
-            let _ = tokio::task::spawn_blocking(move || drop(account)).await;
-        }
+        let accounts = std::mem::take(&mut *self.accounts.lock().await);
+        // Desmontar espera as threads do FUSE terminarem.
+        let _ = tokio::task::spawn_blocking(move || drop(accounts)).await;
     }
 
     fn not_logged_in(&self) -> ServiceError {
@@ -1040,7 +1087,7 @@ impl Daemon {
     /// Nome, cota e foto da conta conectada. A foto é baixada uma vez e fica no diretório de
     /// dados da conta.
     pub async fn account_info(&self) -> Result<AccountInfo, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let about = engine.about().await.map_err(failed)?;
         Ok(AccountInfo {
             photo_png: cached_photo(&engine, &about.photo_link).await,
@@ -1070,7 +1117,7 @@ impl Daemon {
     }
 
     pub async fn errors(&self) -> Result<Vec<SyncErrorItem>, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let mount_point = self.mount_point().await?;
         let my_drive = mount_point.join(self.my_drive_name());
         // As cópias aparecem na montagem, na pasta oculta do Lost and Found.
@@ -1102,7 +1149,7 @@ impl Daemon {
         if item_id.is_empty() {
             return Err(ServiceError::InvalidArgs("item sem envio".into()));
         }
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         engine.retry(&ItemId(item_id.into())).map_err(failed)?;
         self.emit_status_changed().await;
         Ok(())
@@ -1131,7 +1178,7 @@ impl Daemon {
     /// Cancela o envio do arquivo: `canceled` (a versão local foi para `Uploads cancelados`) ou
     /// `too-late` (o envio já terminou) ou `in-use` (o arquivo está aberto para escrita).
     pub async fn cancel_upload(&self, item_id: &str) -> Result<String, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let outcome = engine
             .cancel_upload(&ItemId(item_id.into()))
             .await
@@ -1142,15 +1189,35 @@ impl Daemon {
 
     /// `f` sobre a conta conectada, soltando a trava antes de o chamador consultar o banco.
     async fn with_account<T>(&self, f: impl FnOnce(&Account) -> T) -> Option<T> {
-        self.account.lock().await.as_ref().map(f)
+        self.accounts.lock().await.first().map(f)
     }
 
-    async fn connected_engine(&self) -> Result<Arc<Engine>, ServiceError> {
-        self.engine().await.ok_or_else(|| self.not_logged_in())
+    /// O motor da conta `account` (e-mail); vazio, a primeira. Sem a conta, `NotLoggedIn`.
+    async fn account_engine(&self, account: &str) -> Result<Arc<Engine>, ServiceError> {
+        let accounts = self.accounts.lock().await;
+        let found = if account.is_empty() {
+            accounts.first()
+        } else {
+            accounts.iter().find(|a| a.email == account)
+        };
+        found
+            .map(|a| a.engine.clone())
+            .ok_or_else(|| self.not_logged_in())
+    }
+
+    /// O motor da conta cuja montagem é o prefixo mais longo de `path`, e o caminho relativo a ela.
+    async fn engine_at(&self, path: &Path) -> Option<(Arc<Engine>, PathBuf)> {
+        self.accounts
+            .lock()
+            .await
+            .iter()
+            .filter_map(|a| Some((a, relative_to_mount(path, &a.mount_point)?)))
+            .max_by_key(|(a, _)| a.mount_point.components().count())
+            .map(|(a, relative)| (a.engine.clone(), relative))
     }
 
     pub async fn set_paused(&self, paused: bool) -> Result<(), ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         // O motor avisa a mudança (`SyncStateChanged`), que vira `StatusChanged`.
         match paused {
             true => engine.pause(),
@@ -1170,13 +1237,13 @@ impl Daemon {
     }
 
     pub async fn lost_and_found(&self) -> Result<Vec<String>, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let files = engine.lost_and_found().list();
         Ok(files.iter().map(|p| p.display().to_string()).collect())
     }
 
     pub async fn offline_summary(&self) -> Result<OfflineSummary, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let store = engine.store();
         Ok(OfflineSummary {
             pinned_bytes: store.pinned_bytes().map_err(failed)?,
@@ -1213,7 +1280,7 @@ impl Daemon {
     }
 
     pub async fn unpin_item(&self, item_id: &str) -> Result<(), ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         engine
             .pins()
             .unpin(&ItemId(item_id.into()))
@@ -1221,12 +1288,12 @@ impl Daemon {
     }
 
     pub async fn clear_cache(&self) -> Result<u64, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         engine.cache().clear().await.map_err(failed)
     }
 
     pub async fn clear_offline_files(&self) -> Result<(), ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         engine.pins().unpin_all().map_err(failed)
     }
 
@@ -1260,12 +1327,12 @@ impl Daemon {
     }
 
     pub async fn web_link(&self, item_id: &str) -> Result<String, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         web_link(&live_item(&engine, item_id)?)
     }
 
     pub async fn shared_with_me(&self) -> Result<Vec<SharedItem>, ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         let shared = engine.shared_with_me().await.map_err(failed)?;
         Ok(shared
             .into_iter()
@@ -1280,7 +1347,7 @@ impl Daemon {
     }
 
     pub async fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         engine
             .add_shortcut(&ItemId(item_id.into()))
             .await
@@ -1390,19 +1457,18 @@ impl Daemon {
 
     /// O motor da conta conectada e a pasta do Meu Drive na montagem.
     async fn engine_and_my_drive(&self) -> Result<(Arc<Engine>, PathBuf), ServiceError> {
-        let engine = self.connected_engine().await?;
+        let engine = self.account_engine("").await?;
         Ok((engine, self.mount_point().await?.join(self.my_drive_name())))
     }
 
     /// Item do Meu Drive no caminho `path` da montagem.
     async fn item_at(&self, path: &str) -> Result<(Arc<Engine>, ItemId), ServiceError> {
-        let (engine, mount_point) = self
-            .with_account(|a| (a.engine.clone(), a.mount_point.clone()))
-            .await
-            .ok_or_else(|| self.not_logged_in())?;
         let not_found =
             || ServiceError::NotFound(self.i18n.tr("path-not-in-drive", &[("path", path)]));
-        let relative = relative_to_mount(Path::new(path), &mount_point).ok_or_else(not_found)?;
+        let (engine, relative) = self
+            .engine_at(Path::new(path))
+            .await
+            .ok_or_else(not_found)?;
         let mut parts = relative.components();
         let my_drive = self.my_drive_name();
         if parts.next() != Some(Component::Normal(my_drive.as_ref())) {
@@ -1478,6 +1544,7 @@ impl Daemon {
     /// guardadas (Lost and Found e Uploads cancelados) ficam: são a única cópia dessas versões.
     async fn sign_out(&self, engine: &Arc<Engine>, email: &str) -> Result<(), ServiceError> {
         self.stop_account().await;
+        self.save_accounts().await;
         // Com a montagem já desfeita (nenhum `opendir` semeia PNGs novos) e antes de apagar o
         // banco, que guarda a memória das miniaturas semeadas. Melhor esforço: uma falha aqui
         // não impede a saída da conta.
@@ -1486,7 +1553,6 @@ impl Daemon {
             tracing::warn!(erro = %e, "falha ao limpar as miniaturas");
         }
         self.config.tokens.delete(email).await.map_err(failed)?;
-        let _ = std::fs::remove_file(self.current_account_file());
         let dirs = engine.local_dirs();
         let keep = engine.kept().dirs();
         tokio::task::spawn_blocking(move || {

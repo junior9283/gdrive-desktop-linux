@@ -103,7 +103,7 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
     let resume = tokio::spawn({
         let daemon = daemon.clone();
         async move {
-            if let Err(e) = daemon.resume_saved_account().await {
+            if let Err(e) = daemon.resume_saved_accounts().await {
                 tracing::warn!(erro = %e, "não deu para reconectar a conta");
             }
         }

@@ -136,7 +136,7 @@ impl Harness {
         .await;
         (self.daemon, self.proxy) = (daemon, proxy);
         (self.client, self._server) = (client, server);
-        self.daemon.resume_saved_account().await.unwrap();
+        self.daemon.resume_saved_accounts().await.unwrap();
     }
 
     /// Login pelo D-Bus, com o teste fazendo o papel do navegador. Devolve `LoginFinished`.

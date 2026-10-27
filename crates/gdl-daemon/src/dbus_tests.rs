@@ -1458,3 +1458,26 @@ async fn versions_window_downloads_keeps_and_restores() {
     .await;
     assert_eq!(h.proxy.versions(&id).await.unwrap().versions.len(), 3);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn current_account_file_is_migrated() {
+    let mut h = Harness::new().await;
+    h.logged_in().await;
+    let data_dir = h.paths().data_dir;
+    let email = std::fs::read_to_string(data_dir.join("accounts")).unwrap();
+    // Estado da 0.7: só o `current-account`.
+    h.daemon.shutdown().await;
+    std::fs::remove_file(data_dir.join("accounts")).unwrap();
+    std::fs::write(data_dir.join("current-account"), &email).unwrap();
+
+    h.restart(None).await;
+
+    assert!(h.daemon.engine().await.is_some(), "a conta subiu");
+    assert_eq!(
+        std::fs::read_to_string(data_dir.join("accounts"))
+            .unwrap()
+            .trim(),
+        email.trim()
+    );
+    assert!(!data_dir.join("current-account").exists());
+}

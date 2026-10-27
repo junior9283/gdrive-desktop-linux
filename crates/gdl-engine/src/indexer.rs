@@ -94,7 +94,7 @@ pub async fn initial_index(store: &Store, client: &DriveClient) -> Result<()> {
     let root_id = root.id.0.clone();
 
     index_corpus(store, client, &Corpus::MyDrive, &about.email, root.id).await?;
-    sync_drive_list(store, client, &about.email).await?;
+    sync_drive_list(store, client, None, &about.email).await?;
     store.kv_set(ACCOUNT_EMAIL, &about.email)?;
     store.kv_set(ROOT_ID, &root_id)?;
     store.kv_set(START_PAGE_TOKEN, &token)?;

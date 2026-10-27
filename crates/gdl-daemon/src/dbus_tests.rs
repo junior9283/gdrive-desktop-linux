@@ -1895,6 +1895,81 @@ async fn missing_token_resumes_the_others() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_account_that_did_not_start_stays_saved() {
+    let mut h = Harness::new().await;
+    h.two_accounts(ANA).await;
+    // Sem o login e sem o índice, ela não tem como subir na próxima partida.
+    h.tokens.delete(ANA).await.unwrap();
+    h.daemon.shutdown().await;
+    std::fs::remove_file(h.paths().data_dir.join(ANA).join("metadata.db")).unwrap();
+    h.restart(None).await;
+
+    h.daemon.sign_out(&h.fake.email()).await.unwrap();
+
+    assert_eq!(
+        h.saved_accounts(),
+        [ANA],
+        "tentada de novo na próxima partida"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_second_account_keeps_its_folder_after_the_first_leaves() {
+    let mut h = Harness::new().await;
+    let ana = h.fake.add_account(ANA);
+    ana.add_file(&ana.root_id(), "da-ana.txt", b"dois".to_vec());
+    h.logged_in().await;
+    h.logged_in_as(ANA).await;
+    h.daemon.sign_out(&h.fake.email()).await.unwrap();
+
+    h.restart(None).await;
+
+    let kept = h.mount_of(ANA).join("Meu Drive").join("da-ana.txt");
+    assert_eq!(
+        blocking(move || std::fs::read(kept)).await.unwrap(),
+        b"dois",
+        "a pasta não muda de lugar"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pause_reaches_an_account_added_later() {
+    let h = Harness::new().await;
+    h.fake.add_account(ANA);
+    h.logged_in().await;
+    h.daemon.set_paused(true).await.unwrap();
+
+    h.logged_in_as(ANA).await;
+
+    let ana = h.proxy.status(ANA).await.unwrap();
+    assert!(
+        ana.paused,
+        "pausar vale para todas as contas, também as que chegam depois"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_of_every_account_adds_the_counts_up() {
+    let h = Harness::new().await;
+    h.two_accounts(ANA).await;
+    h.daemon.set_paused(true).await.unwrap();
+    let file = h.mount_of(ANA).join("Meu Drive").join("novo.txt");
+    blocking(move || std::fs::write(file, b"novo"))
+        .await
+        .unwrap();
+    status_until(&h, "o envio pendente da Ana", |s| {
+        s.accounts
+            .iter()
+            .any(|a| a.email == ANA && a.pending_uploads == 1)
+    })
+    .await;
+
+    let all = h.proxy.status("").await.unwrap();
+
+    assert_eq!(all.pending_uploads, 1, "a segunda conta também conta");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn signing_in_again_resumes_the_queue() {
     let h = Harness::new().await;
     let ana = h.fake.add_account(ANA);

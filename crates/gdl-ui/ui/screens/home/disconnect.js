@@ -67,7 +67,8 @@ export async function disconnect(ctx) {
   const choice = await askLogout(ctx, { emails: [status.account], pending: status.pending_uploads });
   if (!choice) return;
   toast(t('disconnect-progress'));
-  attempt(api.call('logout', choice), () => toast(t('disconnect-done')));
+  // A conta que o diálogo citou, mesmo que outra janela mude a lista enquanto ele está aberto.
+  attempt(api.call('logout', { ...choice, account: status.account }), () => toast(t('disconnect-done')));
 }
 
 export async function disconnectAll(ctx) {

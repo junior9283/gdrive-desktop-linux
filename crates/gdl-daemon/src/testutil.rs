@@ -208,7 +208,7 @@ impl Harness {
         std::fs::read_to_string(self.paths().data_dir.join("accounts"))
             .unwrap_or_default()
             .lines()
-            .map(String::from)
+            .map(|line| line.split('\t').next().unwrap_or_default().to_string())
             .collect()
     }
 

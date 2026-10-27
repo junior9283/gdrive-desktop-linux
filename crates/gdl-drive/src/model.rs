@@ -92,6 +92,8 @@ pub enum Change {
     Upsert(Box<RemoteFile>),
     /// Item apagado de vez ou que deixou de ser acessível.
     Removed(String),
+    /// O Drive compartilhado com este ID mudou: criado, renomeado, dado ou tirado da conta.
+    Drive(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

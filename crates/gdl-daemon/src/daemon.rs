@@ -55,8 +55,10 @@ use crate::notify::{
 
 /// Quanto o login espera o retorno do navegador.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
-/// Contas conectadas, um e-mail por linha, na ordem em que foram adicionadas.
+/// Contas conectadas, um e-mail por linha, na ordem em que foram adicionadas. A conta que fica
+/// ao lado da pasta preferida (`<preferida> (<e-mail>)`) leva `\tbeside` depois do e-mail.
 const ACCOUNTS: &str = "accounts";
+const BESIDE: &str = "beside";
 /// Quantas contas ficam conectadas ao mesmo tempo.
 pub const MAX_ACCOUNTS: usize = 4;
 /// Arquivo da 0.7 (uma só conta); migrado para `accounts` ao iniciar.
@@ -116,6 +118,8 @@ struct Account {
     /// Os tokens do motor: o login novo da conta entra aqui, sem desmontar nada.
     access: Arc<AccessTokens>,
     mount_point: PathBuf,
+    /// Montada ao lado da pasta preferida, não nela: continua assim nas próximas partidas.
+    beside: bool,
     shutdown: CancellationToken,
     _session: fuser::BackgroundSession,
     _stop: DropGuard,
@@ -305,6 +309,18 @@ pub struct Daemon {
     bandwidth: Arc<Bandwidth>,
     /// A conexão atual é limitada (NetworkManager).
     metered: AtomicBool,
+    /// O usuário pausou: vale também para a conta que entrar depois.
+    paused: AtomicBool,
+    /// Contas guardadas que não subiram nesta partida (e se ficam ao lado): continuam no
+    /// arquivo, para a próxima tentar de novo.
+    not_started: Mutex<Vec<SavedAccount>>,
+}
+
+/// Uma linha do arquivo `accounts`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SavedAccount {
+    email: String,
+    beside: bool,
 }
 
 /// `DirectConnection` vence `ProxyServer`; sem nenhum, o proxy do sistema.
@@ -326,6 +342,8 @@ impl Daemon {
         Ok(Arc::new(Daemon {
             bandwidth,
             metered: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
+            not_started: Mutex::default(),
             layout: Layout::new(&i18n),
             i18n,
             history: History::load(config.paths.state_dir.join(HISTORY_FILE)),
@@ -558,19 +576,31 @@ impl Daemon {
     /// Grava a lista de contas (vazia, o arquivo some), para a próxima execução reconectá-las.
     /// Uma falha só vai para o log: a conta continua conectada nesta execução.
     async fn save_accounts(&self) {
-        let emails: Vec<String> = self
+        let mut current: Vec<SavedAccount> = self
             .accounts
             .lock()
             .await
             .iter()
-            .map(|a| a.email.clone())
+            .map(|a| SavedAccount {
+                email: a.email.clone(),
+                beside: a.beside,
+            })
+            .collect();
+        // As que não subiram nesta partida continuam, depois das que estão de pé.
+        current.extend(self.not_started().iter().cloned());
+        let text: Vec<String> = current
+            .iter()
+            .map(|l| match l.beside {
+                true => format!("{}\t{BESIDE}", l.email),
+                false => l.email.clone(),
+            })
             .collect();
         let path = self.accounts_file();
-        let saved = if emails.is_empty() {
+        let saved = if text.is_empty() {
             gdl_common::fs::remove_file_if_exists(&path)
         } else {
             gdl_common::paths::create_private_dir(&self.config.paths.data_dir)
-                .and_then(|()| gdl_common::fs::write_atomic(&path, emails.join("\n").as_bytes()))
+                .and_then(|()| gdl_common::fs::write_atomic(&path, text.join("\n").as_bytes()))
         };
         if let Err(e) = saved {
             tracing::warn!(erro = %e, "não deu para guardar a lista de contas");
@@ -591,44 +621,54 @@ impl Daemon {
         }
     }
 
-    /// Os e-mails guardados, na ordem em que as contas foram adicionadas.
-    fn saved_emails(&self) -> Vec<String> {
+    /// As contas guardadas, na ordem em que foram adicionadas.
+    fn saved_accounts(&self) -> Vec<SavedAccount> {
         std::fs::read_to_string(self.accounts_file())
             .unwrap_or_default()
             .lines()
-            .map(str::trim)
-            .filter(|e| !e.is_empty())
-            .map(String::from)
+            .filter_map(|line| {
+                let (email, flag) = line.split_once('\t').unwrap_or((line, ""));
+                let email = email.trim();
+                (!email.is_empty()).then(|| SavedAccount {
+                    email: email.into(),
+                    beside: flag.trim() == BESIDE,
+                })
+            })
             .collect()
+    }
+
+    fn not_started(&self) -> std::sync::MutexGuard<'_, Vec<SavedAccount>> {
+        self.not_started.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Reconecta as contas da execução anterior, se houver. Sobem em paralelo, mas entram na
     /// lista na ordem do arquivo, e a primeira do arquivo continua com a pasta preferida.
     pub async fn resume_saved_accounts(self: &Arc<Self>) -> Result<(), ServiceError> {
         self.migrate_current_account();
-        let emails = self.saved_emails();
-        let starts = emails.iter().enumerate().map(|(index, email)| async move {
-            let token_url = self.config.oauth.token.clone();
-            // Sem o login no chaveiro, a conta sobe só com o que está no cache e pede para
-            // entrar de novo.
-            let stored = self.config.tokens.load(email).await.map_err(failed)?;
-            let access = match stored {
-                Some((creds, tokens)) => AccessTokens::new(creds, tokens, token_url),
-                None => AccessTokens::revoked(token_url),
-            };
-            self.mount_account(email, Arc::new(access), index == 0)
-                .await
-        });
-        // Uma conta que não sobe não impede as outras. O arquivo não é regravado: a que não
-        // subiu continua nele.
-        for (email, started) in emails
+        let saved = self.saved_accounts();
+        let starts = saved
+            .iter()
+            .map(|SavedAccount { email, beside }| async move {
+                let token_url = self.config.oauth.token.clone();
+                // Sem o login no chaveiro, a conta sobe só com o que está no cache e pede para
+                // entrar de novo.
+                let stored = self.config.tokens.load(email).await.map_err(failed)?;
+                let access = match stored {
+                    Some((creds, tokens)) => AccessTokens::new(creds, tokens, token_url),
+                    None => AccessTokens::revoked(token_url),
+                };
+                self.mount_account(email, Arc::new(access), *beside).await
+            });
+        // Uma conta que não sobe não impede as outras e continua no arquivo.
+        for (account, started) in saved
             .iter()
             .zip(futures_util::future::join_all(starts).await)
         {
             match started {
-                Ok((account, moved)) => self.register_account(account, moved).await,
+                Ok((mounted, moved)) => self.register_account(mounted, moved).await,
                 Err(e) => {
-                    tracing::warn!(erro = %e, conta = %email, "não deu para reconectar a conta");
+                    tracing::warn!(erro = %e, conta = %account.email, "não deu para reconectar a conta");
+                    self.not_started().push(account.clone());
                 }
             }
         }
@@ -962,9 +1002,10 @@ impl Daemon {
         // A pasta preferida é da primeira conta, a que entra com a lista vazia.
         let access = AccessTokens::new(creds, tokens, self.config.oauth.token.clone());
         let (account, moved) = self
-            .mount_account(&email, Arc::new(access), connected == 0)
+            .mount_account(&email, Arc::new(access), connected > 0)
             .await
             .map_err(|e| fail(&e))?;
+        self.not_started().retain(|s| s.email != email);
         self.register_account(account, moved).await;
         self.save_accounts().await;
         Ok(email)
@@ -1034,14 +1075,14 @@ impl Daemon {
         }
     }
 
-    /// Abre o motor e monta a conta `email`, sem pô-la na lista. `primary`: a pasta preferida;
-    /// as outras contas ficam em `<preferida> (<e-mail>)`. Devolve também se a pasta não é a
+    /// Abre o motor e monta a conta `email`, sem pô-la na lista: na pasta preferida ou, com
+    /// `is_beside`, ao lado dela, em `<preferida> (<e-mail>)`. Devolve também se a pasta não é a
     /// preferida (já tinha arquivos), para avisar o usuário.
     async fn mount_account(
         self: &Arc<Self>,
         email: &str,
         access: Arc<AccessTokens>,
-        primary: bool,
+        is_beside: bool,
     ) -> Result<(Account, bool), ServiceError> {
         let config = &self.config;
         let client = DriveClient::new(
@@ -1054,10 +1095,14 @@ impl Daemon {
         let prefs = self.prefs();
         let engine = self.open_engine(&prefs, email, client).await?;
         let engine = Arc::new(engine.with_intervals(config.intervals));
+        // A pausa do usuário vale também para a conta que entra depois.
+        if self.paused.load(Ordering::SeqCst) {
+            engine.pause();
+        }
         engine.ensure_indexed().await.map_err(failed)?;
 
         let mut preferred = self.preferred_mount_point(&prefs);
-        if !primary {
+        if is_beside {
             preferred = beside(&preferred, email);
         }
         let mount_point = mount::choose(&preferred).map_err(failed)?;
@@ -1087,6 +1132,7 @@ impl Daemon {
             engine,
             access,
             mount_point,
+            beside: is_beside,
             _stop: shutdown.clone().drop_guard(),
             shutdown,
             _session: session,
@@ -1290,22 +1336,31 @@ impl Daemon {
                 .ok_or_else(|| self.not_logged_in())?,
         };
         let summary = &summaries[index];
-        let state = match account {
-            "" => summaries.iter().map(|s| s.state()).max(),
-            _ => None,
-        }
-        .unwrap_or_else(|| summary.state());
+        // Sem conta pedida (a bandeja): o pior estado e os totais de todas.
+        let all = account.is_empty();
+        let state = match all {
+            true => summaries
+                .iter()
+                .map(|s| s.state())
+                .max()
+                .unwrap_or_else(|| summary.state()),
+            false => summary.state(),
+        };
+        let total = |count: fn(&gdl_engine::events::SyncSummary) -> u32| match all {
+            true => summaries.iter().map(count).sum(),
+            false => count(summary),
+        };
         Ok(Status {
             account: accounts[index].email.clone(),
             mount_point: accounts[index].mount_point.clone(),
             state: state.as_str().into(),
-            syncing: summary.syncing,
+            syncing: total(|s| s.syncing),
             remaining_secs: summary.remaining_secs.map_or(-1, |s| s as i64),
-            pending_uploads: summary.pending_uploads,
+            pending_uploads: total(|s| s.pending_uploads),
             paused: summary.paused,
             offline: summary.offline,
             last_sync_ms: summary.last_sync_ms.unwrap_or(0),
-            errors: summary.errors,
+            errors: total(|s| s.errors),
             accounts,
             can_add_account,
         })
@@ -1435,11 +1490,14 @@ impl Daemon {
         self.with_account(account, |a| a.engine.clone()).await
     }
 
-    /// O e-mail da conta dona do motor (vazio se ela já saiu).
-    async fn email_of(&self, engine: &Arc<Engine>) -> String {
+    /// O e-mail da conta dona do motor. Se ela já saiu, recusa: conta vazia nas telas seria a
+    /// primeira conta, e a tela abriria em outra.
+    async fn email_of(&self, engine: &Arc<Engine>) -> Result<String, ServiceError> {
         let accounts = self.accounts.lock().await;
         let found = accounts.iter().find(|a| Arc::ptr_eq(&a.engine, engine));
-        found.map(|a| a.email.clone()).unwrap_or_default()
+        found
+            .map(|a| a.email.clone())
+            .ok_or_else(|| self.not_logged_in())
     }
 
     /// O motor da conta cuja montagem é o prefixo mais longo de `path`, e o caminho relativo a ela.
@@ -1462,6 +1520,7 @@ impl Daemon {
         for account in accounts.iter() {
             apply_paused(&account.engine, paused);
         }
+        self.paused.store(paused, Ordering::SeqCst);
         Ok(())
     }
 
@@ -1739,7 +1798,7 @@ impl Daemon {
         let action = Action::parse(action).ok_or_else(invalid)?;
         if let Some(screen) = action.shared_drives_screen() {
             let engine = self.shared_drives_folder(paths).await.ok_or_else(invalid)?;
-            let account = self.email_of(&engine).await;
+            let account = self.email_of(&engine).await?;
             self.open_screen(format!("shared-drives:{account}{screen}"));
             return Ok(String::new());
         }
@@ -1767,7 +1826,7 @@ impl Daemon {
             Action::Share | Action::Versions | Action::AddShortcut => {
                 let (engine, item) = single()?;
                 let screen = action.screen().ok_or_else(invalid)?;
-                let account = self.email_of(engine).await;
+                let account = self.email_of(engine).await?;
                 self.open_screen(format!("{screen}:{account}/{}", item.id.0));
             }
             Action::CopyLink => {
@@ -1775,7 +1834,7 @@ impl Daemon {
                 let link = web_link(item)?;
                 // O aviso diz quem pode abrir o link; ele sai depois, sem atrasar a cópia.
                 let (daemon, engine, id) = (self.clone(), engine.clone(), item.id.clone());
-                let account = self.email_of(&engine).await;
+                let account = self.email_of(&engine).await?;
                 tokio::spawn(
                     async move { daemon.notify_link_copied(&account, &engine, &id).await },
                 );
@@ -1955,7 +2014,9 @@ impl Daemon {
         if let Err(e) = tokio::task::spawn_blocking(move || thumbs.purge_thumbnails()).await {
             tracing::warn!(erro = %e, "falha ao limpar as miniaturas");
         }
-        self.config.tokens.delete(email).await.map_err(failed)?;
+        // Os dados locais saem mesmo com o chaveiro fora do ar: a conta já não está na lista, e
+        // nada voltaria para apagá-los.
+        let token = self.config.tokens.delete(email).await;
         let dirs = engine.local_dirs();
         let keep = engine.kept().dirs();
         tokio::task::spawn_blocking(move || {
@@ -1969,6 +2030,7 @@ impl Daemon {
         .map_err(failed)?
         .map_err(failed)?;
         self.emit_status_changed().await;
+        token.map_err(failed)?;
         Ok(())
     }
 

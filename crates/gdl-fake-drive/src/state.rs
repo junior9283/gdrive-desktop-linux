@@ -181,6 +181,8 @@ pub(crate) struct State {
     pub(crate) max_uploads_in_flight: u32,
     /// Erro de cada miniatura (`Fault::ThumbStatus`).
     pub(crate) thumb_status: Option<u16>,
+    /// Erro da listagem de um Drive compartilhado (`Fault::DriveListingStatus`).
+    pub(crate) drive_listing_fault: Option<(String, u16)>,
     /// Corpo de cada miniatura cortado no meio (`Fault::CutThumbBody`).
     pub(crate) thumb_cut: bool,
     pub(crate) files: BTreeMap<String, FileRec>,
@@ -236,6 +238,7 @@ impl State {
             uploads_in_flight: 0,
             max_uploads_in_flight: 0,
             thumb_status: None,
+            drive_listing_fault: None,
             thumb_cut: false,
             files: BTreeMap::new(),
             drives: vec![],
@@ -305,12 +308,14 @@ impl State {
 
     /// Dá o Drive compartilhado `id` a `email`.
     pub(crate) fn add_member(&mut self, id: &str, email: &str) {
-        let drive = self
-            .drives
+        self.drive_mut(id).members.push(email.into());
+    }
+
+    pub(crate) fn drive_mut(&mut self, id: &str) -> &mut DriveRec {
+        self.drives
             .iter_mut()
             .find(|d| d.id == id)
-            .unwrap_or_else(|| panic!("Drive compartilhado {id} não existe no Drive simulado"));
-        drive.members.push(email.into());
+            .unwrap_or_else(|| panic!("Drive compartilhado {id} não existe no Drive simulado"))
     }
 
     /// O Drive compartilhado onde o item está: o primeiro item acima dele (ou ele mesmo) cujo ID
@@ -324,6 +329,10 @@ impl State {
             current = file.parents.first().and_then(|p| self.files.get(p));
         }
         None
+    }
+
+    fn is_drive(&self, id: &str) -> bool {
+        self.drives.iter().any(|d| d.id == id)
     }
 
     /// Os Drives compartilhados de que `account` é membro.
@@ -643,15 +652,24 @@ impl State {
             .filter(|(seq, _)| *seq >= token)
             .filter(|(_, id)| seen.insert(id.as_str()))
             .filter(|(_, id)| {
-                self.files
-                    .get(id)
-                    .is_none_or(|f| self.listed_for(account, scope, f))
+                self.is_drive(id)
+                    || self
+                        .files
+                        .get(id)
+                        .is_none_or(|f| self.listed_for(account, scope, f))
             })
             .collect();
         let page = &pending[..pending.len().min(page_size)];
         let changes: Vec<Value> = page
             .iter()
             .map(|(_, id)| match self.files.get(id) {
+                // Como no Drive real: a mudança de um Drive compartilhado (criado, renomeado, dado
+                // ou tirado da conta) não traz `fileId`.
+                _ if self.is_drive(id) => match self.drives_of(account).find(|d| d.id == **id) {
+                    Some(d) => json!({ "changeType": "drive", "driveId": id, "removed": false,
+                                       "drive": { "id": id, "name": d.name } }),
+                    None => json!({ "changeType": "drive", "driveId": id, "removed": true }),
+                },
                 Some(f) => json!({ "changeType": "file", "fileId": id, "removed": false, "file": self.to_json(f) }),
                 None => json!({ "changeType": "file", "fileId": id, "removed": true }),
             })

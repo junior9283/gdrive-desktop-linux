@@ -66,6 +66,26 @@ const TOP_PINNED: &str = "WHERE pin != 0 AND pin = ?1 AND trashed = 0 AND NOT EX
 const DRIVE_ITEMS: &str = "WITH RECURSIVE down(id) AS ( \
      SELECT ?1 UNION SELECT i.id FROM items i JOIN down ON i.parent = down.id)";
 
+/// Há edição local ou envio na fila em algum item do Drive `drive`.
+fn drive_has_pending(conn: &Connection, drive: &ItemId) -> Result<bool> {
+    Ok(conn.query_row(
+        &format!(
+            "{DRIVE_ITEMS} SELECT EXISTS (SELECT 1 FROM items i JOIN down ON i.id = down.id \
+             WHERE i.local_state IN (1, 2, 3) OR i.id IN (SELECT item_id FROM upload_queue))"
+        ),
+        [&drive.0],
+        |r| r.get(0),
+    )?)
+}
+
+fn set_drive_enabled(conn: &Connection, id: &ItemId, enabled: bool) -> Result<()> {
+    conn.execute(
+        "UPDATE shared_drives SET enabled = ?2 WHERE id = ?1",
+        params![id.0, enabled],
+    )?;
+    Ok(())
+}
+
 /// Resumo da fila de envio (`Store::queue_stats`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct QueueStats {
@@ -876,24 +896,25 @@ impl Store {
     }
 
     pub fn set_drive_enabled(&self, id: &ItemId, enabled: bool) -> Result<()> {
-        self.conn().execute(
-            "UPDATE shared_drives SET enabled = ?2 WHERE id = ?1",
-            params![id.0, enabled],
-        )?;
-        Ok(())
+        set_drive_enabled(&self.conn(), id, enabled)
     }
 
     /// Itens com edição local ou envio na fila dentro do Drive compartilhado `drive`.
     pub fn drive_has_pending(&self, drive: &ItemId) -> Result<bool> {
-        Ok(self.conn().query_row(
-            &format!(
-                "{DRIVE_ITEMS} SELECT EXISTS (SELECT 1 FROM items i JOIN down ON i.id = down.id \
-                 WHERE i.local_state IN (1, 2, 3) \
-                 OR i.id IN (SELECT item_id FROM upload_queue))"
-            ),
-            [&drive.0],
-            |r| r.get(0),
-        )?)
+        drive_has_pending(&self.conn(), drive)
+    }
+
+    /// Desliga o Drive compartilhado e esquece os itens dele (como `forget_drive_items`) numa
+    /// transação só, para uma gravação local não entrar entre a conferência e o esquecimento.
+    /// Com envio pendente nele, devolve `None` e nada muda.
+    pub fn disable_drive(&self, drive: &ItemId) -> Result<Option<Vec<ItemId>>> {
+        self.modify(|b| {
+            if drive_has_pending(b.conn, drive)? {
+                return Ok(None);
+            }
+            set_drive_enabled(b.conn, drive, false)?;
+            b.forget_drive_items(drive).map(Some)
+        })
     }
 
     /// Apaga do banco a raiz do Drive compartilhado e tudo o que há dentro (como `remove_item`
@@ -1450,6 +1471,36 @@ mod tests {
         assert_eq!(gone, [id("a.txt"), id("equipe")]);
         assert!(store.get(&id("a.txt")).unwrap().is_none());
         assert!(store.get(&id("fora.txt")).unwrap().is_some());
+    }
+
+    #[test]
+    fn disabling_a_drive_checks_and_forgets_at_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store
+            .upsert_items(&[folder("equipe", None), item("a.txt", Some("equipe"))])
+            .unwrap();
+        let drive = StoredDrive {
+            id: id("equipe"),
+            name: "Equipe".into(),
+            enabled: true,
+        };
+        store.put_shared_drive(&drive).unwrap();
+        store
+            .set_local_state(&id("a.txt"), LocalState::Dirty)
+            .unwrap();
+
+        assert_eq!(store.disable_drive(&id("equipe")).unwrap(), None);
+        assert!(store.get(&id("a.txt")).unwrap().is_some(), "a edição fica");
+        assert!(store.shared_drives().unwrap()[0].enabled);
+
+        store
+            .set_local_state(&id("a.txt"), LocalState::Clean)
+            .unwrap();
+        let mut gone = store.disable_drive(&id("equipe")).unwrap().unwrap();
+        gone.sort();
+        assert_eq!(gone, [id("a.txt"), id("equipe")]);
+        assert!(!store.shared_drives().unwrap()[0].enabled);
     }
 
     #[test]

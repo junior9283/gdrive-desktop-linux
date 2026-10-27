@@ -121,6 +121,8 @@ pub(crate) fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usiz
                     Some(item_from_remote(*r, email.as_str())),
                 ),
                 Change::Removed(id) => (ItemId(id), None),
+                // A lista de Drives já foi consultada antes (`register_new_drives`).
+                Change::Drive(_) => continue,
             };
             let (old, cleared) = match pending.remove(&id) {
                 Some((item, clear)) => (Some(item), clear),
@@ -221,9 +223,10 @@ impl ChangePoller {
         Ok(applied)
     }
 
-    /// Um Drive compartilhado que aparece nas mudanças e o banco não conhece entra ligado e
-    /// indexado antes de elas serem aplicadas (a lista é consultada só nessa hora). Um que a
-    /// lista não traz não é procurado de novo até `forget_searched_drives`.
+    /// Antes de aplicar as mudanças, a lista de Drives é consultada quando um Drive mudou
+    /// (criado, renomeado, dado ou tirado da conta) ou quando um item vem de um Drive que o banco
+    /// não conhece: os novos entram ligados e indexados. Um que a lista não traz não é procurado
+    /// de novo até `forget_searched_drives`.
     async fn register_new_drives(&self, changes: &[Change]) -> Result<()> {
         let known = self.store.shared_drives()?;
         let unknown: BTreeSet<String> = {
@@ -232,16 +235,17 @@ impl ChangePoller {
                 .iter()
                 .filter_map(|c| match c {
                     Change::Upsert(r) => r.drive_id.clone(),
-                    Change::Removed(_) => None,
+                    Change::Removed(_) | Change::Drive(_) => None,
                 })
                 .filter(|d| !searched.contains(d) && known.iter().all(|k| k.id.0 != *d))
                 .collect()
         };
-        if unknown.is_empty() {
+        let drive_changed = changes.iter().any(|c| matches!(c, Change::Drive(_)));
+        if unknown.is_empty() && !drive_changed {
             return Ok(());
         }
         let email = self.store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
-        sync_drive_list(&self.store, &self.client, &email).await?;
+        sync_drive_list(&self.store, &self.client, Some(&self.cache), &email).await?;
         let known = self.store.shared_drives()?;
         self.searched().extend(
             unknown

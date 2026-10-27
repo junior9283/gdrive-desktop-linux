@@ -47,6 +47,9 @@ pub enum Fault {
     /// As miniaturas (`/thumb`) mandam o começo da imagem e a conexão cai no meio do corpo,
     /// até `clear_faults`.
     CutThumbBody,
+    /// A listagem dos itens do Drive compartilhado `drive` responde o erro `code`, até
+    /// `clear_faults` (o Drive está em `drives.list`, mas não dá para ler o que há nele).
+    DriveListingStatus { drive: String, code: u16 },
 }
 
 pub struct FakeDrive {
@@ -267,6 +270,9 @@ impl FakeDrive {
             Fault::DelayUploads(delay) => self.shared.state().upload_delay = Some(delay),
             Fault::ThumbStatus(code) => self.shared.state().thumb_status = Some(code),
             Fault::CutThumbBody => self.shared.state().thumb_cut = true,
+            Fault::DriveListingStatus { drive, code } => {
+                self.shared.state().drive_listing_fault = Some((drive, code));
+            }
         }
     }
 
@@ -278,6 +284,7 @@ impl FakeDrive {
             state.thumb_delay = None;
             state.upload_delay = None;
             state.thumb_status = None;
+            state.drive_listing_fault = None;
             state.thumb_cut = false;
         }
         self.shared.drop_budget.store(-1, Ordering::SeqCst);
@@ -348,13 +355,24 @@ impl FakeDrive {
         self.shared.state().add_member(id, email);
     }
 
+    /// Renomeia o Drive compartilhado `id` (e a pasta que é a raiz dele).
+    pub fn rename_shared_drive(&self, id: &str, name: &str) {
+        let mut state = self.shared.state();
+        state.drive_mut(id).name = name.into();
+        state.file_mut(id).name = name.into();
+        state.record_change(id);
+    }
+
+    /// Tira o Drive compartilhado `id` de `email`: ele some da lista e das mudanças dela.
+    pub fn unshare_drive(&self, id: &str, email: &str) {
+        let mut state = self.shared.state();
+        state.drive_mut(id).members.retain(|m| m != email);
+        state.record_change(id);
+    }
+
     /// Troca o direito de criar itens dentro do Drive compartilhado `id` (padrão: pode).
     pub fn set_drive_can_add_children(&self, id: &str, can: bool) {
-        let mut state = self.shared.state();
-        let drive = state.drives.iter_mut().find(|d| d.id == id);
-        drive
-            .unwrap_or_else(|| panic!("Drive compartilhado {id} não existe no Drive simulado"))
-            .can_add_children = can;
+        self.shared.state().drive_mut(id).can_add_children = can;
     }
 
     /// O próximo login (tela de consentimento) entra na conta `email`, uma vez; depois volta a

@@ -219,6 +219,12 @@ async fn list(State(shared): Shr, Extension(me): Extension<Me>, Query(params): P
     };
     // Como no Drive real, o compartilhado comigo (sem pai no Meu Drive) também vem na listagem.
     let scope = scope_of(&params);
+    if let Scope::Drive(drive) = &scope
+        && let Some((failing, code)) = shared.state().drive_listing_fault.clone()
+        && *drive == failing
+    {
+        return api_error(code, "notFound", "Shared drive not found");
+    }
     let mut state = shared.state();
     let my_root = state.root_of(&me.0);
     let (hits, next) = offset_page(

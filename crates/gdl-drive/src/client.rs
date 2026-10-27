@@ -764,13 +764,19 @@ impl DriveClient {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct RawChange {
+            // A mudança de um Drive compartilhado não traz `fileId`.
+            #[serde(default)]
             file_id: String,
+            change_type: Option<String>,
+            drive_id: Option<String>,
             #[serde(default)]
             removed: bool,
             file: Option<RemoteFile>,
         }
-        let fields =
-            format!("nextPageToken,newStartPageToken,changes(fileId,removed,file({FILE_FIELDS}))");
+        let fields = format!(
+            "nextPageToken,newStartPageToken,\
+             changes(changeType,fileId,driveId,removed,file({FILE_FIELDS}))"
+        );
         let mut all = vec![];
         let mut page_token = token.to_string();
         loop {
@@ -788,6 +794,9 @@ impl DriveClient {
                 })
                 .await?;
             all.extend(page.changes.into_iter().map(|c| match c.file {
+                _ if c.change_type.as_deref() == Some("drive") => {
+                    Change::Drive(c.drive_id.unwrap_or_default())
+                }
                 Some(file) if !c.removed => Change::Upsert(Box::new(file)),
                 _ => Change::Removed(c.file_id),
             }));
@@ -1851,6 +1860,28 @@ mod tests {
             &changes[..],
             [Change::Upsert(f)] if f.id == id && f.drive_id.as_deref() == Some(drive.as_str())
         ));
+    }
+
+    #[tokio::test]
+    async fn drive_changes_come_without_a_file() {
+        let fake = FakeDrive::start().await;
+        let ana = fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Equipe");
+        fake.share_drive(&drive, &fake.email());
+        let c = client(&fake);
+        let token = c.start_page_token().await.unwrap();
+        fake.rename_shared_drive(&drive, "Equipe nova");
+        let id = fake.add_file(&fake.root_id(), "meu.txt", b"1".to_vec());
+
+        let (changes, _) = c.changes(&token).await.unwrap();
+
+        assert!(
+            matches!(
+                &changes[..],
+                [Change::Drive(d), Change::Upsert(f)] if *d == drive && f.id == id
+            ),
+            "{changes:?}"
+        );
     }
 
     #[tokio::test]

@@ -4,6 +4,7 @@ use gdl_drive::client::{Corpus, DriveClient};
 use gdl_drive::model::SharedDrive;
 use gdl_store::{Inode, Item, ItemId, ItemKind, LocalState, PinState, Store, StoredDrive};
 
+use crate::cache::BlockCache;
 use crate::engine::Engine;
 use crate::indexer::index_corpus;
 use crate::{EngineError, Result};
@@ -84,10 +85,15 @@ async fn index_drive(
 }
 
 /// Consulta a lista de Drives da conta: os que o banco ainda não conhecia entram ligados e
-/// indexados, e os outros só têm o nome atualizado. Devolve a lista, por nome.
+/// indexados, os outros têm o nome atualizado e os ligados que saíram da lista (apagados ou
+/// tirados da conta) são esquecidos, se não têm envio pendente. Um Drive que não dá para
+/// indexar fica de fora até a próxima consulta, sem segurar os outros. O conteúdo dos esquecidos
+/// sai de `cache` (sem ele, na primeira indexação, não há o que tirar). Devolve a lista, por
+/// nome.
 pub(crate) async fn sync_drive_list(
     store: &Store,
     client: &DriveClient,
+    cache: Option<&BlockCache>,
     email: &str,
 ) -> Result<Vec<SharedDrive>> {
     let mut drives = client.drives().await?;
@@ -100,10 +106,36 @@ pub(crate) async fn sync_drive_list(
                 name: drive.name.clone(),
                 ..known.clone()
             })?,
-            None => index_drive(store, client, drive, email).await?,
+            None => {
+                if let Err(e) = index_drive(store, client, drive, email).await {
+                    tracing::warn!(erro = %e, drive = %drive.id, "não deu para indexar o Drive compartilhado");
+                }
+            }
+        }
+    }
+    for gone in known
+        .iter()
+        .filter(|k| k.enabled && drives.iter().all(|d| d.id != k.id.0))
+    {
+        match store.disable_drive(&gone.id)? {
+            Some(ids) => {
+                if let Some(cache) = cache {
+                    discard(cache, &ids).await?;
+                }
+            }
+            None => {
+                tracing::warn!(drive = %gone.id.0, "Drive que saiu da lista fica até os envios pendentes terminarem")
+            }
         }
     }
     Ok(drives)
+}
+
+async fn discard(cache: &BlockCache, ids: &[ItemId]) -> Result<()> {
+    for id in ids {
+        cache.discard(id).await?;
+    }
+    Ok(())
 }
 
 /// `name`, ou `name (2)`, `name (3)`… o primeiro que nenhum de `taken` usa.
@@ -123,7 +155,7 @@ impl Engine {
     /// ligado e indexado), com o estado de ligado de cada um.
     pub async fn shared_drives(&self) -> Result<Vec<SharedDriveInfo>> {
         let email = self.account_email()?;
-        let drives = sync_drive_list(&self.store, &self.client, &email).await?;
+        let drives = sync_drive_list(&self.store, &self.client, Some(&self.cache), &email).await?;
         self.poller.forget_searched_drives();
         self.infos(drives)
     }
@@ -165,11 +197,13 @@ impl Engine {
                 }
             }
         }
+        // Conferido de novo ao desligar: algo pode ter sido gravado enquanto os outros indexavam.
         for drive in to_disable {
-            self.store.set_drive_enabled(&drive.id, false)?;
-            for id in self.store.forget_drive_items(&drive.id)? {
-                self.cache.discard(&id).await?;
-            }
+            let forgotten = self
+                .store
+                .disable_drive(&drive.id)?
+                .ok_or(EngineError::PendingUploads)?;
+            discard(&self.cache, &forgotten).await?;
         }
         Ok(())
     }
@@ -182,11 +216,12 @@ impl Engine {
             return Err(EngineError::EmptyName);
         }
         let email = self.account_email()?;
-        let taken: Vec<String> = sync_drive_list(&self.store, &self.client, &email)
-            .await?
-            .into_iter()
-            .map(|d| d.name)
-            .collect();
+        let taken: Vec<String> =
+            sync_drive_list(&self.store, &self.client, Some(&self.cache), &email)
+                .await?
+                .into_iter()
+                .map(|d| d.name)
+                .collect();
         // Um pedido novo a cada chamada: o mesmo `requestId` devolveria o Drive de antes.
         let request_id = format!("{:032x}", rand::random::<u128>());
         let drive = self
@@ -402,6 +437,71 @@ mod tests {
         let drives = engine.shared_drives().await.unwrap();
         assert_eq!((drives[0].name.as_str(), drives[0].enabled), ("Novo", true));
         assert!(engine.store().get(&id(&old)).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn renamed_drive_gets_the_new_name_on_the_next_poll() {
+        let (fake, team, engine, _tmp) = setup().await;
+
+        fake.rename_shared_drive(&team.drive, "Equipe nova");
+        engine.poller.run_once().await.unwrap();
+
+        let path = engine.store().path_of(&id(&team.file)).unwrap().unwrap();
+        assert_eq!(
+            path.root,
+            DriveRoot::Shared {
+                id: id(&team.drive),
+                name: "Equipe nova".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_drive_taken_away_leaves_the_mount() {
+        let (fake, team, engine, _tmp) = setup().await;
+
+        fake.unshare_drive(&team.drive, &fake.email());
+        engine.poller.run_once().await.unwrap();
+
+        let store = engine.store();
+        assert!(store.get(&id(&team.file)).unwrap().is_none());
+        assert!(store.shared_drives().unwrap().iter().all(|d| !d.enabled));
+        assert!(
+            store
+                .lookup(&root_of(&engine), "meu.txt")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_drive_that_cannot_be_read_does_not_stop_the_rest() {
+        let fake = FakeDrive::start().await;
+        let ana = fake.add_account("ana@example.com");
+        let broken = ana.add_shared_drive("Fechado");
+        fake.share_drive(&broken, &fake.email());
+        fake.inject(Fault::DriveListingStatus {
+            drive: broken.clone(),
+            code: 404,
+        });
+        // Na primeira indexação: o Meu Drive entra mesmo assim.
+        let (engine, _tmp) = indexed_engine(&fake).await;
+        let mine = fake.add_file(&fake.root_id(), "meu.txt", b"1".to_vec());
+        // Nas mudanças: um Drive novo que não abre não segura as outras.
+        let other = ana.add_shared_drive("Outro");
+        fake.share_drive(&other, &fake.email());
+        let theirs = ana.add_file(&other, "deles.txt", b"2".to_vec());
+        engine.poller.run_once().await.unwrap();
+
+        let store = engine.store();
+        assert!(store.get(&id(&mine)).unwrap().is_some());
+        assert!(store.get(&id(&theirs)).unwrap().is_some());
+        fake.clear_faults();
+        let drives = engine.shared_drives().await.unwrap();
+        assert!(
+            drives.iter().all(|d| d.enabled),
+            "o que falhou é tentado de novo"
+        );
     }
 
     #[tokio::test]

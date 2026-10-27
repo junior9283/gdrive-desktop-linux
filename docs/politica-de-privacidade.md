@@ -21,7 +21,7 @@ servidores próprios e não recebe nenhum dado seu.
 ## Para que o app usa os dados do Google
 
 O app pede três permissões no login: o Google Drive (`drive`), para listar, abrir, enviar e
-organizar os seus arquivos, e `openid` e `email`, para saber qual conta está conectada. Ele usa esses
+organizar os seus arquivos (e, quando você pede, compartilhá-los ou ver as versões guardadas), e `openid` e `email`, para saber qual conta está conectada. Ele usa esses
 dados só para mostrar e sincronizar o seu Drive no seu computador. Não os vende, não os usa para
 publicidade e não os entrega a ninguém.
 

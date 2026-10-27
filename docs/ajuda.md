@@ -23,6 +23,17 @@ Use `gdrive-desktop-linux pin <caminho>` no terminal para deixar um arquivo ou p
 off-line, e `gdrive-desktop-linux unpin <caminho>` para voltar a deixá-lo só na nuvem. A tela
 **Arquivos off-line** mostra o que está no computador e o espaço usado.
 
+## Menu do botão direito
+
+Nos arquivos e pastas do Drive, o gerenciador de arquivos ganha o submenu **Google Drive**: abrir no
+navegador, copiar o link (o aviso diz quem pode abrir), disponível off-line ou só on-line,
+**Compartilhar** (pessoas, papéis e acesso geral), **Gerenciar versões** (baixar, restaurar ou
+manter para sempre) e, nos arquivos do Office, abrir no Documentos, Planilhas ou Apresentações. No
+Dolphin, cada arquivo mostra também um emblema: na nuvem, off-line, sincronizando ou em conflito.
+
+No KDE, o app tira a pasta do Drive do indexador de arquivos (Baloo), que baixaria tudo para ler o
+conteúdo; as outras pastas excluídas continuam como estavam. Desinstalar desfaz a mudança.
+
 ## Algo deu errado
 
 Veja as [perguntas frequentes](perguntas-frequentes.md). Se o problema continuar, abra um relato em

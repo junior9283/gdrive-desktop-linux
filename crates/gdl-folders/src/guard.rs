@@ -90,6 +90,16 @@ pub fn network_fs(path: &Path) -> bool {
     rustix::fs::statfs(path).is_ok_and(|s| NETWORK.contains(&(s.f_type as u64)))
 }
 
+/// `path` é um ponto de montagem: está num disco diferente do da pasta acima.
+pub fn is_mount_point(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev());
+    match (dev(path), path.parent().map(dev)) {
+        (Ok(here), Some(Ok(above))) => here != above,
+        _ => false,
+    }
+}
+
 /// A raiz do par não está utilizável: o par para (nunca vira "tudo excluído").
 pub fn root_problem(root: &Path) -> Option<StopReason> {
     match std::fs::read_dir(root) {

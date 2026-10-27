@@ -420,12 +420,16 @@ impl Daemon {
             .collect()
     }
 
-    /// Os pares de todas as contas conectadas, com o motor de cada um.
+    /// Os pares que são pastas no computador, de todas as contas conectadas, com o motor de cada
+    /// um. Os backups de dispositivo ficam de fora: são envios avulsos, e o ponto de montagem
+    /// guardado pode ser hoje de outro disco.
     async fn all_pairs(&self) -> Vec<(Arc<Engine>, Pair)> {
         let mut pairs = vec![];
         for (_, engine, _) in self.folder_accounts().await {
             for pair in engine.store().pairs().unwrap_or_default() {
-                pairs.push((engine.clone(), pair));
+                if pair.kind != PairKind::Device {
+                    pairs.push((engine.clone(), pair));
+                }
             }
         }
         pairs
@@ -447,7 +451,7 @@ impl Daemon {
             taken.extend(
                 pairs
                     .into_iter()
-                    .filter(|p| Some(p.id) != except)
+                    .filter(|p| p.kind != PairKind::Device && Some(p.id) != except)
                     .map(|p| p.local),
             );
         }

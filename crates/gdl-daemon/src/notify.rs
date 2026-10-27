@@ -330,10 +330,10 @@ impl Notifier {
                 zbus::Result::Ok(caps.iter().any(|c| c == "body-markup"))
             })
             .await;
-        // Sem resposta, sem escapar: a mesma falha impede o aviso de sair.
+        // Só sai cru se o servidor disse que não interpreta marcação; na dúvida, escapado.
         let body = match markup {
-            Ok(true) => std::borrow::Cow::Owned(crate::desktop::xml_text(&note.body)),
-            _ => std::borrow::Cow::Borrowed(&note.body),
+            Ok(false) => std::borrow::Cow::Borrowed(&note.body),
+            _ => std::borrow::Cow::Owned(crate::desktop::xml_text(&note.body)),
         };
         let sent = self
             .proxy

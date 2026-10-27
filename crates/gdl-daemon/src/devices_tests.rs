@@ -226,3 +226,30 @@ async fn device_label_is_not_markup() {
         ask.body
     );
 }
+
+/// Bug da revisão final: o par do backup ficava com o ponto de montagem. Outro pendrive com o
+/// mesmo rótulo montava no mesmo lugar e não fazia backup (caminho já de outro par), e o lugar
+/// aparecia como pasta sincronizada no Dolphin.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn another_device_with_the_same_label_backs_up_too() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let mount = pendrive(&h);
+    h.plug(UUID, LABEL, &mount).await;
+    wait_until("pergunta", || notes_titled(&h, ASK).len() == 1).await;
+    h.proxy.backup_device(UUID, false).await.unwrap();
+    wait_until("primeiro backup", || notes_titled(&h, DONE).len() == 1).await;
+    unplug(&h).await;
+
+    assert_eq!(h.proxy.folder_roots().await.unwrap(), Vec::<String>::new());
+    let shown = mount.join("fotos/praia.jpg").display().to_string();
+    assert_eq!(h.proxy.folder_states(&[&shown]).await.unwrap(), vec![""]);
+
+    std::fs::write(mount.join("outra.txt"), b"outra").unwrap();
+    h.plug("9999-FFFF", LABEL, &mount).await;
+    wait_until("pergunta", || notes_titled(&h, ASK).len() == 2).await;
+    h.proxy.backup_device("9999-FFFF", false).await.unwrap();
+
+    wait_until("segundo backup", || notes_titled(&h, DONE).len() == 2).await;
+    wait_until("outra.txt", || h.fake.find_live("outra.txt").len() == 1).await;
+}

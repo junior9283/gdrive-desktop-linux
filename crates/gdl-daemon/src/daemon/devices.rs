@@ -302,7 +302,8 @@ impl Daemon {
         let store = engine.store();
         let key = pair_key(&device.id);
         let known = store.kv_get(&key).map_err(failed)?;
-        let known = known.and_then(|id| id.parse().ok());
+        let known: Option<i64> = known.and_then(|id| id.parse().ok());
+        self.release_mount(store, &device.mount, known)?;
         let pair = match known.and_then(|id| store.pair(id).ok().flatten()) {
             Some(mut pair) => {
                 if pair.local != device.mount {
@@ -335,5 +336,29 @@ impl Daemon {
             }
         };
         Ok((engine, pair))
+    }
+
+    /// O backup de outro dispositivo que montava em `mount` (outro pendrive com o mesmo rótulo)
+    /// solta o caminho, que no banco só pode ser de um par: guarda um lugar que não existe, até
+    /// aquele dispositivo voltar.
+    fn release_mount(
+        &self,
+        store: &gdl_store::Store,
+        mount: &std::path::Path,
+        keep: Option<i64>,
+    ) -> Result<(), ServiceError> {
+        let pairs = store.pairs().map_err(failed)?.into_iter();
+        let mut others =
+            pairs.filter(|p| p.kind == PairKind::Device && p.local == mount && Some(p.id) != keep);
+        if let Some(other) = others.next() {
+            let away = self
+                .config
+                .paths
+                .data_dir
+                .join("unplugged")
+                .join(other.id.to_string());
+            store.set_pair_local(other.id, &away).map_err(failed)?;
+        }
+        Ok(())
     }
 }

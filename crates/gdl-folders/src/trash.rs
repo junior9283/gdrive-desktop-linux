@@ -110,11 +110,24 @@ impl Trash {
 
 /// A lixeira é uma pasta de verdade (não link) do usuário; a `.Trash-<uid>` de outro disco também
 /// só dele: num disco compartilhado, outro usuário poderia tê-la criado antes para receber os
-/// arquivos. (A da pasta pessoal pode ter as permissões que o sistema deu.)
+/// arquivos. (A da pasta pessoal pode ter as permissões que o sistema deu.) Aberta, ela é fechada;
+/// se o sistema de arquivos ignora permissões (FAT, exFAT), ele também não guarda dono, e tudo
+/// nele é de quem montou: ninguém mais poderia tê-la preparado.
 fn check_private(dir: &Path, in_home: bool) -> io::Result<()> {
-    let m = std::fs::symlink_metadata(dir)?;
+    use std::os::unix::fs::PermissionsExt;
+    let mut m = std::fs::symlink_metadata(dir)?;
     let uid = rustix::process::getuid().as_raw();
-    if !m.is_dir() || m.uid() != uid || (!in_home && m.mode() & 0o077 != 0) {
+    let open = |m: &std::fs::Metadata| !in_home && m.mode() & 0o077 != 0;
+    if m.is_dir() && m.uid() == uid && open(&m) {
+        let before = m.mode();
+        // Um chmod recusado é o mesmo que ignorado: o modo não muda.
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        m = std::fs::symlink_metadata(dir)?;
+        if m.mode() == before {
+            return Ok(());
+        }
+    }
+    if !m.is_dir() || m.uid() != uid || open(&m) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             format!("lixeira insegura: {}", dir.display()),
@@ -154,6 +167,22 @@ mod tests {
             "o arquivo fica onde estava"
         );
         assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
+    }
+
+    /// Bug da revisão final: a `.Trash-<uid>` aberta para o grupo (como em pendrives FAT, onde
+    /// o modo vem da montagem) era recusada, e nada ia para a lixeira do disco.
+    #[test]
+    fn an_open_trash_of_mine_is_closed_and_used() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".Trash-1000");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        check_private(&dir, false).unwrap();
+
+        let mode = std::fs::metadata(&dir).unwrap().mode() & 0o777;
+        assert_eq!(mode, 0o700);
     }
 
     #[test]

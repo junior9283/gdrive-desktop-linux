@@ -140,12 +140,19 @@ impl Store {
         Ok(())
     }
 
+    /// O par passa a outra pasta do computador. O último estado sincronizado era da pasta antiga
+    /// e sai junto: a próxima comparação é um primeiro encontro (junta, nunca exclui).
     pub fn set_pair_local(&self, id: i64, local: &Path) -> Result<()> {
-        self.conn().execute(
-            "UPDATE folder_pairs SET local = ?2 WHERE id = ?1",
-            params![id, path_text(local)?],
-        )?;
-        Ok(())
+        let local = path_text(local)?;
+        self.modify(|batch| {
+            let conn = batch.conn;
+            conn.execute(
+                "UPDATE folder_pairs SET local = ?2 WHERE id = ?1",
+                params![id, local],
+            )?;
+            conn.execute("DELETE FROM synced WHERE pair_id = ?1", [id])?;
+            Ok::<_, StoreError>(())
+        })
     }
 
     /// O estado sincronizado do par, em ordem de caminho.

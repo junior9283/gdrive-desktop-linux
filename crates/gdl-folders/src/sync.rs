@@ -13,7 +13,7 @@ use gdl_common::names::{fit, split_ext, to_remote};
 use gdl_common::temp_files::is_local_only;
 use gdl_drive::client::{DriveClient, RemoteFile, SessionSlot};
 use gdl_drive::model::Change;
-use gdl_store::folders::{Pair, PairKind, PairState, Synced};
+use gdl_store::folders::{Pair, PairKind, PairState, StopReason, Synced};
 use gdl_store::{Item, ItemId, ItemKind, Store};
 use md5::{Digest, Md5};
 use rustix::fs::{CWD, RenameFlags, renameat_with};
@@ -86,6 +86,8 @@ pub struct FolderSync {
     /// Avisa que `newly_synced` deixou de estar vazio.
     synced_notify: tokio::sync::Notify,
     links: Option<Links>,
+    /// A raiz é um ponto de montagem agora (injetável nos testes).
+    is_mount_point: fn(&Path) -> bool,
 }
 
 impl FolderSync {
@@ -109,7 +111,14 @@ impl FolderSync {
             newly_synced: Mutex::default(),
             synced_notify: tokio::sync::Notify::new(),
             links: None,
+            is_mount_point: guard::is_mount_point,
         }
+    }
+
+    /// Troca a conferência de ponto de montagem (os testes não montam discos).
+    pub fn with_mount_check(mut self, check: fn(&Path) -> bool) -> FolderSync {
+        self.is_mount_point = check;
+        self
     }
 
     /// Grava também os documentos Google e os atalhos (o Espelho).
@@ -144,6 +153,10 @@ impl FolderSync {
     /// Quantos caminhos do computador ainda não foram para o Drive como estão aqui (novos ou
     /// mudados desde a última sincronização).
     pub async fn pending_uploads(&self) -> Result<usize> {
+        // Sem a pasta não há o que enviar (o que estava nela não está mais aqui).
+        if !self.pair.local.exists() {
+            return Ok(0);
+        }
         let v = self.view().await?;
         let pending = v
             .locals
@@ -180,7 +193,7 @@ impl FolderSync {
     /// Compara os dois lados e aplica o que mudou. Com a pasta do computador inacessível, o par
     /// para (`PairState::Stopped`) sem tocar em nada: nunca é tratado como "tudo excluído".
     pub async fn reconcile(&self) -> Result<Report> {
-        if let Some(reason) = guard::root_problem(&self.pair.local) {
+        if let Some(reason) = guard::root_problem(&self.pair.local).or(self.unmounted()?) {
             tracing::warn!(pair = self.pair.id, ?reason, "pasta do par inacessível");
             self.set_state(PairState::Stopped(reason))?;
             return Ok(Report::default());
@@ -188,8 +201,17 @@ impl FolderSync {
         let mut report = Report::default();
         for _ in 0..MAX_PASSES {
             report.failed.clear();
-            if !self.pass(&mut report).await? {
-                break;
+            match self.pass(&mut report).await {
+                Ok(true) => {}
+                Ok(false) => break,
+                // Algo lá dentro não se deixa ler: sem ver tudo, nada é comparado.
+                Err(SyncError::Io(e)) if e.kind() == io::ErrorKind::PermissionDenied => {
+                    tracing::warn!(pair = self.pair.id, "pasta ilegível no par: {e}");
+                    self.set_state(PairState::Stopped(StopReason::NoPermission))?;
+                    report.failed.push((String::new(), e.to_string()));
+                    break;
+                }
+                Err(e) => return Err(e),
             }
         }
         Ok(report)
@@ -704,6 +726,32 @@ impl FolderSync {
         }
     }
 
+    /// A raiz já foi um ponto de montagem e não é mais: o disco saiu e ficou só a pasta vazia
+    /// onde ele montava (que nunca é "tudo excluído"). A marca fica no banco da conta.
+    fn unmounted(&self) -> Result<Option<StopReason>> {
+        let key = format!("folders.mount-root.{}", self.pair.id);
+        if (self.is_mount_point)(&self.pair.local) {
+            if self.store.kv_get(&key)?.is_none() {
+                self.store.kv_set(&key, "1")?;
+            }
+            return Ok(None);
+        }
+        Ok(self.store.kv_get(&key)?.map(|_| StopReason::Missing))
+    }
+
+    /// Abre lugar para regravar um ponteiro ou link: um link é do app e sai; outra coisa (o
+    /// usuário pôs um arquivo de verdade no lugar) vai para a lixeira, nunca se apaga.
+    fn clear_for_link(&self, path: &Path, existing: Option<std::fs::Metadata>) -> Result<()> {
+        match existing {
+            Some(m) if m.is_symlink() => std::fs::remove_file(path)?,
+            Some(_) => {
+                self.trash.put(path)?;
+            }
+            None => {}
+        }
+        Ok(())
+    }
+
     /// Grava o ponteiro ou link de `item` em `rel`; verdadeiro se mudou algo. O que o usuário pôs
     /// no mesmo lugar (sem base de link) fica como está.
     fn write_link(&self, links: &Links, rel: &str, item: &Item, known: bool) -> Result<bool> {
@@ -721,9 +769,7 @@ impl FolderSync {
                     .as_ref()
                     .is_some_and(|m| m.is_file() && m.len() == json.len() as u64);
                 if !same {
-                    if existing.is_some_and(|m| m.is_symlink()) {
-                        std::fs::remove_file(&path)?;
-                    }
+                    self.clear_for_link(&path, existing)?;
                     std::fs::write(&path, json)?;
                 }
                 !same
@@ -734,9 +780,7 @@ impl FolderSync {
                 let wanted = links.shortcut_targets.join(&target_id.0).join(name);
                 let same = std::fs::read_link(&path).is_ok_and(|t| t == wanted);
                 if !same {
-                    if existing.is_some() {
-                        std::fs::remove_file(&path)?;
-                    }
+                    self.clear_for_link(&path, existing)?;
                     std::os::unix::fs::symlink(&wanted, &path)?;
                 }
                 !same
@@ -1381,6 +1425,84 @@ mod tests {
         assert_eq!(state(&w), PairState::Active, "a pasta voltou, o par volta");
     }
 
+    /// Bug da revisão final: um disco desmontado deixa o ponto de montagem vazio, que a
+    /// comparação via como "tudo excluído" e mandava para a lixeira do Drive.
+    #[tokio::test]
+    async fn unmounted_disk_stops_the_pair_without_trashing() {
+        static MOUNTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        fn mounted(_: &Path) -> bool {
+            MOUNTED.load(Ordering::SeqCst)
+        }
+        let w = World::new().await;
+        let reconcile = || async {
+            w.sync_with(2)
+                .with_mount_check(mounted)
+                .reconcile()
+                .await
+                .unwrap()
+        };
+        w.write("a.txt", b"um");
+        reconcile().await;
+        let id = w.remote("a.txt");
+
+        std::fs::remove_file(w.local.join("a.txt")).unwrap();
+        MOUNTED.store(false, Ordering::SeqCst);
+        reconcile().await;
+
+        assert_eq!(
+            state(&w),
+            PairState::Stopped(gdl_store::folders::StopReason::Missing)
+        );
+        assert_eq!(
+            w.fake.meta(&id)["trashed"],
+            false,
+            "nada foi para a lixeira do Drive"
+        );
+
+        w.write("a.txt", b"um");
+        MOUNTED.store(true, Ordering::SeqCst);
+        reconcile().await;
+        assert_eq!(state(&w), PairState::Active, "o disco voltou, o par volta");
+    }
+
+    /// Bug da revisão final: sem a pasta (disco fora, pasta apagada), contar os envios pendentes
+    /// falhava, e o Espelho não voltava para o Stream.
+    #[tokio::test]
+    async fn missing_root_has_nothing_pending() {
+        let w = World::new().await;
+        w.write("a.txt", b"um");
+        std::fs::remove_dir_all(&w.local).unwrap();
+
+        assert_eq!(w.sync_with(1).pending_uploads().await.unwrap(), 0);
+    }
+
+    /// Bug da revisão final: uma subpasta ilegível fazia a comparação falhar só no log; o par
+    /// seguia "ativo" sem sincronizar nada.
+    #[tokio::test]
+    async fn unreadable_subfolder_stops_the_pair() {
+        use std::os::unix::fs::PermissionsExt;
+        let w = World::new().await;
+        w.write("fechada/a.txt", b"um");
+        w.reconcile().await;
+        let id = w.remote("a.txt");
+        let closed = w.local.join("fechada");
+        let mode = |m| std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(m));
+
+        mode(0o000).unwrap();
+        let report = w.sync_with(2).reconcile().await;
+        mode(0o755).unwrap();
+
+        let report = report.unwrap();
+        assert_eq!(
+            state(&w),
+            PairState::Stopped(gdl_store::folders::StopReason::NoPermission)
+        );
+        assert!(!report.failed.is_empty());
+        assert_eq!(w.fake.meta(&id)["trashed"], false);
+        w.reconcile().await;
+        assert_eq!(state(&w), PairState::Active, "legível de novo, o par volta");
+    }
+
     #[tokio::test]
     async fn mass_delete_asks_first() {
         let w = World::new().await;
@@ -1554,5 +1676,38 @@ mod tests {
             "vai para a lixeira"
         );
         assert!(w.fake.find_live("Plano.gdoc").is_empty());
+    }
+
+    /// Bug da revisão final: um arquivo de verdade no lugar de um atalho ou ponteiro já gravado
+    /// era truncado ou apagado de vez ao regravar o link.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn user_file_over_a_link_goes_to_the_trash_before_rewriting() {
+        let w = World::mirror().await;
+        let root = w.fake.root_id();
+        w.fake
+            .add_gdoc(&root, "Plano", "application/vnd.google-apps.document");
+        let target = w.fake.add_file(&root, "alvo.txt", b"alvo".to_vec());
+        w.fake.add_shortcut(&root, "atalho", &target);
+        w.refresh().await;
+        w.reconcile().await;
+
+        std::fs::remove_file(w.local.join("atalho")).unwrap();
+        std::fs::write(w.local.join("atalho"), b"copia de verdade").unwrap();
+        std::fs::write(w.local.join("Plano.gdoc"), b"meu texto").unwrap();
+        w.reconcile().await;
+
+        assert!(
+            std::fs::symlink_metadata(w.local.join("atalho"))
+                .unwrap()
+                .is_symlink()
+        );
+        assert_eq!(
+            std::fs::read(w.trash_dir.join("files/atalho")).unwrap(),
+            b"copia de verdade"
+        );
+        assert_eq!(
+            std::fs::read(w.trash_dir.join("files/Plano.gdoc")).unwrap(),
+            b"meu texto"
+        );
     }
 }

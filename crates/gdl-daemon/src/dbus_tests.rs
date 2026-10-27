@@ -2667,6 +2667,31 @@ async fn disable_mirrored_folders_stops_existing_folders() {
     );
 }
 
+/// Bug da revisão final: "Escolher novo local" numa pasta errada (vazia) tratava cada arquivo
+/// sincronizado como excluído e mandava tudo para a lixeira do Drive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relocating_to_another_folder_merges_and_trashes_nothing() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    let id = h
+        .proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+    let wrong = local_folder(&h, "Vazia");
+
+    h.proxy
+        .relocate_local_folder("", id, wrong.to_str().unwrap())
+        .await
+        .unwrap();
+
+    wait_until("a.txt baixado na pasta nova", || wrong.join("a.txt").exists()).await;
+    assert_eq!(h.fake.find_live("a.txt").len(), 1, "nada foi para a lixeira do Drive");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn missing_folder_is_announced() {
     let h = Harness::new().await;

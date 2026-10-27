@@ -55,6 +55,12 @@ fn show_named(app: &AppHandle, name: &str, arg: Option<&str>) -> Result<(), Stri
     show(app, screens::find(name)?, arg).map_err(|e| e.to_string())
 }
 
+/// Atende um pedido `tela[:argumento]` (da linha de comando ou de `Ui.Open`).
+fn show_request(app: &AppHandle, request: &str) -> Result<(), String> {
+    let (screen, arg) = screens::request(request)?;
+    show_named(app, screen.name, arg)
+}
+
 #[tauri::command]
 async fn call(
     bridge: State<'_, Arc<Bridge>>,
@@ -169,11 +175,10 @@ async fn uninstall(purge: bool) -> Result<(), String> {
     Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
 }
 
-/// Fica com o nome da janela; `None` se outra janela já estava aberta (e recebeu o pedido).
-async fn start(screen: Option<&Screen>) -> zbus::Result<Option<(Bridge, Requests)>> {
+/// Fica com o nome da janela; `None` se outra janela já estava aberta (e recebeu `request`).
+async fn start(request: &str) -> zbus::Result<Option<(Bridge, Requests)>> {
     let conn = Connection::session().await?;
-    let name = screen.map_or(screens::HOME, |s| s.name);
-    match SingleInstance::claim(&conn, name).await? {
+    match SingleInstance::claim(&conn, request).await? {
         SingleInstance::Primary(requests) => Ok(Some((Bridge::new(&conn).await?, requests))),
         SingleInstance::Secondary => Ok(None),
     }
@@ -193,7 +198,8 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let (bridge, mut requests) = match tauri::async_runtime::block_on(start(screen)) {
+    let forward = screen.as_deref().unwrap_or(screens::HOME);
+    let (bridge, mut requests) = match tauri::async_runtime::block_on(start(forward)) {
         Ok(Some((bridge, requests))) => (Arc::new(bridge), requests),
         Ok(None) => return ExitCode::SUCCESS,
         Err(e) => {
@@ -221,8 +227,8 @@ fn main() -> ExitCode {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            if let Some(screen) = screen {
-                show(&handle, screen, None)?;
+            if let Some(request) = &screen {
+                show_request(&handle, request)?;
             }
             let emit: Emit = Arc::new({
                 let handle = handle.clone();
@@ -243,7 +249,7 @@ fn main() -> ExitCode {
             tauri::async_runtime::spawn(bridge.watch(RECONNECT, emit));
             tauri::async_runtime::spawn(async move {
                 while let Some(name) = requests.recv().await {
-                    if let Err(e) = show_named(&handle, &name, None) {
+                    if let Err(e) = show_request(&handle, &name) {
                         tracing::warn!(erro = %e, "pedido de tela recusado");
                     }
                 }

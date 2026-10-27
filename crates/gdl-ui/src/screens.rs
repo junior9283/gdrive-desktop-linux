@@ -20,7 +20,7 @@ const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
     }
 }
 
-pub const SCREENS: [Screen; 9] = [
+pub const SCREENS: [Screen; 11] = [
     screen(HOME, 900.0, 640.0),
     screen("onboarding", 560.0, 640.0),
     screen("preferences", 760.0, 640.0),
@@ -33,6 +33,9 @@ pub const SCREENS: [Screen; 9] = [
     screen("about", 480.0, 420.0),
     screen("notification-settings", 480.0, 520.0),
     screen("uninstall", 520.0, 480.0),
+    // As duas abrem com o id do item (`share:<id>`).
+    screen("share", 520.0, 580.0),
+    screen("versions", 560.0, 480.0),
 ];
 
 impl Screen {
@@ -52,16 +55,28 @@ pub fn find(name: &str) -> Result<&'static Screen, String> {
         .ok_or_else(|| format!("tela desconhecida: {name}"))
 }
 
-/// A tela pedida na linha de comando (`--open <tela>`); sem pedido, a principal. Com `--dbus`
-/// (a ativação pelo D-Bus, que chega com o pedido de tela logo depois), nenhuma.
-pub fn from_args(
-    args: impl IntoIterator<Item = String>,
-) -> Result<Option<&'static Screen>, String> {
+/// Um pedido de tela, `tela` ou `tela:argumento` (o item da janela "Compartilhar", por exemplo).
+/// Os nomes das telas não têm `:`.
+pub fn request(text: &str) -> Result<(&'static Screen, Option<&str>), String> {
+    let (name, arg) = text
+        .split_once(':')
+        .map_or((text, None), |(name, arg)| (name, Some(arg)));
+    Ok((find(name)?, arg))
+}
+
+/// O pedido de tela da linha de comando (`--open <tela>[:argumento]`), já conferido; sem pedido,
+/// a principal. Com `--dbus` (a ativação pelo D-Bus, que chega com o pedido de tela logo depois),
+/// nenhum.
+pub fn from_args(args: impl IntoIterator<Item = String>) -> Result<Option<String>, String> {
     let mut args = args.into_iter();
-    let mut screen = Some(find(HOME)?);
+    let mut screen = Some(HOME.to_owned());
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--open" => screen = Some(find(&args.next().ok_or("--open sem tela")?)?),
+            "--open" => {
+                let text = args.next().ok_or("--open sem tela")?;
+                request(&text)?;
+                screen = Some(text);
+            }
             "--dbus" => screen = None,
             other => return Err(format!("argumento desconhecido: {other}")),
         }
@@ -79,14 +94,26 @@ mod tests {
 
     #[test]
     fn open_argument_picks_the_screen() {
-        assert_eq!(from_args(args(&[])).unwrap().unwrap().name, "home");
+        assert_eq!(from_args(args(&[])).unwrap().unwrap(), "home");
         assert_eq!(
-            from_args(args(&["--open", "about"])).unwrap().unwrap().name,
+            from_args(args(&["--open", "about"])).unwrap().unwrap(),
             "about"
         );
         assert!(from_args(args(&["--open", "x"])).is_err());
         assert!(from_args(args(&["--open"])).is_err());
         assert!(from_args(args(&["--outro"])).is_err());
+    }
+
+    #[test]
+    fn a_request_can_carry_an_argument() {
+        let (screen, arg) = request("share:1AbC:x").unwrap();
+        assert_eq!((screen.name, arg), ("share", Some("1AbC:x")));
+        assert_eq!(request("about").unwrap(), (find("about").unwrap(), None));
+        assert!(request("x:1").is_err());
+        assert_eq!(
+            from_args(args(&["--open", "versions:9"])),
+            Ok(Some("versions:9".into()))
+        );
     }
 
     #[test]

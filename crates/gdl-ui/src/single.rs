@@ -5,7 +5,7 @@ use gdl_ipc::{UI_BUS_NAME, UI_OBJECT_PATH, UiProxy, claim_name};
 use tokio::sync::mpsc;
 use zbus::Connection;
 
-/// As telas que os outros processos pedem.
+/// Os pedidos de tela (`tela[:argumento]`) dos outros processos.
 pub type Requests = mpsc::UnboundedReceiver<String>;
 
 pub enum SingleInstance {
@@ -27,8 +27,8 @@ impl UiObject {
 }
 
 impl SingleInstance {
-    /// Fica com o nome ou, se outro processo já o tem, pede a ele a tela `screen`.
-    pub async fn claim(conn: &Connection, screen: &str) -> zbus::Result<SingleInstance> {
+    /// Fica com o nome ou, se outro processo já o tem, passa a ele o pedido `request`.
+    pub async fn claim(conn: &Connection, request: &str) -> zbus::Result<SingleInstance> {
         let (screens, requests) = mpsc::unbounded_channel();
         // O objeto vem antes do nome: quem achar o nome já encontra quem responda.
         let server = conn.object_server();
@@ -37,7 +37,7 @@ impl SingleInstance {
             return Ok(SingleInstance::Primary(requests));
         }
         server.remove::<UiObject, _>(UI_OBJECT_PATH).await?;
-        UiProxy::new(conn).await?.open(screen).await?;
+        UiProxy::new(conn).await?.open(request).await?;
         Ok(SingleInstance::Secondary)
     }
 }

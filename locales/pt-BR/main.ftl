@@ -126,6 +126,8 @@ window-offline = Arquivos off-line
 window-about = Sobre
 window-notification-settings = Preferências de notificação
 window-uninstall = Desinstalar o Google Drive
+window-share = Compartilhar
+window-versions = Gerenciar versões
 
 ## Menu "Google Drive" do botão direito nos gerenciadores de arquivos.
 menu-open-web = Abrir no navegador

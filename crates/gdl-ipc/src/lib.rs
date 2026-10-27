@@ -101,7 +101,8 @@ pub struct AccountSummary {
 pub struct Status {
     pub account: String,
     pub mount_point: String,
-    /// `signed-out`, `synced`, `syncing`, `paused`, `offline`, `quota-full` ou `error`.
+    /// `signed-out`, `starting` (reconectando as contas guardadas), `synced`, `syncing`, `paused`,
+    /// `offline`, `quota-full`, `error` ou `needs-sign-in`.
     pub state: String,
     /// Itens subindo ou descendo agora (envios na fila e fixados por baixar).
     pub syncing: u32,

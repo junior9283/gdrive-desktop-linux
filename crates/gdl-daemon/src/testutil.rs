@@ -125,6 +125,12 @@ impl Harness {
     /// Para o serviço (pela saída normal, que cancela o que estiver em andamento) e sobe outro
     /// sobre os mesmos dados, que reconecta a conta. `policy` troca a política.
     pub async fn restart(&mut self, policy: Option<&str>) {
+        self.restart_without_resuming(policy).await;
+        self.daemon.resume_saved_accounts().await.unwrap();
+    }
+
+    /// Um serviço novo no lugar deste, que ainda não reconectou as contas guardadas.
+    pub async fn restart_without_resuming(&mut self, policy: Option<&str>) {
         self.daemon.shutdown().await;
         if let Some(policy) = policy {
             write_policy(self.dir.path(), policy);
@@ -136,7 +142,6 @@ impl Harness {
         .await;
         (self.daemon, self.proxy) = (daemon, proxy);
         (self.client, self._server) = (client, server);
-        self.daemon.resume_saved_accounts().await.unwrap();
     }
 
     /// Login pelo D-Bus, com o teste fazendo o papel do navegador. Devolve `LoginFinished`.

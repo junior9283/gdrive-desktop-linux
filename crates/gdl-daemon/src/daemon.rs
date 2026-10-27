@@ -314,6 +314,9 @@ pub struct Daemon {
     /// Contas guardadas que não subiram nesta partida (e se ficam ao lado): continuam no
     /// arquivo, para a próxima tentar de novo.
     not_started: Mutex<Vec<SavedAccount>>,
+    /// Há contas guardadas e elas ainda não terminaram de reconectar: sem nenhuma de pé, o
+    /// estado é "conectando", não "sem conta" (que levaria a bandeja ao primeiro uso).
+    resuming: AtomicBool,
 }
 
 /// Uma linha do arquivo `accounts`.
@@ -339,7 +342,10 @@ impl Daemon {
         let bandwidth = Arc::new(Bandwidth::default());
         let i18n = I18n::new(&config.lang);
         apply_bandwidth(&bandwidth, &prefs);
+        let data_dir = &config.paths.data_dir;
+        let resuming = data_dir.join(ACCOUNTS).exists() || data_dir.join(CURRENT_ACCOUNT).exists();
         Ok(Arc::new(Daemon {
+            resuming: AtomicBool::new(resuming),
             bandwidth,
             metered: AtomicBool::new(false),
             paused: AtomicBool::new(false),
@@ -672,6 +678,8 @@ impl Daemon {
                 }
             }
         }
+        self.resuming.store(false, Ordering::Relaxed);
+        self.emit_status_changed().await;
         Ok(())
     }
 
@@ -1309,8 +1317,13 @@ impl Daemon {
             .collect();
         let can_add_account = self.add_account_refusal(listed.len()).is_none();
         if listed.is_empty() {
+            let state = if self.resuming.load(Ordering::Relaxed) {
+                SyncState::Starting
+            } else {
+                SyncState::SignedOut
+            };
             return Ok(Status {
-                state: SyncState::SignedOut.as_str().into(),
+                state: state.as_str().into(),
                 remaining_secs: -1,
                 can_add_account,
                 ..Status::default()

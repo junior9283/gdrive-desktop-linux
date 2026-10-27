@@ -16,6 +16,7 @@ action-pause = Pausar
 action-resume = Retomar
 
 header-signed-out = Você não fez login
+header-starting = Conectando à sua conta…
 header-synced = Sincronização concluída
 header-error = Sincronização incompleta
 header-syncing = { $count ->
@@ -54,6 +55,7 @@ view-notifications = Notificações
 view-links = Links rápidos
 
 home-signed-out = Faça login para ver seus arquivos e acompanhar a sincronização.
+home-starting = Conectando às suas contas. Isso leva só alguns segundos.
 
 card-attention = Precisa de atenção
 card-attention-none = Nada precisa da sua atenção agora.

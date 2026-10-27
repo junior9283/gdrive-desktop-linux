@@ -5,6 +5,7 @@ import { formatAgo, formatDuration, formatSize } from '../../format.js';
 
 const TITLES = {
   'signed-out': 'header-signed-out',
+  starting: 'header-starting',
   synced: 'header-synced',
   error: 'header-error',
   syncing: 'header-syncing',
@@ -42,11 +43,14 @@ export function accountMenuFor(status) {
   };
 }
 
+// Ainda sem conta de pé: nenhuma conectada, ou o serviço reconectando as guardadas.
+export const withoutAccount = (state) => state === 'signed-out' || state === 'starting';
+
 // `{ title, subtitle, pause, signIn }` do cabeçalho; `pause` é a chave do botão (ou `null` sem
 // conta ou com a conta precisando entrar de novo, caso em que `signIn` pede o botão de entrar).
 export function headerFor(status, now, locale) {
   const title = [TITLES[status.state] ?? 'header-synced', { count: status.syncing }];
-  if (status.state === 'signed-out') return { title, subtitle: null, pause: null, signIn: false };
+  if (withoutAccount(status.state)) return { title, subtitle: null, pause: null, signIn: false };
   let subtitle;
   if (status.state === 'syncing' && status.remaining_secs >= 0) {
     subtitle = ['header-remaining', { time: formatDuration(status.remaining_secs, locale) }];

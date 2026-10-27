@@ -16,6 +16,7 @@ action-pause = Pause
 action-resume = Resume
 
 header-signed-out = You are not signed in
+header-starting = Connecting to your account…
 header-synced = Sync complete
 header-error = Sync incomplete
 header-syncing = { $count ->
@@ -54,6 +55,7 @@ view-notifications = Notifications
 view-links = Quick links
 
 home-signed-out = Sign in to see your files and follow the sync.
+home-starting = Connecting to your accounts. This only takes a few seconds.
 
 card-attention = Needs attention
 card-attention-none = Nothing needs your attention right now.

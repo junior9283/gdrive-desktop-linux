@@ -1895,6 +1895,49 @@ async fn missing_token_resumes_the_others() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_says_starting_until_the_saved_accounts_reconnect() {
+    let mut h = Harness::new().await;
+    h.logged_in().await;
+
+    // A bandeja pergunta logo que liga o serviço, antes de a conta guardada subir: não pode
+    // ouvir "sem conta" (abriria o primeiro uso).
+    h.restart_without_resuming(None).await;
+    assert_eq!(h.proxy.status("").await.unwrap().state, "starting");
+
+    h.daemon.resume_saved_accounts().await.unwrap();
+    assert_ne!(h.proxy.status("").await.unwrap().state, "starting");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn without_saved_accounts_status_says_signed_out() {
+    let mut h = Harness::new().await;
+    h.restart_without_resuming(None).await;
+    assert_eq!(h.proxy.status("").await.unwrap().state, "signed-out");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn when_no_saved_account_comes_back_status_says_signed_out() {
+    use futures_util::StreamExt;
+    let mut h = Harness::new().await;
+    h.logged_in().await;
+    let email = h.fake.email();
+    // Sem o login e sem o índice, a conta não tem como subir.
+    h.tokens.delete(&email).await.unwrap();
+    h.daemon.shutdown().await;
+    std::fs::remove_file(h.paths().data_dir.join(&email).join("metadata.db")).unwrap();
+    h.restart_without_resuming(None).await;
+    let mut changed = h.proxy.receive_status_changed().await.unwrap();
+
+    h.daemon.resume_saved_accounts().await.unwrap();
+
+    // A bandeja, que esperava em "conectando", fica sabendo e pode abrir o primeiro uso.
+    tokio::time::timeout(std::time::Duration::from_secs(10), changed.next())
+        .await
+        .expect("StatusChanged");
+    assert_eq!(h.proxy.status("").await.unwrap().state, "signed-out");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_account_that_did_not_start_stays_saved() {
     let mut h = Harness::new().await;
     h.two_accounts(ANA).await;

@@ -116,6 +116,7 @@ tray-error = { $count ->
    *[other] { $count } files could not be synced
 }
 tray-signed-out = You are not signed in
+tray-starting = Connecting to your account…
 tray-accounts = Connected with { $count } accounts
 tray-no-service = The Google Drive service is not running
 tray-open-folder = Open the Google Drive folder

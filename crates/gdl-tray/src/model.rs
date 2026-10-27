@@ -77,6 +77,7 @@ impl TrayView {
         let (icon, tooltip) = match status.state.as_str() {
             "signed-out" => return signed_out(i18n, "tray-signed-out", false),
             "syncing" => (Icon::Syncing, i18n.tr_count("tray-syncing", pending)),
+            "starting" => (Icon::Syncing, i18n.tr("tray-starting", &[])),
             "paused" => (still("gdl-paused"), i18n.tr_count("tray-paused", pending)),
             "offline" => (still("gdl-offline"), i18n.tr_count("tray-offline", pending)),
             "quota-full" => (still("gdl-error"), i18n.tr("tray-quota-full", &[])),
@@ -294,6 +295,16 @@ mod tests {
         let down = TrayView::service_down(&i18n);
         assert_eq!(labels(&down)[0], "Iniciar o serviço");
         assert_eq!(down.icon_at(0), "gdl-signed-out");
+    }
+
+    #[test]
+    fn starting_service_does_not_ask_to_sign_in() {
+        let i18n = I18n::new("pt_BR");
+        let view = TrayView::from_status(&status("starting", 0, 0), &i18n);
+        assert_eq!(view.click, Action::Open("home"));
+        assert!(view.animated());
+        assert_eq!(view.tooltip, "Conectando à sua conta…");
+        assert!(!is_signed_out(&status("starting", 0, 0)));
     }
 
     #[test]

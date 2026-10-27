@@ -3,7 +3,7 @@
 
 import { attempt, el, icon, stylesheet } from '../components.js';
 import { accountButton, accountMenu } from './home/account.js';
-import { headerFor, shownStatus } from './home/model.js';
+import { headerFor, shownStatus, withoutAccount } from './home/model.js';
 import { moreMenu } from './home/more.js';
 import * as activity from './home/activity.js';
 import * as links from './home/links.js';
@@ -176,7 +176,7 @@ function updateHeader() {
   ui.pause.hidden = !header.pause;
   if (header.pause) ui.pause.textContent = t(header.pause);
   ui.signIn.hidden = !header.signIn;
-  ui.nav.hidden = status.state === 'signed-out';
+  ui.nav.hidden = withoutAccount(status.state);
   accountButton(ui.account, home.ctx.api, status.account);
   ui.header.dataset.state = status.state;
 }
@@ -189,7 +189,7 @@ function setUnread(count) {
 
 // Com a visão das notificações aberta, é ela que acerta o selo (ela marca tudo como lido).
 async function updateBadge() {
-  if (home.status?.state === 'signed-out' || home.view === 'notifications') return;
+  if (withoutAccount(home.status?.state) || home.view === 'notifications') return;
   try {
     setUnread((await home.ctx.api.call('notifications')).filter((n) => !n.read).length);
   } catch {
@@ -211,13 +211,17 @@ async function showView() {
   for (const button of ui.nav.querySelectorAll('button')) {
     button.classList.toggle('active', button.dataset.view === home.view);
   }
-  if (home.status?.state === 'signed-out') {
+  // Sem conta de pé: reconectando as guardadas só avisa; sem nenhuma, oferece o login.
+  const state = home.status?.state;
+  if (withoutAccount(state)) {
     ui.main.replaceChildren(
       el(
         'div',
         { class: 'card signed-out' },
-        el('p', {}, t('home-signed-out')),
-        el('button', { class: 'filled', onclick: () => api.openScreen('onboarding') }, t('sign-in')),
+        el('p', {}, t(`home-${state}`)),
+        state === 'signed-out'
+          ? el('button', { class: 'filled', onclick: () => api.openScreen('onboarding') }, t('sign-in'))
+          : [],
       ),
     );
     return;

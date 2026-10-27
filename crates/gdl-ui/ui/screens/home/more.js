@@ -2,11 +2,12 @@
 
 import { attempt, confirmDialog, popupMenu, toast } from '../../components.js';
 import { disconnect, disconnectAll } from './disconnect.js';
+import { withoutAccount } from './model.js';
 
 export function moreMenu(anchor, ctx) {
   const { api, t, home } = ctx;
   const errors = home.status?.errors ?? 0;
-  const signedIn = home.status && home.status.state !== 'signed-out';
+  const signedIn = home.status && !withoutAccount(home.status.state);
   popupMenu(anchor, [
     { id: 'offline', label: t('view-offline'), action: () => api.openScreen('offline'), disabled: !signedIn },
     { id: 'errors', label: t('more-errors', { count: errors }), action: () => api.openScreen('errors'), disabled: !signedIn },

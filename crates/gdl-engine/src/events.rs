@@ -26,6 +26,8 @@ pub struct SyncSummary {
 pub enum SyncState {
     /// Sem conta conectada (o serviço responde isto; o motor só existe com conta).
     SignedOut,
+    /// O serviço acabou de subir e ainda está reconectando as contas guardadas.
+    Starting,
     Synced,
     Syncing,
     Paused,
@@ -40,6 +42,7 @@ impl SyncState {
     pub fn as_str(self) -> &'static str {
         match self {
             SyncState::SignedOut => "signed-out",
+            SyncState::Starting => "starting",
             SyncState::Synced => "synced",
             SyncState::Syncing => "syncing",
             SyncState::Paused => "paused",

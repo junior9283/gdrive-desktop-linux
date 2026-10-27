@@ -7,6 +7,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Corrigido
+- Sair pela bandeja e abrir o app de novo pelo menu não leva mais à tela de primeiro uso quando
+  há conta conectada: enquanto o serviço reconecta as contas, a bandeja e a janela mostram
+  "Conectando à sua conta…".
+
 ## [0.8.0] - 2026-10-27
 
 ### Adicionado

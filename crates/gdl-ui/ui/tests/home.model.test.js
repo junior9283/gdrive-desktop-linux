@@ -145,6 +145,11 @@ test('cabeçalho da conta que precisa entrar de novo: botão de entrar, sem Paus
   assert.equal(headerFor(status('synced'), now, 'pt-BR').signIn, false);
 });
 
+test('conectando as contas salvas: aviso próprio, sem Pausar nem entrar', () => {
+  const header = headerFor(status('starting'), now, 'pt-BR');
+  assert.deepEqual(header, { title: ['header-starting', { count: 0 }], subtitle: null, pause: null, signIn: false });
+});
+
 test('o cabeçalho mostra o estado da própria conta, não o pior entre elas', () => {
   const both = { account: 'a@x', state: 'error', accounts: accounts(['a@x'], ['b@x', 'error']) };
   assert.equal(shownStatus(both).state, 'synced');

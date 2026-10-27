@@ -1677,9 +1677,11 @@ name = "gdl-ipc"
 version = "0.6.0"
 dependencies = [
  "futures-util",
+ "gdl-common",
  "serde",
  "tempfile",
  "tokio",
+ "tracing",
  "zbus",
 ]
 

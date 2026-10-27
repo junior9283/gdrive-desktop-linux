@@ -11,6 +11,43 @@ pub fn open_url(id: &str) -> String {
     format!("https://docs.google.com/open?id={id}")
 }
 
+/// O editor on-line que abre arquivos do Office no modo de edição deles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfficeEditor {
+    Docs,
+    Sheets,
+    Slides,
+}
+
+impl OfficeEditor {
+    pub const ALL: [OfficeEditor; 3] = [
+        OfficeEditor::Docs,
+        OfficeEditor::Sheets,
+        OfficeEditor::Slides,
+    ];
+
+    /// O editor de um arquivo do Office com este nome (pela extensão).
+    pub fn for_name(name: &str) -> Option<OfficeEditor> {
+        let (_, ext) = gdl_common::names::split_ext(name);
+        Some(match ext.to_ascii_lowercase().as_str() {
+            ".doc" | ".docx" | ".docm" | ".dot" | ".dotx" => OfficeEditor::Docs,
+            ".xls" | ".xlsx" | ".xlsm" => OfficeEditor::Sheets,
+            ".ppt" | ".pptx" | ".pptm" | ".pps" | ".ppsx" => OfficeEditor::Slides,
+            _ => return None,
+        })
+    }
+
+    /// Endereço que abre o arquivo `id` neste editor.
+    pub fn url(self, id: &str) -> String {
+        let app = match self {
+            OfficeEditor::Docs => "document",
+            OfficeEditor::Sheets => "spreadsheets",
+            OfficeEditor::Slides => "presentation",
+        };
+        format!("https://docs.google.com/{app}/d/{id}/edit?rtpof=true")
+    }
+}
+
 /// Endereço do item no Drive na web (`user.gdl.web_url`, "Abrir no navegador"); itens ainda
 /// não enviados não têm.
 pub fn web_url(item: &Item) -> Option<String> {
@@ -56,6 +93,20 @@ pub fn pointer_doc_id(json: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn office_files_open_in_their_editor() {
+        assert_eq!(
+            OfficeEditor::for_name("Orçamento.XLSX"),
+            Some(OfficeEditor::Sheets)
+        );
+        assert_eq!(OfficeEditor::for_name("notas.txt"), None);
+        assert_eq!(OfficeEditor::for_name(".docx"), None);
+        assert_eq!(
+            OfficeEditor::Docs.url("abc"),
+            "https://docs.google.com/document/d/abc/edit?rtpof=true"
+        );
+    }
 
     #[test]
     fn each_google_type_has_its_extension() {

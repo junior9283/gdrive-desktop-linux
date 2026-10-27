@@ -78,6 +78,13 @@ notify-cache-moving-title = Mudando o cache de lugar
 notify-cache-moving-body = Os arquivos baixados estão indo para { $path }. O Drive abre quando terminar.
 notify-cache-moved-title = Cache no lugar novo
 notify-cache-moved-body = Os arquivos baixados agora ficam em { $path }.
+notify-link-copied-title = Link copiado
+notify-link-restricted = Só as pessoas com acesso podem abrir este link.
+notify-link-anyone = Qualquer pessoa com o link pode { $role }.
+notify-link-domain = Qualquer pessoa de { $domain } com o link pode { $role }.
+link-role-reader = ver
+link-role-commenter = comentar
+link-role-writer = editar
 tray-synced = Tudo sincronizado
 tray-syncing = { $count ->
     [1] Sincronizando 1 arquivo
@@ -132,6 +139,11 @@ window-versions = Gerenciar versões
 ## Menu "Google Drive" do botão direito nos gerenciadores de arquivos.
 menu-open-web = Abrir no navegador
 menu-copy-link = Copiar link
+menu-open-docs = Abrir com Documentos Google
+menu-open-sheets = Abrir com Planilhas Google
+menu-open-slides = Abrir com Apresentações Google
+menu-share = Compartilhar
+menu-versions = Gerenciar versões
 menu-offline = Disponível off-line
 menu-online-only = Somente on-line
 menu-new-document = Novo Documento Google

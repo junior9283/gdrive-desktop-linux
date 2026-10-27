@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::{UiProxy, nobody_there};
 use gdl_common::paths::exe_dir;
-use gdl_ipc::{UiProxy, nobody_there};
 use zbus::Connection;
 
 /// O programa da janela.
@@ -85,7 +85,7 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
         // Um barramento ponto a ponto sem ninguém do outro lado servindo a janela.
-        let (server, client) = gdl_ipc::testing::p2p_pair().await;
+        let (server, client) = crate::testing::p2p_pair().await;
         // `object_server()` liga o servidor de objetos do outro lado, que passa a responder
         // "objeto desconhecido" (como o barramento real responde "nome sem dono"); sem ele, o
         // pedido ficaria sem resposta.

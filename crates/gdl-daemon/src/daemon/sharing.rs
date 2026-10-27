@@ -4,14 +4,24 @@
 use gdl_common::names::{create_unique, split_ext};
 use gdl_common::paths::user_dir;
 use gdl_common::time::local_stamp;
-use gdl_drive::model::Grantee;
+use gdl_drive::model::{Grantee, Permission};
+use gdl_engine::engine::Engine;
 use gdl_ipc::{ServiceError, SharePerson, Sharing, VersionItem, Versions};
 use gdl_store::ItemId;
 
 use super::{Daemon, engine_error, failed, live_item, web_link};
+use crate::notify::Notification;
 
 /// Os papéis que a janela pode dar (dono não se dá por aqui).
 const ROLES: [&str; 3] = ["reader", "commenter", "writer"];
+
+/// O acesso geral do item; com os dois, vale o de qualquer pessoa (o mais amplo).
+fn general_access(perms: &[Permission]) -> Option<&Permission> {
+    perms
+        .iter()
+        .filter(|p| p.is_general())
+        .max_by_key(|p| p.kind == "anyone")
+}
 
 /// O domínio de uma conta do Google Workspace; vazio em contas pessoais.
 fn workspace_domain(email: &str) -> String {
@@ -44,11 +54,7 @@ impl Daemon {
             .permissions(&item.id)
             .await
             .map_err(|e| engine_error(e, item_id))?;
-        // Se houver os dois acessos gerais, vale o de qualquer pessoa (o mais amplo).
-        let general = perms
-            .iter()
-            .filter(|p| p.is_general())
-            .max_by_key(|p| p.kind == "anyone");
+        let general = general_access(&perms);
         let mut people: Vec<SharePerson> = perms
             .iter()
             .filter(|p| !p.is_general())
@@ -70,6 +76,30 @@ impl Daemon {
             domain: self.account_domain().await,
             people,
         })
+    }
+
+    /// O aviso de "link copiado", dizendo quem pode abrir o link. Sem resposta do Drive, nenhum.
+    pub(super) async fn notify_link_copied(&self, engine: &Engine, id: &ItemId) {
+        let Ok(perms) = engine.permissions(id).await else {
+            return;
+        };
+        let body = match general_access(&perms) {
+            None => self.i18n.tr("notify-link-restricted", &[]),
+            Some(p) => {
+                let role = self.i18n.tr(&format!("link-role-{}", p.role), &[]);
+                let domain = p.domain.clone().unwrap_or_default();
+                let key = format!("notify-link-{}", p.kind);
+                self.i18n.tr(&key, &[("role", &role), ("domain", &domain)])
+            }
+        };
+        self.notify(&Notification {
+            kind_id: "link-copied",
+            summary: self.i18n.tr("notify-link-copied-title", &[]),
+            body,
+            action: None,
+            replaces_key: Some("link-copied".into()),
+        })
+        .await;
     }
 
     pub async fn share_add(

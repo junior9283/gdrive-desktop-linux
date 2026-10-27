@@ -1,6 +1,8 @@
 //! O menu "Google Drive" do botão direito, o mesmo em todos os gerenciadores de arquivos (as
 //! extensões só desenham o que o serviço devolve): quais itens a seleção mostra e com qual marca.
 
+use gdl_engine::gdocs::OfficeEditor;
+
 /// O id de D-Bus dos separadores entre grupos de itens.
 pub const SEPARATOR: &str = "-";
 
@@ -8,7 +10,13 @@ pub const SEPARATOR: &str = "-";
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     OpenWeb,
+    /// Abre o arquivo do Office no editor on-line equivalente.
+    OpenDocs,
+    OpenSheets,
+    OpenSlides,
+    Share,
     CopyLink,
+    Versions,
     Offline,
     OnlineOnly,
     NewDocument,
@@ -25,9 +33,14 @@ pub struct NewFile {
 }
 
 impl Action {
-    pub const ALL: [Action; 9] = [
+    pub const ALL: [Action; 14] = [
         Action::OpenWeb,
+        Action::OpenDocs,
+        Action::OpenSheets,
+        Action::OpenSlides,
+        Action::Share,
         Action::CopyLink,
+        Action::Versions,
         Action::Offline,
         Action::OnlineOnly,
         Action::NewDocument,
@@ -41,7 +54,12 @@ impl Action {
     fn names(self) -> (&'static str, &'static str) {
         match self {
             Action::OpenWeb => ("open-web", "menu-open-web"),
+            Action::OpenDocs => ("open-docs", "menu-open-docs"),
+            Action::OpenSheets => ("open-sheets", "menu-open-sheets"),
+            Action::OpenSlides => ("open-slides", "menu-open-slides"),
+            Action::Share => ("share", "menu-share"),
             Action::CopyLink => ("copy-link", "menu-copy-link"),
+            Action::Versions => ("versions", "menu-versions"),
             Action::Offline => ("offline", "menu-offline"),
             Action::OnlineOnly => ("online-only", "menu-online-only"),
             Action::NewDocument => ("new-document", "menu-new-document"),
@@ -62,6 +80,22 @@ impl Action {
 
     pub fn parse(id: &str) -> Option<Action> {
         Action::ALL.into_iter().find(|a| a.id() == id)
+    }
+
+    /// A ação "Abrir com" do editor.
+    pub fn open_with(editor: OfficeEditor) -> Action {
+        match editor {
+            OfficeEditor::Docs => Action::OpenDocs,
+            OfficeEditor::Sheets => Action::OpenSheets,
+            OfficeEditor::Slides => Action::OpenSlides,
+        }
+    }
+
+    /// O editor que esta ação abre (só nas de "Abrir com").
+    pub fn editor(self) -> Option<OfficeEditor> {
+        OfficeEditor::ALL
+            .into_iter()
+            .find(|e| Action::open_with(*e) == self)
     }
 
     pub fn new_file(self) -> Option<NewFile> {
@@ -87,6 +121,10 @@ pub struct Picked {
     pub is_folder: bool,
     /// Tem endereço na web (itens ainda não enviados não têm).
     pub has_link: bool,
+    /// Arquivo comum já no Drive, com versões guardadas (pastas e documentos Google não têm).
+    pub has_versions: bool,
+    /// O editor on-line dos arquivos do Office.
+    pub editor: Option<OfficeEditor>,
     pub offline: Offline,
 }
 
@@ -129,12 +167,14 @@ pub fn entries(picked: &[Picked]) -> Vec<(Option<Action>, &'static str)> {
         false => Offline::Mixed,
     };
     let mut list = Vec::new();
-    if single.is_some_and(|p| p.has_link) {
-        list.extend([
-            (Some(Action::OpenWeb), ""),
-            (Some(Action::CopyLink), ""),
-            (None, ""),
-        ]);
+    if let Some(p) = single.filter(|p| p.has_link) {
+        list.push((Some(Action::OpenWeb), ""));
+        list.extend(p.editor.map(|e| (Some(Action::open_with(e)), "")));
+        list.extend([(Some(Action::Share), ""), (Some(Action::CopyLink), "")]);
+        if p.has_versions {
+            list.push((Some(Action::Versions), ""));
+        }
+        list.push((None, ""));
     }
     list.extend([
         (Some(Action::Offline), offline.mark()),
@@ -161,10 +201,13 @@ mod tests {
     const FILE: Picked = Picked {
         is_folder: false,
         has_link: true,
+        has_versions: true,
+        editor: None,
         offline: Offline::Off,
     };
     const FOLDER: Picked = Picked {
         is_folder: true,
+        has_versions: false,
         ..FILE
     };
 
@@ -185,7 +228,9 @@ mod tests {
             ids(&list),
             [
                 "open-web",
+                "share",
                 "copy-link",
+                "versions",
                 "-",
                 "offline",
                 "online-only",
@@ -195,6 +240,20 @@ mod tests {
         );
         assert_eq!(mark(&list, Action::Offline), "off");
         assert_eq!(mark(&list, Action::OnlineOnly), "on");
+    }
+
+    #[test]
+    fn an_office_file_opens_in_its_editor_and_a_folder_has_no_versions() {
+        let sheet = Picked {
+            editor: Some(OfficeEditor::Sheets),
+            ..FILE
+        };
+        assert_eq!(
+            ids(&entries(&[sheet]))[..3],
+            ["open-web", "open-sheets", "share"]
+        );
+        let folder = ids(&entries(&[FOLDER]));
+        assert!(folder.contains(&"share") && !folder.contains(&"versions"));
     }
 
     #[test]
@@ -231,6 +290,7 @@ mod tests {
         }]);
         assert!(!ids(&list).contains(&"open-web"));
         assert!(!ids(&list).contains(&"copy-link"));
+        assert!(!ids(&list).contains(&"share"));
         assert!(entries(&[]).is_empty());
     }
 
@@ -243,6 +303,10 @@ mod tests {
         let sheet = Action::NewSpreadsheet.new_file().unwrap();
         assert_eq!(sheet.mime, "application/vnd.google-apps.spreadsheet");
         assert!(Action::Trash.new_file().is_none());
+        for editor in OfficeEditor::ALL {
+            assert_eq!(Action::open_with(editor).editor(), Some(editor));
+        }
+        assert_eq!(Action::Share.editor(), None);
     }
 
     #[test]

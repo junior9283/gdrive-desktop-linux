@@ -78,6 +78,13 @@ notify-cache-moving-title = Moving the cache
 notify-cache-moving-body = Downloaded files are moving to { $path }. Drive opens when this finishes.
 notify-cache-moved-title = Cache moved
 notify-cache-moved-body = Downloaded files are now in { $path }.
+notify-link-copied-title = Link copied
+notify-link-restricted = Only people with access can open this link.
+notify-link-anyone = Anyone with the link can { $role }.
+notify-link-domain = Anyone at { $domain } with the link can { $role }.
+link-role-reader = view
+link-role-commenter = comment
+link-role-writer = edit
 tray-synced = Everything is up to date
 tray-syncing = { $count ->
     [1] Syncing 1 file
@@ -132,6 +139,11 @@ window-versions = Manage versions
 ## The "Google Drive" right-click menu in file managers.
 menu-open-web = Open in browser
 menu-copy-link = Copy link
+menu-open-docs = Open with Google Docs
+menu-open-sheets = Open with Google Sheets
+menu-open-slides = Open with Google Slides
+menu-share = Share
+menu-versions = Manage versions
 menu-offline = Available offline
 menu-online-only = Online only
 menu-new-document = New Google Doc

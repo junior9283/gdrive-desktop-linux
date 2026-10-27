@@ -252,7 +252,7 @@ fn write_policy(root: &Path, policy: &str) {
     std::fs::write(paths.etc_dir.join("policies.toml"), policy).unwrap();
 }
 
-/// Script que faz o papel do navegador e do gerenciador de arquivos: anota o argumento em
+/// Script que faz o papel do navegador, do gerenciador de arquivos e da janela: anota os argumentos em
 /// `opened.txt` (ver `Harness::opened`).
 fn launcher(root: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -260,7 +260,7 @@ fn launcher(root: &Path) -> PathBuf {
     let log = root.join("opened.txt");
     std::fs::write(
         &script,
-        format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n", log.display()),
+        format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", log.display()),
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -269,6 +269,7 @@ fn launcher(root: &Path) -> PathBuf {
 
 /// Configuração do serviço sobre o Drive simulado e a pasta `root` do teste.
 fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
+    let launcher = launcher(root);
     Config {
         paths: Paths::for_test(root),
         lang: "pt_BR.UTF-8".into(),
@@ -284,7 +285,9 @@ fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
         },
         tokens: tokens.clone() as Arc<dyn TokenStore>,
         // Nada abre na tela: o "navegador" só anota o que pediram para abrir.
-        browser: Some(launcher(root)),
+        browser: Some(launcher.clone()),
+        // A janela também: o que se pede a ela fica anotado (`--open tela`).
+        ui: launcher,
         backoff: Backoff {
             base: Duration::from_millis(1),
             max: Duration::from_millis(2),

@@ -24,7 +24,7 @@ use gdl_engine::EngineError;
 use gdl_engine::engine::{Engine, Intervals, pending_cache_move};
 use gdl_engine::errors::ErrorSource;
 use gdl_engine::events::{EngineEvent, SyncState};
-use gdl_engine::gdocs::web_url;
+use gdl_engine::gdocs::{OfficeEditor, web_url};
 use gdl_engine::kept::{Kept, KeptFolder};
 use gdl_fs::DriveFs;
 use gdl_store::{Inode, Item, ItemId, ItemKind, PinState};
@@ -35,6 +35,7 @@ use url::Url;
 use zbus::Connection;
 use zbus::object_server::SignalEmitter;
 
+use gdl_ipc::launcher::Launcher;
 use gdl_ipc::{
     AccountInfo, ActivityItem, MenuEntry, NotificationItem, NotificationSetting, OBJECT_PATH,
     OfflineEntry, OfflineSummary, Pref, SearchResult, ServiceError, SharedItem, Status,
@@ -94,6 +95,8 @@ pub struct Config {
     pub tokens: Arc<dyn TokenStore>,
     /// Lançador do navegador; sem ele, `DefaultWebBrowser` ou `xdg-open`.
     pub browser: Option<PathBuf>,
+    /// O programa da janela, para abrir telas (`Compartilhar`, `Gerenciar versões`) pelo menu.
+    pub ui: PathBuf,
     pub backoff: Backoff,
     pub intervals: Intervals,
 }
@@ -186,7 +189,8 @@ impl<'a> DrivePaths<'a> {
 }
 
 /// O que o menu do botão direito precisa saber do item.
-fn picked(engine: &Engine, item: &Item) -> Result<menu::Picked, ServiceError> {
+/// `office`: arquivos do Office abrem no editor on-line (`OpenOfficeFilesInDocs`).
+fn picked(engine: &Engine, item: &Item, office: bool) -> Result<menu::Picked, ServiceError> {
     let is_folder = item.kind == ItemKind::Folder;
     let offline = match item.pin {
         PinState::Pinned | PinState::Inherited => menu::Offline::On,
@@ -197,9 +201,13 @@ fn picked(engine: &Engine, item: &Item) -> Result<menu::Picked, ServiceError> {
         }
         PinState::None => menu::Offline::Off,
     };
+    let has_link = web_url(item).is_some();
+    let is_file = has_link && item.kind == ItemKind::File;
     Ok(menu::Picked {
         is_folder,
-        has_link: web_url(item).is_some(),
+        has_link,
+        has_versions: is_file,
+        editor: OfficeEditor::for_name(&item.local_name).filter(|_| is_file && office),
         offline,
     })
 }
@@ -518,6 +526,15 @@ impl Daemon {
     /// Desmonta e para o motor (o serviço está saindo).
     pub async fn shutdown(&self) {
         self.stop_account().await;
+    }
+
+    /// Mostra a tela `request` (`tela` ou `tela:argumento`) na janela, abrindo-a se preciso.
+    fn open_screen(&self, request: String) {
+        let Some(conn) = self.conn.get() else {
+            return;
+        };
+        let launcher = Launcher::new(conn.clone(), self.config.ui.clone());
+        tokio::spawn(async move { launcher.open(&request).await });
     }
 
     /// Abre o endereço no navegador (`DefaultWebBrowser`, se o administrador definiu).
@@ -1217,9 +1234,10 @@ impl Daemon {
         let Ok(selection) = self.selection(paths).await else {
             return Vec::new();
         };
+        let office = self.prefs().open_office_files_in_docs;
         let picked: Result<Vec<_>, _> = selection
             .iter()
-            .map(|(engine, item)| picked(engine, item))
+            .map(|(engine, item)| picked(engine, item, office))
             .collect();
         let Ok(picked) = picked else {
             return Vec::new();
@@ -1236,7 +1254,7 @@ impl Daemon {
 
     /// Faz a ação `action` do menu nos `paths`; devolve o link em `copy-link` e vazio nas outras.
     pub async fn menu_action(
-        &self,
+        self: &Arc<Self>,
         action: &str,
         paths: &[String],
     ) -> Result<String, ServiceError> {
@@ -1255,7 +1273,24 @@ impl Daemon {
         };
         match action {
             Action::OpenWeb => self.open(web_link(single()?.1)?),
-            Action::CopyLink => return web_link(single()?.1),
+            Action::OpenDocs | Action::OpenSheets | Action::OpenSlides => {
+                // Só o editor do tipo do arquivo (a ação vem de fora, pelo D-Bus).
+                let item = single()?.1;
+                let editor = OfficeEditor::for_name(&item.local_name)
+                    .filter(|e| action.editor() == Some(*e))
+                    .ok_or_else(invalid)?;
+                self.open(editor.url(&item.id.0));
+            }
+            Action::Share => self.open_screen(format!("share:{}", single()?.1.id.0)),
+            Action::Versions => self.open_screen(format!("versions:{}", single()?.1.id.0)),
+            Action::CopyLink => {
+                let (engine, item) = single()?;
+                let link = web_link(item)?;
+                // O aviso diz quem pode abrir o link; ele sai depois, sem atrasar a cópia.
+                let (daemon, engine, id) = (self.clone(), engine.clone(), item.id.clone());
+                tokio::spawn(async move { daemon.notify_link_copied(&engine, &id).await });
+                return Ok(link);
+            }
             Action::Offline | Action::OnlineOnly => {
                 for (engine, item) in &selection {
                     let pins = engine.pins();

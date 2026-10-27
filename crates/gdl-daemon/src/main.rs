@@ -11,6 +11,7 @@ use gdl_drive::client::Backoff;
 use gdl_drive::oauth::OAuthEndpoints;
 use gdl_drive::token_store::SecretServiceStore;
 use gdl_engine::engine::Intervals;
+use gdl_ipc::launcher::Launcher;
 use gdl_ipc::{BUS_NAME, OBJECT_PATH};
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -73,6 +74,7 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         api: Api::google(),
         tokens: Arc::new(SecretServiceStore::new().await?),
         browser: None,
+        ui: Launcher::default_program(),
         backoff: Backoff::default(),
         intervals: Intervals::default(),
     };

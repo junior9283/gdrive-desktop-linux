@@ -4,7 +4,8 @@
 use serde::{Deserialize, Serialize};
 use zbus::zvariant::Type;
 
-#[cfg(feature = "testing")]
+pub mod launcher;
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
 pub const BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1";

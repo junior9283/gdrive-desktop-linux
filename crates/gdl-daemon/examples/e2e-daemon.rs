@@ -62,7 +62,9 @@ async fn main() -> Result<(), Error> {
         },
         tokens: Arc::new(MemoryStore::default()),
         // Nada abre de verdade: o login é feito aqui mesmo.
-        browser: Some(browser),
+        browser: Some(browser.clone()),
+        // Nem as telas pedidas pelo menu (a janela de teste já está aberta).
+        ui: browser,
         backoff: Backoff::default(),
         intervals: Intervals::default(),
     })?;

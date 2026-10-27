@@ -1091,7 +1091,10 @@ async fn menu_shows_only_inside_my_drive_with_offline_marks() {
     );
 
     let file_menu = h.proxy.menu(&[&path("Pasta/a.txt")]).await.unwrap();
-    assert_eq!(ids(&file_menu)[..2], ["open-web", "copy-link"]);
+    assert_eq!(
+        ids(&file_menu)[..4],
+        ["open-web", "share", "copy-link", "versions"]
+    );
     assert_eq!(state(&file_menu, "offline"), "on");
     assert_eq!(state(&file_menu, "online-only"), "off");
 
@@ -1187,6 +1190,77 @@ async fn menu_actions_link_pin_create_refresh_and_trash() {
         .await
         .unwrap_err();
     assert_eq!(err.short_name(), "NotFound", "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn menu_opens_share_versions_and_office_editor() {
+    let h = Harness::new().await;
+    let id = h
+        .fake
+        .add_file(&h.fake.root_id(), "Contas.xlsx", b"x".to_vec());
+    h.logged_in().await;
+    let path = h.drive().join("Contas.xlsx").display().to_string();
+    let menu = h.proxy.menu(&[&path]).await.unwrap();
+    let ids: Vec<_> = menu.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids[..2], ["open-web", "open-sheets"]);
+    let before = h.opened().len();
+
+    for action in ["share", "versions", "open-sheets"] {
+        h.proxy.menu_action(action, &[&path]).await.unwrap();
+    }
+    wait_until("três aberturas", || h.opened().len() == before + 3).await;
+    let opened = h.opened().split_off(before);
+    for wanted in [
+        format!("--open share:{id}"),
+        format!("--open versions:{id}"),
+        format!("https://docs.google.com/spreadsheets/d/{id}/edit?rtpof=true"),
+    ] {
+        assert!(opened.contains(&wanted), "{wanted} em {opened:?}");
+    }
+    let err = h
+        .proxy
+        .menu_action("open-docs", &[&path])
+        .await
+        .unwrap_err();
+    assert_eq!(err.short_name(), "InvalidArgs", "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn copying_a_link_says_who_can_open_it() {
+    let h = Harness::new().await;
+    let id = h.fake.add_file(&h.fake.root_id(), "a.txt", b"x".to_vec());
+    h.logged_in().await;
+    let path = h.drive().join("a.txt").display().to_string();
+    // O aviso sai depois da cópia: espera o corpo dele conter `wanted`.
+    let proxy = &h.proxy;
+    let note_with = |wanted: &'static str| async move {
+        for _ in 0..200 {
+            let notes = proxy.notifications().await.unwrap();
+            let note = notes.into_iter().find(|n| n.kind == "link-copied");
+            if let Some(note) = note.filter(|n| n.body.contains(wanted)) {
+                return note.body;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("sem aviso de link copiado com {wanted:?}");
+    };
+
+    h.proxy.menu_action("copy-link", &[&path]).await.unwrap();
+    assert_eq!(
+        note_with("acesso").await,
+        "Só as pessoas com acesso podem abrir este link."
+    );
+
+    h.proxy
+        .share_set_general(&id, "anyone", "commenter")
+        .await
+        .unwrap();
+    h.proxy.menu_action("copy-link", &[&path]).await.unwrap();
+    let text = note_with("comentar").await;
+    assert!(
+        text.starts_with("Qualquer pessoa com o link pode"),
+        "{text}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -139,6 +139,17 @@ async fn open_local_folder(
     open_outside(path, None).await
 }
 
+/// As pastas do usuário que o primeiro uso sugere sincronizar.
+#[tauri::command]
+fn suggested_folders() -> Vec<String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let config_home = Paths::from_env().config_home;
+    gdl_common::paths::suggested_folders(&config_home, &home)
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect()
+}
+
 /// Pede uma pasta ao usuário pelo portal (o seletor do próprio ambiente); `None` se ele cancelou.
 #[tauri::command]
 async fn pick_folder(
@@ -236,6 +247,7 @@ fn main() -> ExitCode {
             open_mount,
             open_local_folder,
             pick_folder,
+            suggested_folders,
             uninstall
         ])
         .setup(move |app| {

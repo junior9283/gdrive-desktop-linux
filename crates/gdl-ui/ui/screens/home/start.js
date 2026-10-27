@@ -2,6 +2,7 @@
 // da sincronização e do Gemini (na web).
 
 import { card, el } from '../../components.js';
+import { foldersCard } from '../preferences/folders.js';
 import { headerFor, offlineText } from './model.js';
 
 // Os números do off-line e dos compartilhados (`shared_with_me` vai ao Drive) valem por um
@@ -38,6 +39,12 @@ export async function render({ api, t, locale, home }) {
   const status = home.status;
   const offlineCount = el('p');
   const sharedCount = el('p');
+  const foldersCount = el('p');
+  api.call('local_folders')
+    .then((list) => {
+      foldersCount.textContent = t(...foldersCard(list));
+    })
+    .catch(() => {});
   extras(api)
     .then(([summary, sharedItems]) => {
       offlineCount.textContent = t(...offlineText(summary, locale));
@@ -49,6 +56,7 @@ export async function render({ api, t, locale, home }) {
     { class: 'cards' },
     attention({ status, t, api }),
     card(t('card-offline'), offlineCount, t('card-offline-open'), () => home.show('offline')),
+    card(t('card-folders'), foldersCount, t('card-folders-open'), () => home.show('folders')),
     card(t('card-shared'), sharedCount, t('card-shared-open'), () => home.show('shared')),
     card(t('card-sync'), el('p', {}, t(...headerFor(status, Date.now(), locale).title)),
       t('card-sync-open'), () => home.show('activity')),

@@ -58,6 +58,8 @@ export function createApi(tauri, getAccount = () => '') {
     openMount: () => invoke('open_mount'),
     // Uma pasta do computador sincronizada (pelo id; o caminho vem do serviço).
     openLocalFolder: (account, id) => invoke('open_local_folder', { account, id }),
+    // As pastas do usuário que o primeiro uso sugere sincronizar (as que existem).
+    suggestedFolders: () => invoke('suggested_folders'),
     // Uma pasta escolhida no seletor do sistema, ou `null`.
     pickFolder: (title) => invoke('pick_folder', { title }),
     // Tira o app do computador (a CLI pede a senha de administrador se ele veio de um pacote);

@@ -25,6 +25,7 @@ export function folderRows(folders, manyAccounts) {
       accountLabel: manyAccounts ? f.account : null,
       notice: notice(f),
       needsConfirm: f.state === 'confirm-deletes',
+      canRelocate: f.state.startsWith('stopped-'),
     }))
     .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 }
@@ -42,4 +43,11 @@ export function configurator({ refusal, size, files, exists }) {
 // A chave do texto de um motivo de recusa do serviço, ou `null` quando não tem texto próprio.
 export function refusalKey(reason) {
   return REFUSALS.has(reason) ? `folder-refused-${reason}` : null;
+}
+
+// O texto do cartão "Pastas conectadas" do Início, como `[chave, argumentos]`.
+export function foldersCard(folders) {
+  if (!folders.length) return ['card-folders-none', {}];
+  const stuck = folders.filter((f) => f.state !== 'active').length;
+  return stuck ? ['card-folders-attention', { count: stuck }] : ['card-folders-text', { count: folders.length }];
 }

@@ -2,9 +2,12 @@
 // Continuar. A lógica dos passos fica em `onboarding/model.js`; aqui, o DOM e as chamadas.
 
 import { prefValue } from '../api.js';
-import { attempt, card, el, errorText, stylesheet, toast } from '../components.js';
+import { attempt, card, choice, el, errorText, stylesheet, toast, toastError } from '../components.js';
+import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
 import { GUIDE, TROUBLES, actions, firstState, nextStep, stepsFor } from './onboarding/model.js';
+import { refusalToast } from './folder-actions.js';
+import { configurator, folderName } from './preferences/folders.js';
 
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
 // `add` (o menu da conta pede outra conta) ou `resume:<e-mail>` (a conta que precisa entrar de
@@ -14,7 +17,9 @@ function loginMode(arg) {
   return arg?.startsWith('resume:') ? { mode: 'resume', expected: arg.slice('resume:'.length) } : {};
 }
 
-const screen = { root: null, ctx: null, state: null, listening: null };
+// `picked`: as pastas marcadas no passo de pastas, sincronizadas ao concluir; `suggested`: a
+// conferência delas (feita uma vez: ela percorre a pasta inteira).
+const screen = { root: null, ctx: null, state: null, listening: null, picked: new Set(), suggested: null };
 
 export async function render(root, ctx) {
   const css = stylesheet('screens/onboarding.css');
@@ -29,6 +34,7 @@ export async function render(root, ctx) {
     screen.state = firstState({
       signedIn: status.state !== 'signed-out',
       loginOnly: prefValue(prefs, 'DisableOnboardingDialog', false) === true,
+      foldersOff: prefValue(prefs, 'DisableMirroredFolders', false) === true,
       mount: status.mount_point,
       ...loginMode(screenArg(location.search)),
     });
@@ -38,6 +44,11 @@ export async function render(root, ctx) {
 }
 
 function dispatch(event) {
+  // Concluir no passo de pastas sincroniza as marcadas antes de fechar a janela.
+  if (event.type === 'continue' && screen.state.step === 'folders' && screen.picked.size && !event.added) {
+    addPicked().then(() => dispatch({ ...event, added: true }));
+    return;
+  }
   const before = screen.state.step;
   screen.state = nextStep(screen.state, event);
   const moved = screen.state.step !== before;
@@ -56,6 +67,14 @@ function beginLogin() {
     .catch((e) => dispatch({ type: 'login-finished', ok: false, error: errorText(e) }));
 }
 
+function addPicked() {
+  const { api, t } = screen.ctx;
+  const adding = [...screen.picked].map((path) =>
+    api.call('add_local_folder', { path, merge: true }).catch(refusalToast(t)));
+  screen.picked.clear();
+  return Promise.all(adding);
+}
+
 // Desenha o passo atual; o foco vai para o primeiro campo (ou para Continuar) só ao trocar de
 // passo. No fim, fecha a janela.
 function draw(moved = true) {
@@ -65,7 +84,7 @@ function draw(moved = true) {
     return;
   }
   const { t } = ctx;
-  const steps = stepsFor(state.loginOnly, state.mode);
+  const steps = stepsFor(state.loginOnly, state.mode, state.foldersOff);
   const at = steps.indexOf(state.step);
   const list = el(
     'ol',
@@ -208,6 +227,36 @@ const STEPS = {
       el('p', {}, t('onboarding-offline-text')),
       el('pre', { class: 'command' }, t('onboarding-offline-command')),
       el('p', {}, t('onboarding-offline-list')),
+    ];
+  },
+
+  // As pastas sugeridas (Área de trabalho, Documentos, Imagens, Vídeos) com o tamanho; a que o
+  // serviço recusa aparece bloqueada, com o motivo.
+  folders({ api, t, locale }) {
+    const list = el('ul', { class: 'suggested-folders' });
+    const row = (path, check) => {
+      const box = el('input', { type: 'checkbox', checked: screen.picked.has(path), disabled: Boolean(check.refusal) });
+      box.addEventListener('change', () => (box.checked ? screen.picked.add(path) : screen.picked.delete(path)));
+      const detail = check.refusal
+        ? t(check.refusal)
+        : t('folder-config-summary', { files: check.files, size: formatSize(check.size, locale) });
+      return el('li', { 'data-path': path }, choice(box, el('strong', {}, folderName(path)), el('br'), el('span', { class: 'meta' }, detail)));
+    };
+    screen.suggested ??= api.suggestedFolders().then((paths) => Promise.all(paths.map(async (path) =>
+      [path, configurator(await api.call('check_local_folder', { path }))])));
+    screen.suggested
+      .then((checks) => checks.map(([path, check]) => row(path, check)))
+      .then((rows) => list.replaceChildren(...(rows.length ? rows : [el('li', { class: 'empty' }, t('onboarding-folders-none'))])))
+      .catch((error) => {
+        // Uma falha não fica guardada: a próxima visita confere de novo.
+        screen.suggested = null;
+        toastError(error);
+      });
+    return [
+      title(t('onboarding-folders-title')),
+      el('p', {}, t('onboarding-folders-text')),
+      list,
+      el('p', { class: 'meta' }, t('onboarding-folders-later')),
     ];
   },
 };

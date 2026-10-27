@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{Daemon, failed};
 use crate::dbus::Service;
+use crate::notify::{self, Notification};
 
 /// `appProperties` das pastas de apoio: achadas por elas, não pelo nome (que o usuário pode
 /// trocar na web, e que muda com o idioma).
@@ -77,6 +78,15 @@ async fn pretty_hostname() -> Option<String> {
 #[derive(Default)]
 pub(super) struct Runners(Mutex<RunnerMap>);
 
+/// O que os pares de uma conta precisam: o e-mail (para os avisos), o motor, os laços que rodam e
+/// o cancelamento da conta.
+pub(super) struct FolderAccount {
+    pub email: String,
+    pub engine: Arc<Engine>,
+    pub runners: Arc<Runners>,
+    pub shutdown: CancellationToken,
+}
+
 type RunnerMap = HashMap<i64, (Arc<FolderSync>, CancellationToken)>;
 
 impl Runners {
@@ -97,34 +107,29 @@ impl Runners {
 
 impl Daemon {
     /// Sobe os pares guardados da conta (na partida dela); param com `shutdown`.
-    pub(super) fn start_folders(
-        self: &Arc<Self>,
-        engine: &Arc<Engine>,
-        runners: &Arc<Runners>,
-        shutdown: &CancellationToken,
-    ) {
+    pub(super) fn start_folders(self: &Arc<Self>, account: &FolderAccount) {
         // Com a política, os pares ficam guardados mas não rodam.
         if self.folders_refused().is_err() {
             return;
         }
-        match engine.store().pairs() {
+        match account.engine.store().pairs() {
             Ok(pairs) => {
                 for pair in pairs.into_iter().filter(|p| p.kind == PairKind::Folder) {
-                    self.start_folder(engine, runners, shutdown, pair);
+                    self.start_folder(account, pair);
                 }
             }
             Err(e) => tracing::warn!(erro = %e, "falha ao ler as pastas do computador"),
         }
     }
 
-    fn start_folder(
-        self: &Arc<Self>,
-        engine: &Arc<Engine>,
-        runners: &Arc<Runners>,
-        shutdown: &CancellationToken,
-        pair: Pair,
-    ) {
-        let id = pair.id;
+    fn start_folder(self: &Arc<Self>, account: &FolderAccount, pair: Pair) {
+        let FolderAccount {
+            engine,
+            runners,
+            shutdown,
+            ..
+        } = account;
+        let (id, name) = (pair.id, file_name(&pair.local));
         let sync = Arc::new(FolderSync::new(
             engine.store().clone(),
             engine.client().clone(),
@@ -138,9 +143,11 @@ impl Daemon {
             let timing = self.config.folder_timing;
             async move { sync.run(events, timing, stop).await }
         });
-        // O estado do par (parado, esperando confirmação) chega à interface pelo sinal.
+        // O estado do par (parado, esperando confirmação) chega à interface pelo sinal e, quando
+        // muda para um que pede ação, ao usuário pelo aviso.
         let daemon = Arc::downgrade(self);
         let (mut changes, until) = (sync.state_changes(), stop.clone());
+        let email = account.email.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -151,6 +158,15 @@ impl Daemon {
                     break;
                 };
                 daemon.emit_local_folders_changed().await;
+                let state = *changes.borrow_and_update();
+                if let Some(note) = notify::for_folder(id, &name, &state, &daemon.i18n) {
+                    daemon
+                        .notify(&Notification {
+                            account: email.clone(),
+                            ..note
+                        })
+                        .await;
+                }
             }
         });
         runners.lock().insert(id, (sync, stop));
@@ -201,34 +217,34 @@ impl Daemon {
         merge: bool,
     ) -> Result<i64, ServiceError> {
         self.folders_refused()?;
-        let (engine, runners, shutdown) = self.folder_account(account).await?;
+        let account = self.folder_account(account).await?;
+        let engine = &account.engine;
         let local = self.validated(path, None).await?;
-        let remote = match self.existing_folder(&engine, &local).await? {
+        let remote = match self.existing_folder(engine, &local).await? {
             Some(id) if merge => id,
             _ => {
-                let computer = self.computer_folder(&engine).await?;
-                let name = free_name(&engine, &computer, &file_name(&local))?;
+                let computer = self.computer_folder(engine).await?;
+                let name = free_name(engine, &computer, &file_name(&local))?;
                 let made = engine
                     .client()
                     .create_folder(&computer, &name, None)
                     .await
                     .map_err(failed)?;
-                remember(&engine, made)?
+                remember(engine, made)?
             }
         };
         let id = engine
             .store()
             .add_pair(&local, &ItemId(remote), PairKind::Folder, Direction::TwoWay)
             .map_err(failed)?;
-        self.restart_folder(&engine, &runners, &shutdown, id)
-            .await?;
+        self.restart_folder(&account, id).await?;
         Ok(id)
     }
 
     pub async fn remove_local_folder(&self, account: &str, id: i64) -> Result<(), ServiceError> {
-        let (engine, runners, _) = self.folder_account(account).await?;
-        runners.stop(id);
-        engine.store().remove_pair(id).map_err(failed)?;
+        let account = self.folder_account(account).await?;
+        account.runners.stop(id);
+        account.engine.store().remove_pair(id).map_err(failed)?;
         self.emit_local_folders_changed().await;
         Ok(())
     }
@@ -240,28 +256,26 @@ impl Daemon {
         path: &str,
     ) -> Result<(), ServiceError> {
         self.folders_refused()?;
-        let (engine, runners, shutdown) = self.folder_account(account).await?;
+        let account = self.folder_account(account).await?;
         let local = self.validated(path, Some(id)).await?;
-        let store = engine.store();
-        runners.stop(id);
+        let store = account.engine.store();
+        account.runners.stop(id);
         store.set_pair_local(id, &local).map_err(failed)?;
         store
             .set_pair_state(id, PairState::Active)
             .map_err(failed)?;
-        self.restart_folder(&engine, &runners, &shutdown, id).await
+        self.restart_folder(&account, id).await
     }
 
     /// Sobe (de novo) o laço do par `id` como está no banco e avisa a interface.
     async fn restart_folder(
         self: &Arc<Self>,
-        engine: &Arc<Engine>,
-        runners: &Arc<Runners>,
-        shutdown: &CancellationToken,
+        account: &FolderAccount,
         id: i64,
     ) -> Result<(), ServiceError> {
-        let pair = engine.store().pair(id).map_err(failed)?;
+        let pair = account.engine.store().pair(id).map_err(failed)?;
         let pair = pair.ok_or_else(|| ServiceError::NotFound(id.to_string()))?;
-        self.start_folder(engine, runners, shutdown, pair);
+        self.start_folder(account, pair);
         self.emit_local_folders_changed().await;
         Ok(())
     }
@@ -283,8 +297,10 @@ impl Daemon {
     }
 
     pub async fn confirm_folder_deletes(&self, account: &str, id: i64) -> Result<(), ServiceError> {
-        let (_, runners, _) = self.folder_account(account).await?;
-        let sync = runners
+        let sync = self
+            .folder_account(account)
+            .await?
+            .runners
             .get(id)
             .ok_or_else(|| ServiceError::NotFound(id.to_string()))?;
         sync.confirm_deletes().map_err(failed)
@@ -399,12 +415,12 @@ impl Daemon {
             .collect()
     }
 
-    async fn folder_account(
-        &self,
-        account: &str,
-    ) -> Result<(Arc<Engine>, Arc<Runners>, CancellationToken), ServiceError> {
-        self.with_account(account, |a| {
-            (a.engine.clone(), a.folders.clone(), a.shutdown.clone())
+    async fn folder_account(&self, account: &str) -> Result<FolderAccount, ServiceError> {
+        self.with_account(account, |a| FolderAccount {
+            email: a.email.clone(),
+            engine: a.engine.clone(),
+            runners: a.folders.clone(),
+            shutdown: a.shutdown.clone(),
         })
         .await
     }
@@ -444,7 +460,9 @@ async fn find_computers(engine: &Engine) -> Result<Option<String>, ServiceError>
 /// Grava a pasta de apoio, que a montagem mostra na raiz.
 fn note_computers(engine: &Engine, id: &str) -> Result<(), ServiceError> {
     let store = engine.store();
-    store.set_computers_folder(&ItemId(id.into())).map_err(failed)
+    store
+        .set_computers_folder(&ItemId(id.into()))
+        .map_err(failed)
 }
 
 /// A pasta viva `name` dentro de `parent`, pelo banco.

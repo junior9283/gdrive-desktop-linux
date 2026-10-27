@@ -898,15 +898,78 @@ async fn shared_drives_screen_saves_and_creates() {
     );
 }
 
+/// O passo 5 do primeiro uso: as pastas do `user-dirs.dirs` (o `e2e.sh` deixa só Documentos, com
+/// um arquivo), marcadas e sincronizadas ao concluir.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn onboarding_suggests_folders() {
+    let service = service().await;
+    let documents = std::env::var("GDL_E2E_DOCUMENTS").expect("rode pelo scripts/e2e.sh");
+    let session = Session::open("onboarding").await;
+    for _ in 0..3 {
+        session.click(".continue").await;
+    }
+
+    let row = session
+        .wait_text(".suggested-folders", "1 arquivo")
+        .await;
+    session
+        .click(&format!(".suggested-folders [data-path='{documents}'] input"))
+        .await;
+    session.click(".continue").await;
+    let added = until("a pasta sugerida sincronizando", async || {
+        let folders = service.local_folders().await.unwrap();
+        (!folders.is_empty()).then_some(folders)
+    })
+    .await;
+    for folder in &added {
+        service.remove_local_folder("", folder.id).await.unwrap();
+    }
+
+    assert!(row.contains("Documentos"), "{row}");
+    assert_eq!(
+        added.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        [documents.as_str()]
+    );
+}
+
+/// Uma pasta do computador nova em `/tmp`, com `a.txt`.
+fn computer_folder(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("{name}-e2e-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.txt"), b"um").unwrap();
+    dir
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn connected_folders_view_lists_the_pairs() {
+    let service = service().await;
+    let dir = computer_folder("Projetos");
+    let path = dir.display().to_string();
+    let id = service.add_local_folder("", &path, false).await.unwrap();
+    let home = Session::open("home").await;
+
+    let card = home.wait_text(".cards", "1 pasta sincronizando").await;
+    home.click("[data-view='folders']").await;
+    let row = home
+        .wait_text(&format!(".local-folder[data-path='{path}']"), "Projetos")
+        .await;
+    service.remove_local_folder("", id).await.unwrap();
+    home.wait_text(".view", "Nenhuma pasta").await;
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(card.contains("Pastas conectadas"), "{card}");
+    assert!(row.contains(&path), "{row}");
+}
+
 /// O seletor do sistema não roda no Xvfb: o configurador abre pelo argumento `folder:<caminho>`
 /// (o mesmo do Dolphin).
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn computer_tab_adds_and_stops_a_folder() {
     let service = service().await;
-    let dir = std::env::temp_dir().join(format!("Documentos-e2e-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("a.txt"), b"um").unwrap();
+    let dir = computer_folder("Documentos");
     let path = dir.display().to_string();
     let session = Session::open(&format!("preferences:folder:{path}")).await;
 

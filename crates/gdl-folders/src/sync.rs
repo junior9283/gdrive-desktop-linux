@@ -67,7 +67,7 @@ pub struct FolderSync {
     /// Pede uma comparação ao laço (`run`) agora.
     pub(crate) wake: tokio::sync::Notify,
     /// Muda a cada troca do estado do par (para a interface).
-    state_changed: tokio::sync::watch::Sender<()>,
+    state_changed: tokio::sync::watch::Sender<PairState>,
 }
 
 impl FolderSync {
@@ -78,6 +78,7 @@ impl FolderSync {
         trash: Trash,
         conflict_word: String,
     ) -> FolderSync {
+        let state = pair.state;
         FolderSync {
             store,
             client,
@@ -86,7 +87,7 @@ impl FolderSync {
             conflict_word,
             deletes_confirmed: AtomicU64::new(0),
             wake: tokio::sync::Notify::new(),
-            state_changed: tokio::sync::watch::Sender::new(()),
+            state_changed: tokio::sync::watch::Sender::new(state),
         }
     }
 
@@ -109,7 +110,7 @@ impl FolderSync {
     }
 
     /// Avisa a cada troca de estado do par.
-    pub fn state_changes(&self) -> tokio::sync::watch::Receiver<()> {
+    pub fn state_changes(&self) -> tokio::sync::watch::Receiver<PairState> {
         self.state_changed.subscribe()
     }
 
@@ -122,7 +123,7 @@ impl FolderSync {
     fn set_state(&self, state: PairState) -> Result<()> {
         if self.state()? != state {
             self.store.set_pair_state(self.pair.id, state)?;
-            self.state_changed.send_replace(());
+            self.state_changed.send_replace(state);
         }
         Ok(())
     }

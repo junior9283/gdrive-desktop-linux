@@ -47,6 +47,9 @@ test('Continuar e Voltar percorrem os passos depois do login', () => {
   state = nextStep(state, { type: 'continue' });
   assert.equal(state.step, 'offline');
   assert.equal(nextStep(state, { type: 'back' }).step, 'files');
+  state = nextStep(state, { type: 'continue' });
+  assert.equal(state.step, 'folders', 'o passo 5 sugere pastas do computador');
+  assert.equal(nextStep(state, { type: 'back' }).step, 'offline');
   assert.equal(nextStep(state, { type: 'continue' }).step, 'end');
   // Depois do login não se volta para ele.
   assert.equal(nextStep({ ...state, step: 'intro' }, { type: 'back' }).step, 'intro');
@@ -102,7 +105,14 @@ test('a tela de consentimento recebe as páginas do site do projeto', () => {
 
 test('DisableOnboardingDialog deixa só os passos do login', () => {
   assert.deepEqual(stepsFor(true), ['setup', 'sign-in', 'waiting']);
-  assert.deepEqual(stepsFor(false), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'offline']);
+  assert.deepEqual(stepsFor(false), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'offline', 'folders']);
+});
+
+test('com DisableMirroredFolders, o primeiro uso não sugere pastas', () => {
+  assert.deepEqual(stepsFor(false, '', true), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'offline']);
+  const state = { ...firstState({ signedIn: true, loginOnly: false, foldersOff: true }), step: 'offline' };
+  assert.equal(actions(state).primary, 'finish');
+  assert.equal(nextStep(state, { type: 'continue' }).step, 'end');
 });
 
 test('editar um campo guarda o valor e limpa o erro', () => {
@@ -119,7 +129,8 @@ test('botões de cada passo', () => {
   assert.deepEqual(at('waiting'), { skip: false, back: true, primary: null });
   assert.deepEqual(at('intro'), { skip: true, back: false, primary: 'continue' });
   assert.deepEqual(at('files'), { skip: true, back: true, primary: 'continue' });
-  assert.deepEqual(at('offline'), { skip: false, back: true, primary: 'finish' });
+  assert.deepEqual(at('offline'), { skip: true, back: true, primary: 'continue' });
+  assert.deepEqual(at('folders'), { skip: false, back: true, primary: 'finish' });
   assert.deepEqual(actions({ ...signIn(), loginOnly: true }).primary, 'continue');
 });
 

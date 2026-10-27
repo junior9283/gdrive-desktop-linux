@@ -50,7 +50,8 @@ use crate::menu::{self, Action};
 use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
-    self, Notification, Notifier, OPEN_CANCELED, OPEN_LOST_FOUND, OPTIONAL_KINDS, RESUME, SIGN_IN,
+    self, Notification, Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPTIONAL_KINDS,
+    RESUME, SIGN_IN,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -784,6 +785,10 @@ impl Daemon {
                 self.open_screen(format!("onboarding:resume:{account}"));
                 return Ok(());
             }
+            OPEN_FOLDERS => {
+                self.open_screen("preferences:computer".into());
+                return Ok(());
+            }
             OPEN_LOST_FOUND => KeptFolder::LostAndFound,
             OPEN_CANCELED => KeptFolder::CanceledUploads,
             _ => return Err(ServiceError::InvalidArgs(key.into())),
@@ -1144,7 +1149,12 @@ impl Daemon {
         self.forward_activity(engine.activity_changes(), shutdown.clone());
         self.forward_states(engine.clone(), mount_point.clone(), shutdown.clone());
         let folders = Arc::new(folders::Runners::default());
-        self.start_folders(&engine, &folders, &shutdown);
+        self.start_folders(&folders::FolderAccount {
+            email: email.into(),
+            engine: engine.clone(),
+            runners: folders.clone(),
+            shutdown: shutdown.clone(),
+        });
         let moved = mount_point != preferred;
         let account = Account {
             email: email.into(),

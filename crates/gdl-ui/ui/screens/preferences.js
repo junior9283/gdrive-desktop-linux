@@ -2,12 +2,13 @@
 // "Alterações pendentes", Cancelar e Salvar (todas as mudanças num `set_preferences` só). Uma
 // chave da política aparece bloqueada. A lógica fica em `preferences/model.js`.
 
-import { attempt, choice, confirmDialog, el, errorText, menuButton, saveFooter, stylesheet, toast, toastError } from '../components.js';
+import { attempt, choice, confirmDialog, el, saveFooter, stylesheet, toast, toastError } from '../components.js';
+import { folderItems, refusalToast } from './folder-actions.js';
 import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
 import { currentAccount } from '../state.js';
 import { disconnect } from './home/disconnect.js';
-import { configurator, folderArg, folderName, folderRows, refusalKey } from './preferences/folders.js';
+import { configurator, folderArg, folderName } from './preferences/folders.js';
 import {
   diff, fromPrefs, gbToKb, hotkeyFrom, kbToGb, numberOrNull, proxyMode, proxyPatch, validate,
 } from './preferences/model.js';
@@ -165,43 +166,7 @@ function computerTab() {
 
 // A lista das pastas do computador (redesenhada quando o serviço avisa que mudou).
 function drawFolders() {
-  if (!ui.folders) return;
-  const { api, t } = screen.ctx;
-  const rows = folderRows(computer.folders, computer.accounts.length > 1);
-  if (!rows.length) {
-    ui.folders.replaceChildren(el('li', { class: 'empty' }, t('pref-computer-empty')));
-    return;
-  }
-  ui.folders.replaceChildren(...rows.map((row) => {
-    const args = { account: row.account, id: row.id };
-    const confirmDeletes = row.needsConfirm
-      ? el('button', { class: 'text', onclick: () => attempt(api.call('confirm_folder_deletes', args)) }, t('folder-confirm-deletes'))
-      : [];
-    return el('li', { class: 'local-folder', 'data-path': row.path },
-      el('div', { class: 'field' },
-        el('strong', {}, row.name),
-        el('span', { class: 'path' }, row.path),
-        row.accountLabel ? el('span', { class: 'meta' }, row.accountLabel) : [],
-        row.notice ? el('span', { class: 'folder-notice' }, t(...row.notice), confirmDeletes) : []),
-      menuButton(t('row-menu'), () => [
-        { id: 'open', label: t('folder-open'), action: () => attempt(api.openLocalFolder(row.account, row.id)) },
-        { id: 'stop', label: t('folder-stop'), action: () => stopFolder(row) },
-      ]));
-  }));
-}
-
-async function stopFolder(row) {
-  const { api, t } = screen.ctx;
-  const ok = await confirmDialog({
-    title: t('folder-stop-title', { name: row.name }),
-    body: t('folder-stop-body'),
-    confirm: t('folder-stop'),
-    cancel: t('action-cancel'),
-    danger: true,
-  });
-  if (!ok) return;
-  attempt(api.call('remove_local_folder', { account: row.account, id: row.id }), () =>
-    toast(t('folder-stopped', { name: row.name })));
+  ui.folders?.replaceChildren(...folderItems(screen.ctx, computer.folders, computer.accounts.length > 1));
 }
 
 async function pickAndAdd() {
@@ -255,10 +220,7 @@ async function addFolder(path) {
   const args = { account: account.value, path, merge: state.askMerge && merge.checked };
   api.call('add_local_folder', args)
     .then(() => toast(t('folder-added', { name })))
-    .catch((error) => {
-      const key = error?.name === 'Refused' && refusalKey(error.message);
-      toast(key ? t(key) : errorText(error));
-    });
+    .catch(refusalToast(t));
 }
 
 function driveTab() {

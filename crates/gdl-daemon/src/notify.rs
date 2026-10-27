@@ -9,6 +9,7 @@ use std::sync::Mutex;
 
 use gdl_common::i18n::I18n;
 use gdl_engine::events::{EngineEvent, LostReason};
+use gdl_store::folders::{PairState, StopReason};
 use zbus::Connection;
 use zbus::zvariant::Value;
 
@@ -20,6 +21,8 @@ pub const OPEN_LOST_FOUND: &str = "open-lost-found";
 pub const OPEN_CANCELED: &str = "open-canceled";
 /// Ação do aviso de gravação com a sincronização pausada que a retoma.
 pub const RESUME: &str = "resume";
+/// Ação dos avisos de pasta do computador que abre Preferências > Meu computador.
+pub const OPEN_FOLDERS: &str = "open-folders";
 /// Ação do aviso de conta sem login que abre a janela no login dela.
 pub const SIGN_IN: &str = "sign-in";
 
@@ -192,6 +195,30 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
     })
 }
 
+/// O aviso de uma pasta do computador (o par `pair`, chamado `name`) que parou ou espera
+/// confirmação; `None` quando ela voltou a sincronizar. Um aviso por pasta: o novo substitui o
+/// anterior.
+pub fn for_folder(pair: i64, name: &str, state: &PairState, i18n: &I18n) -> Option<Notification> {
+    let (kind_id, count) = match state {
+        PairState::Active => return None,
+        PairState::Stopped(StopReason::Missing) => ("folder-missing", 0),
+        PairState::Stopped(StopReason::NoPermission) => ("folder-no-permission", 0),
+        PairState::Stopped(StopReason::Moved) => ("folder-moved", 0),
+        PairState::ConfirmDeletes(n) => ("folder-mass-delete", *n),
+    };
+    // Os textos são `notify-<tipo>-title` e `notify-<tipo>-body`.
+    let text =
+        |part: &str, args: &[(&str, &str)]| i18n.tr(&format!("notify-{kind_id}-{part}"), args);
+    Some(Notification {
+        kind_id,
+        summary: text("title", &[]),
+        body: text("body", &[("name", name), ("count", &count.to_string())]),
+        action: Some((OPEN_FOLDERS, i18n.tr("notify-folder-action", &[]))),
+        replaces_key: Some(format!("folder:{pair}")),
+        account: String::new(),
+    })
+}
+
 /// Envia notificações pela conexão do serviço (no barramento de sessão, ao servidor de
 /// notificações da área de trabalho).
 pub struct Notifier {
@@ -317,6 +344,36 @@ mod tests {
             for_event(&EngineEvent::SyncStateChanged(Default::default()), &i18n),
             None
         );
+    }
+
+    #[test]
+    fn folder_states_have_notes_that_open_the_folders() {
+        use gdl_store::folders::{PairState, StopReason};
+        let i18n = I18n::new("pt_BR");
+        let note = |state| for_folder(7, "Documentos", &state, &i18n);
+        assert_eq!(note(PairState::Active), None);
+        for (state, kind) in [
+            (PairState::Stopped(StopReason::Missing), "folder-missing"),
+            (
+                PairState::Stopped(StopReason::NoPermission),
+                "folder-no-permission",
+            ),
+            (PairState::Stopped(StopReason::Moved), "folder-moved"),
+            (PairState::ConfirmDeletes(40), "folder-mass-delete"),
+        ] {
+            let note = note(state).unwrap();
+            assert_eq!(note.kind_id, kind);
+            assert!(note.body.contains("Documentos"), "{kind}: {}", note.body);
+            assert!(!note.summary.starts_with("notify-"), "{kind} sem texto");
+            assert_eq!(note.action, Some((OPEN_FOLDERS, "Ver pastas".into())));
+            assert_eq!(
+                note.replaces_key.as_deref(),
+                Some("folder:7"),
+                "um aviso por pasta"
+            );
+        }
+        let mass = note(PairState::ConfirmDeletes(40)).unwrap();
+        assert!(mass.body.contains("40"), "{}", mass.body);
     }
 
     #[test]

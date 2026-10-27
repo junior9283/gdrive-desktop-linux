@@ -49,6 +49,7 @@ more-options = More options
 
 view-start = Home
 view-activity = Sync activity
+view-folders = Connected folders
 view-offline = Offline files
 view-shared = Shared with me
 view-notifications = Notifications
@@ -71,6 +72,17 @@ card-offline-text = { $count ->
    *[other] { $count } offline items ({ $size })
 }
 card-offline-open = See offline files
+card-folders = Connected folders
+card-folders-none = No folder from this computer is syncing.
+card-folders-text = { $count ->
+    [one] 1 folder syncing.
+   *[other] { $count } folders syncing.
+}
+card-folders-attention = { $count ->
+    [one] 1 folder needs attention.
+   *[other] { $count } folders need attention.
+}
+card-folders-open = See folders
 card-shared = Shared with me
 card-shared-text = { $count ->
     [0] Nobody shared files with you
@@ -243,6 +255,11 @@ onboarding-step-waiting = Browser sign-in
 onboarding-step-intro = Get to know the app
 onboarding-step-files = Your files
 onboarding-step-offline = Working offline
+onboarding-step-folders = Computer folders
+onboarding-folders-title = Sync folders from this computer
+onboarding-folders-text = The folders you check go to "Computers" in Google Drive, and changes sync both ways.
+onboarding-folders-none = None of the usual folders (Desktop, Documents, Pictures, Videos) was found.
+onboarding-folders-later = You can choose other folders later, in Preferences > My computer.
 onboarding-skip = Skip
 onboarding-back = Back
 onboarding-continue = Continue
@@ -283,6 +300,7 @@ pref-computer-empty = No folder from this computer is backed up to Google Drive.
 pref-add-folder = Add folder
 pref-computer-text = The folders you choose here go to "Computers" in Google Drive, and changes sync both ways.
 folder-open = Open folder
+folder-relocate = Choose new location
 folder-stop = Stop syncing
 folder-stop-title = Stop syncing "{ $name }"?
 folder-stop-body = The files stay on this computer and in Google Drive; only changes stop syncing.

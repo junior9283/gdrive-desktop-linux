@@ -49,6 +49,7 @@ more-options = Mais opções
 
 view-start = Início
 view-activity = Atividade de sincronização
+view-folders = Pastas conectadas
 view-offline = Arquivos off-line
 view-shared = Compartilhados comigo
 view-notifications = Notificações
@@ -71,6 +72,17 @@ card-offline-text = { $count ->
    *[other] { $count } itens off-line ({ $size })
 }
 card-offline-open = Ver arquivos off-line
+card-folders = Pastas conectadas
+card-folders-none = Nenhuma pasta do computador está sendo sincronizada.
+card-folders-text = { $count ->
+    [one] 1 pasta sincronizando.
+   *[other] { $count } pastas sincronizando.
+}
+card-folders-attention = { $count ->
+    [one] 1 pasta precisa de atenção.
+   *[other] { $count } pastas precisam de atenção.
+}
+card-folders-open = Ver pastas
 card-shared = Compartilhados comigo
 card-shared-text = { $count ->
     [0] Ninguém compartilhou arquivos com você
@@ -243,6 +255,11 @@ onboarding-step-waiting = Login no navegador
 onboarding-step-intro = Conheça o app
 onboarding-step-files = Seus arquivos
 onboarding-step-offline = Uso sem internet
+onboarding-step-folders = Pastas do computador
+onboarding-folders-title = Sincronize pastas deste computador
+onboarding-folders-text = As pastas marcadas vão para "Computadores" no Google Drive, e as mudanças seguem nos dois sentidos.
+onboarding-folders-none = Nenhuma das pastas de sempre (Área de trabalho, Documentos, Imagens, Vídeos) foi encontrada.
+onboarding-folders-later = Você pode escolher outras pastas depois, em Preferências > Meu computador.
 onboarding-skip = Pular
 onboarding-back = Voltar
 onboarding-continue = Continuar
@@ -283,6 +300,7 @@ pref-computer-empty = Nenhuma pasta do computador está em backup no Google Driv
 pref-add-folder = Adicionar pasta
 pref-computer-text = As pastas escolhidas aqui ficam em "Computadores" no Google Drive, e as mudanças seguem nos dois sentidos.
 folder-open = Abrir pasta
+folder-relocate = Escolher novo local
 folder-stop = Parar de sincronizar
 folder-stop-title = Parar de sincronizar "{ $name }"?
 folder-stop-body = Os arquivos continuam neste computador e no Google Drive; só as mudanças deixam de ser sincronizadas.

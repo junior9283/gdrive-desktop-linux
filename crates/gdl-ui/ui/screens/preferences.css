@@ -100,33 +100,6 @@
   color: var(--md-on-secondary-container);
 }
 
-/* Meu computador: uma linha por pasta, com o menu à direita. */
-.local-folders {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  width: 100%;
-}
-
-.local-folder {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--md-outline-variant);
-}
-
-.local-folder .field {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.folder-notice {
-  color: var(--md-error);
-}
-
 .folder-config {
   display: flex;
   flex-direction: column;

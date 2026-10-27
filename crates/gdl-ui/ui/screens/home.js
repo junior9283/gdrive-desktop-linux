@@ -6,6 +6,7 @@ import { accountButton, accountMenu } from './home/account.js';
 import { headerFor, shownStatus, withoutAccount } from './home/model.js';
 import { moreMenu } from './home/more.js';
 import * as activity from './home/activity.js';
+import * as folders from './home/folders.js';
 import * as links from './home/links.js';
 import * as notifications from './home/notifications.js';
 import * as offline from './home/offline.js';
@@ -13,7 +14,7 @@ import * as shared from './home/shared.js';
 import * as start from './home/start.js';
 import { currentAccount, onAccountChange, setCurrentAccount } from '../state.js';
 
-const VIEWS = { start, activity, offline, shared, notifications, links };
+const VIEWS = { start, activity, folders, offline, shared, notifications, links };
 // Tudo de uma vez: o login que terminou e a conta mostrada que mudou.
 const EVERYTHING = { status: true, badge: true, views: Object.keys(VIEWS) };
 // O que cada evento da ponte atualiza: o cabeçalho (`status`), o selo das notificações (`badge`)
@@ -22,6 +23,7 @@ const EVENTS = {
   'status-changed': { status: true, views: ['start'] },
   'activity-changed': { views: ['activity'] },
   'notifications-changed': { badge: true, views: ['notifications'] },
+  'local-folders-changed': { views: ['start', 'folders'] },
   'login-finished': EVERYTHING,
 };
 // Durante a sincronização os eventos chegam várias vezes por segundo: no máximo uma atualização

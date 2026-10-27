@@ -68,6 +68,13 @@ mkdir -p "$XDG_CONFIG_HOME/gdrive-desktop-linux"
 printf '#!/bin/sh\nprintf "%%s\\n" "$1" >> "%s"\n' "$GDL_E2E_OPENED" > "$work/navegador"
 chmod +x "$work/navegador"
 printf 'DefaultWebBrowser = "%s"\n' "$work/navegador" > "$XDG_CONFIG_HOME/gdrive-desktop-linux/preferences.toml"
+# As pastas que o primeiro uso sugere ficam no diretório do teste, nunca nas do usuário: só
+# Documentos existe (com um arquivo).
+export GDL_E2E_DOCUMENTS="$work/pastas/Documentos"
+mkdir -p "$GDL_E2E_DOCUMENTS"
+printf 'um' > "$GDL_E2E_DOCUMENTS/a.txt"
+printf 'XDG_%s_DIR="%s"\n' DESKTOP "$work/pastas/Desktop" DOCUMENTS "$GDL_E2E_DOCUMENTS" \
+  PICTURES "$work/pastas/Imagens" VIDEOS "$work/pastas/Videos" > "$XDG_CONFIG_HOME/user-dirs.dirs"
 target/debug/examples/e2e-daemon > "$work/daemon.out" 2> "$work/daemon.log" &
 pids="$pids $!"
 export GDL_E2E_DAEMON_PID=$!

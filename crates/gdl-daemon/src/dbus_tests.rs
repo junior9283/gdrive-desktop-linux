@@ -2543,7 +2543,11 @@ async fn other_computers_show_in_the_mount() {
     h.fake.add_file(&other, "b.txt", b"b".to_vec());
     h.logged_in().await;
 
-    let mounted = h.drive().parent().unwrap().join("Computadores/Outro PC/b.txt");
+    let mounted = h
+        .drive()
+        .parent()
+        .unwrap()
+        .join("Computadores/Outro PC/b.txt");
     wait_until("o backup do outro computador", || mounted.exists()).await;
 }
 
@@ -2641,7 +2645,8 @@ async fn disable_mirrored_folders_stops_existing_folders() {
 
     h.restart(Some("DisableMirroredFolders = true")).await;
     std::fs::write(docs.join("depois.txt"), b"dois").unwrap();
-    let refused = |e: &ServiceError| matches!(e, ServiceError::Refused(r) if r == "folders-disabled");
+    let refused =
+        |e: &ServiceError| matches!(e, ServiceError::Refused(r) if r == "folders-disabled");
     let moved = local_folder(&h, "Outra");
     let err = h
         .proxy
@@ -2660,6 +2665,38 @@ async fn disable_mirrored_folders_stops_existing_folders() {
         1,
         "o par continua guardado"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn missing_folder_is_announced() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    h.proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("pasta no Drive", || {
+        h.fake.find_live("Documentos").len() == 1
+    })
+    .await;
+
+    std::fs::remove_dir_all(&docs).unwrap();
+    let mut note = None;
+    for _ in 0..100 {
+        let notes = h.proxy.notifications().await.unwrap();
+        note = notes.into_iter().find(|n| n.kind == "folder-missing");
+        if note.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let note = note.expect("o aviso da pasta que sumiu");
+
+    assert!(note.body.contains("Documentos"), "{}", note.body);
+    assert_eq!(note.action_key, "open-folders");
+    let folders = h.proxy.local_folders().await.unwrap();
+    assert_eq!(folders[0].state, "stopped-missing");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

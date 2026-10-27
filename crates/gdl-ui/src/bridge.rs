@@ -211,6 +211,9 @@ impl Bridge {
                 j!(s.add_local_folder(a.account(), a.str("path")?, a.bool("merge")?))
             }
             "remove_local_folder" => j!(s.remove_local_folder(a.account(), a.i64("id")?)),
+            "relocate_local_folder" => {
+                j!(s.relocate_local_folder(a.account(), a.i64("id")?, a.str("path")?))
+            }
             "confirm_folder_deletes" => j!(s.confirm_folder_deletes(a.account(), a.i64("id")?)),
             "versions" => j!(s.versions(a.account(), a.str("item_id")?)),
             "version_download" => {

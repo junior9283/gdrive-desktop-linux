@@ -1,8 +1,7 @@
 // A lógica do primeiro uso sem DOM: em que passo está, para onde cada botão (ou o fim do login)
 // leva e quais botões aparecem. Os erros saem como `[chave, argumentos]` do `ui.ftl`.
 
-// Os passos da 0.2 (escolher pastas e o resumo chegam com o backup de pastas). O login
-// começa pelo guia do Client ID, que quem já tem um passa com Continuar.
+// O login começa pelo guia do Client ID, que quem já tem um passa com Continuar.
 const LOGIN = ['setup', 'sign-in', 'waiting'];
 
 // O guia do Client ID (base: `docs/guia-client-id.md`): cada parte abre a sua página do Google
@@ -35,23 +34,25 @@ export const GUIDE = [
 
 // Os problemas mais comuns do login, com o que fazer (os mesmos do fim do guia em `docs/`).
 export const TROUBLES = ['publish-blocked', 'access-denied', 'redirect-mismatch', 'weekly-logout', 'api-disabled'];
-const TOUR = ['intro', 'files', 'offline'];
+// O último passo sugere pastas do computador para sincronizar.
+const TOUR = ['intro', 'files', 'offline', 'folders'];
 
 // Os passos mostrados: com `DisableOnboardingDialog`, só os do login; adicionando outra conta
 // (`mode` `add`) ou entrando de novo numa (`resume`), só o passo dela e a espera, sem o guia: as
-// credenciais já guardadas valem.
-export function stepsFor(loginOnly, mode = '') {
+// credenciais já guardadas valem. Com `DisableMirroredFolders` (`foldersOff`), sem as pastas.
+export function stepsFor(loginOnly, mode = '', foldersOff = false) {
   if (mode) return [mode, 'waiting'];
-  return loginOnly ? [...LOGIN] : [...LOGIN, ...TOUR];
+  if (loginOnly) return [...LOGIN];
+  return [...LOGIN, ...TOUR.filter((step) => !foldersOff || step !== 'folders')];
 }
 
 // Onde começa: nos modos `add` e `resume`, no passo deles (`expected` é o e-mail da conta que
 // entra de novo); sem conta, no login; com a conta conectada, na apresentação (ou no fim, se ela
 // está desligada). `mount` é a pasta do Drive.
-export function firstState({ signedIn, loginOnly, mount = '', mode = '', expected = '' }) {
+export function firstState({ signedIn, loginOnly, mount = '', mode = '', expected = '', foldersOff = false }) {
   const step = mode || (!signedIn ? 'setup' : loginOnly ? 'end' : 'intro');
   return {
-    step, loginOnly, mode, expected, mount, clientId: '', secret: '', url: null, linkShown: false, error: null,
+    step, loginOnly, foldersOff, mode, expected, mount, clientId: '', secret: '', url: null, linkShown: false, error: null,
     failed: false,
   };
 }
@@ -68,7 +69,7 @@ export function loginFailure(error) {
 
 // O passo seguinte dentro de `steps`, ou o fim.
 function after(state) {
-  const steps = stepsFor(state.loginOnly, state.mode);
+  const steps = stepsFor(state.loginOnly, state.mode, state.foldersOff);
   return steps[steps.indexOf(state.step) + 1] ?? 'end';
 }
 

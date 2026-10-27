@@ -39,6 +39,21 @@ pub fn user_dir(config_home: &Path, home: &Path, kind: &str, default: &str) -> P
         .unwrap_or_else(|| home.join(default))
 }
 
+/// As pastas que o primeiro uso sugere sincronizar: Área de trabalho, Documentos, Imagens e Vídeos
+/// do usuário, as que existem (sem a pasta pessoal inteira, quando alguma aponta para ela).
+pub fn suggested_folders(config_home: &Path, home: &Path) -> Vec<PathBuf> {
+    [
+        ("DESKTOP", "Desktop"),
+        ("DOCUMENTS", "Documents"),
+        ("PICTURES", "Pictures"),
+        ("VIDEOS", "Videos"),
+    ]
+    .into_iter()
+    .map(|(kind, default)| user_dir(config_home, home, kind, default))
+    .filter(|dir| dir != home && dir.is_dir())
+    .collect()
+}
+
 /// Base XDG: o valor da variável só vale se for caminho absoluto; senão, `<home>/<padrão>`.
 fn xdg_base(value: Option<std::ffi::OsString>, home: &Path, default: &str) -> PathBuf {
     value
@@ -130,6 +145,31 @@ mod tests {
         assert_eq!(
             user_dir(&config, home, "DOWNLOAD", "Downloads"),
             Path::new("/dados/baixados")
+        );
+    }
+
+    #[test]
+    fn suggested_folders_are_the_existing_user_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, home) = (tmp.path().join("config"), tmp.path().join("ana"));
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(
+            config.join("user-dirs.dirs"),
+            "XDG_DESKTOP_DIR=\"$HOME/Área de trabalho\"\nXDG_PICTURES_DIR=\"$HOME\"\n",
+        )
+        .unwrap();
+        for dir in ["Área de trabalho", "Documents", "Videos"] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+
+        assert_eq!(
+            suggested_folders(&config, &home),
+            [
+                home.join("Área de trabalho"),
+                home.join("Documents"),
+                home.join("Videos")
+            ],
+            "a pasta pessoal inteira (Imagens apontando para ela) e as que não existem ficam de fora"
         );
     }
 

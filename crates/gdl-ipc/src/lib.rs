@@ -302,6 +302,9 @@ pub enum ServiceError {
     InvalidArgs(String),
     /// A preferência (nomeada) é definida pela política do administrador.
     Managed(String),
+    /// O serviço recusou o pedido; a mensagem é um motivo estável (`too-many-accounts`,
+    /// `add-account-disabled`), para a interface escolher o texto.
+    Refused(String),
     Failed(String),
 }
 
@@ -317,6 +320,7 @@ impl ServiceError {
             ServiceError::NotFound(_) => "NotFound",
             ServiceError::InvalidArgs(_) => "InvalidArgs",
             ServiceError::Managed(_) => "Managed",
+            ServiceError::Refused(_) => "Refused",
             ServiceError::Failed(_) => "Failed",
         }
     }
@@ -330,6 +334,7 @@ impl ServiceError {
             | ServiceError::NotFound(m)
             | ServiceError::InvalidArgs(m)
             | ServiceError::Managed(m)
+            | ServiceError::Refused(m)
             | ServiceError::Failed(m) => m,
         }
     }

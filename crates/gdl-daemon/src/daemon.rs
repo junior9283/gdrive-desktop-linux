@@ -57,6 +57,8 @@ use crate::notify::{
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// Contas conectadas, um e-mail por linha, na ordem em que foram adicionadas.
 const ACCOUNTS: &str = "accounts";
+/// Quantas contas ficam conectadas ao mesmo tempo.
+pub const MAX_ACCOUNTS: usize = 4;
 /// Arquivo da 0.7 (uma só conta); migrado para `accounts` ao iniciar.
 const CURRENT_ACCOUNT: &str = "current-account";
 /// Intervalo mínimo entre dois sinais `ActivityChanged`.
@@ -430,7 +432,7 @@ impl Daemon {
             self.apply_metered(self.is_metered()).await;
         }
         self.apply_autostart();
-        if let Some(mount_point) = self.with_account(|a| a.mount_point.clone()).await {
+        for mount_point in self.mount_points().await {
             self.apply_sidebar(&mount_point);
         }
         if let Some(emitter) = self.emitter() {
@@ -478,8 +480,9 @@ impl Daemon {
     /// Pausa na conexão limitada (com `PauseSyncingOnMeteredConnection`); o motor só retoma ao
     /// sair dela se a pausa não for do usuário.
     async fn apply_metered(&self, metered: bool) {
-        if let Some(engine) = self.engine().await {
-            engine.set_metered_pause(metered && self.prefs().pause_syncing_on_metered_connection);
+        let pause = metered && self.prefs().pause_syncing_on_metered_connection;
+        for account in self.accounts.lock().await.iter() {
+            account.engine.set_metered_pause(pause);
         }
     }
 
@@ -579,18 +582,32 @@ impl Daemon {
             .collect()
     }
 
-    /// Reconecta as contas da execução anterior, se houver.
+    /// Reconecta as contas da execução anterior, se houver. Sobem em paralelo, mas entram na
+    /// lista na ordem do arquivo, e a primeira do arquivo continua com a pasta preferida.
     pub async fn resume_saved_accounts(self: &Arc<Self>) -> Result<(), ServiceError> {
         self.migrate_current_account();
-        // Uma conta que não sobe não impede as outras.
-        for email in self.saved_emails() {
-            let started = match self.config.tokens.load(&email).await.map_err(failed) {
-                Ok(Some((creds, tokens))) => self.start_account(creds, tokens).await,
-                Ok(None) => Ok(()),
-                Err(e) => Err(e),
-            };
-            if let Err(e) = started {
-                tracing::warn!(erro = %e, conta = %email, "não deu para reconectar a conta");
+        let emails = self.saved_emails();
+        let starts = emails.iter().enumerate().map(|(index, email)| async move {
+            match self.config.tokens.load(email).await.map_err(failed)? {
+                Some((creds, tokens)) => self
+                    .mount_account(creds, tokens, index == 0)
+                    .await
+                    .map(Some),
+                None => Ok(None),
+            }
+        });
+        // Uma conta que não sobe não impede as outras. O arquivo não é regravado: a que não
+        // subiu continua nele.
+        for (email, started) in emails
+            .iter()
+            .zip(futures_util::future::join_all(starts).await)
+        {
+            match started {
+                Ok(Some((account, moved))) => self.register_account(account, moved).await,
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(erro = %e, conta = %email, "não deu para reconectar a conta");
+                }
             }
         }
         Ok(())
@@ -598,7 +615,7 @@ impl Daemon {
 
     /// Desmonta e para o motor (o serviço está saindo).
     pub async fn shutdown(&self) {
-        self.stop_account().await;
+        self.stop_all_accounts().await;
     }
 
     /// Mostra a tela `request` (`tela` ou `tela:argumento`) na janela, abrindo-a se preciso.
@@ -775,6 +792,13 @@ impl Daemon {
         self: &Arc<Self>,
         creds: ClientCredentials,
     ) -> Result<String, ServiceError> {
+        let connected = self.accounts.lock().await.len();
+        if connected >= MAX_ACCOUNTS {
+            return Err(ServiceError::Refused("too-many-accounts".into()));
+        }
+        if connected > 0 && self.prefs().disable_add_account {
+            return Err(ServiceError::Refused("add-account-disabled".into()));
+        }
         let flow = LoginFlow::start(creds.clone(), self.config.oauth.clone())
             .await
             .map_err(failed)?;
@@ -815,6 +839,16 @@ impl Daemon {
             .map_err(|e| (String::new(), e.to_string()))?;
         let email = tokens.email.clone();
         let fail = |e: &dyn std::fmt::Display| (email.clone(), e.to_string());
+        let (connected, already) = {
+            let accounts = self.accounts.lock().await;
+            (accounts.len(), accounts.iter().any(|a| a.email == email))
+        };
+        if already {
+            return Err((email, "already-connected".into()));
+        }
+        if connected >= MAX_ACCOUNTS {
+            return Err((email, "too-many-accounts".into()));
+        }
         if !self.allowed(&email) {
             let message = self.i18n.tr("login-rejected", &[("email", &email)]);
             return Err((email, message));
@@ -824,9 +858,13 @@ impl Daemon {
             .save(&email, &creds, &tokens)
             .await
             .map_err(|e| fail(&e))?;
-        self.start_account(creds, tokens)
+        // A pasta preferida é da primeira conta, a que entra com a lista vazia.
+        let (account, moved) = self
+            .mount_account(creds, tokens, connected == 0)
             .await
             .map_err(|e| fail(&e))?;
+        self.register_account(account, moved).await;
+        self.save_accounts().await;
         Ok(email)
     }
 
@@ -878,12 +916,15 @@ impl Daemon {
         }
     }
 
-    async fn start_account(
+    /// Abre o motor e monta a conta, sem pô-la na lista. `primary`: a pasta preferida; as
+    /// outras contas ficam em `<preferida> (<e-mail>)`. Devolve também se a pasta não é a
+    /// preferida (já tinha arquivos), para avisar o usuário.
+    async fn mount_account(
         self: &Arc<Self>,
         creds: ClientCredentials,
         tokens: TokenSet,
-    ) -> Result<(), ServiceError> {
-        self.stop_account().await;
+        primary: bool,
+    ) -> Result<(Account, bool), ServiceError> {
         let email = tokens.email.clone();
         let config = &self.config;
         let access = AccessTokens::new(creds, tokens, config.oauth.token.clone());
@@ -899,7 +940,10 @@ impl Daemon {
         let engine = Arc::new(engine.with_intervals(config.intervals));
         engine.ensure_indexed().await.map_err(failed)?;
 
-        let preferred = self.preferred_mount_point(&prefs);
+        let mut preferred = self.preferred_mount_point(&prefs);
+        if !primary {
+            preferred = beside(&preferred, &email);
+        }
         let mount_point = mount::choose(&preferred).map_err(failed)?;
         let uid = rustix::process::getuid().as_raw();
         let gid = rustix::process::getgid().as_raw();
@@ -923,15 +967,21 @@ impl Daemon {
         let my_drive = mount_point.join(self.my_drive_name());
         self.forward_states(engine.clone(), my_drive, shutdown.clone());
         let moved = mount_point != preferred;
-        self.accounts.lock().await.push(Account {
+        let account = Account {
             email,
             engine,
-            mount_point: mount_point.clone(),
+            mount_point,
             _stop: shutdown.clone().drop_guard(),
             shutdown,
             _session: session,
-        });
-        self.save_accounts().await;
+        };
+        Ok((account, moved))
+    }
+
+    /// Põe a conta montada na lista, com os Locais, o Baloo e o aviso de pasta trocada.
+    async fn register_account(&self, account: Account, moved: bool) {
+        let mount_point = account.mount_point.clone();
+        self.accounts.lock().await.push(account);
         self.apply_sidebar(&mount_point);
         self.apply_baloo(&mount_point);
         self.apply_metered(self.is_metered()).await;
@@ -947,7 +997,6 @@ impl Daemon {
             .await;
         }
         self.emit_status_changed().await;
-        Ok(())
     }
 
     /// Avisos e `StatusChanged` a partir dos eventos do motor, até a conta sair.
@@ -1045,10 +1094,28 @@ impl Daemon {
 
     /// Desmonta e para todas as contas, sem mexer na lista guardada (o serviço vai voltar a
     /// elas); quem sai de uma conta é `sign_out`, que atualiza a lista.
-    async fn stop_account(&self) {
+    async fn stop_all_accounts(&self) {
         let accounts = std::mem::take(&mut *self.accounts.lock().await);
-        // Desmontar espera as threads do FUSE terminarem.
-        let _ = tokio::task::spawn_blocking(move || drop(accounts)).await;
+        unmount(accounts).await;
+    }
+
+    /// Tira a conta `email` da lista e a desmonta, sem mexer nas outras nem em `accounts`.
+    /// Devolve o motor (já parado) e a pasta onde ela estava montada.
+    async fn remove_account(&self, email: &str) -> Option<(Arc<Engine>, PathBuf)> {
+        let account = {
+            let mut accounts = self.accounts.lock().await;
+            let index = accounts.iter().position(|a| a.email == email)?;
+            accounts.remove(index)
+        };
+        let removed = (account.engine.clone(), account.mount_point.clone());
+        unmount(vec![account]).await;
+        Some(removed)
+    }
+
+    /// As montagens de todas as contas, na ordem da lista.
+    async fn mount_points(&self) -> Vec<PathBuf> {
+        let accounts = self.accounts.lock().await;
+        accounts.iter().map(|a| a.mount_point.clone()).collect()
     }
 
     fn not_logged_in(&self) -> ServiceError {
@@ -1508,16 +1575,16 @@ impl Daemon {
                         self.i18n.tr("logout-pending", &[("count", &count)]),
                     ));
                 }
-                self.sign_out(&engine, &email).await
+                self.sign_out(&email).await
             }
-            "discard" => self.sign_out(&engine, &email).await,
+            "discard" => self.sign_out(&email).await,
             "move" if !dir.is_empty() => {
                 let (copier, dir) = (engine.clone(), PathBuf::from(dir));
                 tokio::task::spawn_blocking(move || copy_pending(&copier, &dir))
                     .await
                     .map_err(failed)?
                     .map_err(failed)?;
-                self.sign_out(&engine, &email).await
+                self.sign_out(&email).await
             }
             "finish" => {
                 engine.resume();
@@ -1530,7 +1597,7 @@ impl Daemon {
                             () = tokio::time::sleep(FINISH_POLL) => {}
                         }
                     }
-                    if let Err(e) = daemon.sign_out(&engine, &email).await {
+                    if let Err(e) = daemon.sign_out(&email).await {
                         tracing::warn!(erro = %e, "falha ao sair da conta");
                     }
                 });
@@ -1542,9 +1609,16 @@ impl Daemon {
 
     /// Desmonta, esquece os tokens e apaga os dados locais da conta (banco e cache). As cópias
     /// guardadas (Lost and Found e Uploads cancelados) ficam: são a única cópia dessas versões.
-    async fn sign_out(&self, engine: &Arc<Engine>, email: &str) -> Result<(), ServiceError> {
-        self.stop_account().await;
+    pub(crate) async fn sign_out(&self, email: &str) -> Result<(), ServiceError> {
+        let (engine, mount_point) = self
+            .remove_account(email)
+            .await
+            .ok_or_else(|| self.not_logged_in())?;
         self.save_accounts().await;
+        let places = self.config.paths.data_home.join("user-places.xbel");
+        if let Err(e) = desktop::set_sidebar_place(&places, &mount_point, "", false) {
+            tracing::warn!(erro = %e, "não deu para tirar a conta dos Locais do Dolphin");
+        }
         // Com a montagem já desfeita (nenhum `opendir` semeia PNGs novos) e antes de apagar o
         // banco, que guarda a memória das miniaturas semeadas. Melhor esforço: uma falha aqui
         // não impede a saída da conta.
@@ -1573,23 +1647,27 @@ impl Daemon {
     /// com `purge`, apaga os dados locais do app; depois encerra o serviço. `purge` só vale sem
     /// conta conectada: a saída da conta é que decide o que fazer com os envios pendentes.
     pub async fn uninstall(&self, purge: bool) -> Result<(), ServiceError> {
-        let connected = self.with_account(|a| a.mount_point.clone()).await;
-        if purge && connected.is_some() {
+        let mut mount_points = self.mount_points().await;
+        if purge && !mount_points.is_empty() {
             return Err(ServiceError::Failed(
                 self.i18n.tr("uninstall-signed-in", &[]),
             ));
         }
-        let mount_point = connected.unwrap_or_else(|| self.preferred_mount_point(&self.prefs()));
-        self.stop_account().await;
+        if mount_points.is_empty() {
+            mount_points.push(self.preferred_mount_point(&self.prefs()));
+        }
+        self.stop_all_accounts().await;
         let paths = self.config.paths.clone();
         tokio::task::spawn_blocking(move || {
             desktop::remove_autostart(&paths.config_home)?;
             cosmic::remove_actions(&paths.config_home)?;
             let places = paths.data_home.join("user-places.xbel");
-            desktop::set_sidebar_place(&places, &mount_point, "", false)?;
-            desktop::set_baloo_exclusion(&paths.config_home, &mount_point, false)?;
-            // Desmontada, a pasta fica vazia; com algo dentro, fica.
-            let _ = std::fs::remove_dir(&mount_point);
+            for mount_point in &mount_points {
+                desktop::set_sidebar_place(&places, mount_point, "", false)?;
+                desktop::set_baloo_exclusion(&paths.config_home, mount_point, false)?;
+                // Desmontada, a pasta fica vazia; com algo dentro, fica.
+                let _ = std::fs::remove_dir(mount_point);
+            }
             if purge {
                 purge_local_data(&paths)?;
             }
@@ -1601,6 +1679,17 @@ impl Daemon {
         self.quit().await;
         Ok(())
     }
+}
+
+/// Desmonta e para as contas; desmontar espera as threads do FUSE terminarem.
+async fn unmount(accounts: Vec<Account>) {
+    let _ = tokio::task::spawn_blocking(move || drop(accounts)).await;
+}
+
+/// A pasta de uma conta que não é a primeira: `<preferida> (<e-mail>)`.
+fn beside(preferred: &Path, email: &str) -> PathBuf {
+    let name = preferred.file_name().unwrap_or_default().to_string_lossy();
+    preferred.with_file_name(format!("{name} ({email})"))
 }
 
 /// As pastas de `dirs` com alguma coisa dentro.

@@ -158,6 +158,32 @@ impl Harness {
         (args.ok, args.email.to_string(), args.error.to_string())
     }
 
+    /// Login pelo D-Bus na conta `email` do Drive simulado (criada antes com `add_account`).
+    pub async fn login_as(&self, email: &str) -> (bool, String, String) {
+        self.fake.login_as(email);
+        self.login().await
+    }
+
+    /// Entra na conta `email` e confere que deu certo.
+    pub async fn logged_in_as(&self, email: &str) {
+        let (ok, _, error) = self.login_as(email).await;
+        assert!(ok, "login de {email}: {error}");
+    }
+
+    /// A montagem de uma conta que não é a primeira: `Google Drive (<e-mail>)`.
+    pub fn mount_of(&self, email: &str) -> PathBuf {
+        self.home.join(format!("Google Drive ({email})"))
+    }
+
+    /// Os e-mails guardados em `accounts`, na ordem do arquivo.
+    pub fn saved_accounts(&self) -> Vec<String> {
+        std::fs::read_to_string(self.paths().data_dir.join("accounts"))
+            .unwrap_or_default()
+            .lines()
+            .map(String::from)
+            .collect()
+    }
+
     pub async fn logged_in(&self) {
         let (ok, _, error) = self.login().await;
         assert!(ok, "login: {error}");

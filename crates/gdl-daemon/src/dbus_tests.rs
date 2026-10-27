@@ -1481,3 +1481,146 @@ async fn current_account_file_is_migrated() {
     );
     assert!(!data_dir.join("current-account").exists());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn second_account_mounts_beside_the_first() {
+    let h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "da-primeira.txt", b"um".to_vec());
+    let ana = h.fake.add_account("ana@example.com");
+    ana.add_file(&ana.root_id(), "da-ana.txt", b"dois".to_vec());
+
+    h.logged_in().await;
+    h.logged_in_as("ana@example.com").await;
+
+    let first = h.drive().join("da-primeira.txt");
+    let second = h
+        .mount_of("ana@example.com")
+        .join("Meu Drive")
+        .join("da-ana.txt");
+    let (a, b) = blocking(move || (std::fs::read(first), std::fs::read(second))).await;
+    assert_eq!(a.unwrap(), b"um");
+    assert_eq!(b.unwrap(), b"dois");
+    assert!(!h.drive().join("da-ana.txt").exists());
+    assert_eq!(
+        h.saved_accounts(),
+        [h.fake.email(), "ana@example.com".into()]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_of_one_keeps_the_other_mounted() {
+    let h = Harness::new().await;
+    let ana = h.fake.add_account("ana@example.com");
+    ana.add_file(&ana.root_id(), "da-ana.txt", b"dois".to_vec());
+    h.logged_in().await;
+    h.logged_in_as("ana@example.com").await;
+
+    h.daemon.sign_out(&h.fake.email()).await.unwrap();
+
+    let kept = h
+        .mount_of("ana@example.com")
+        .join("Meu Drive")
+        .join("da-ana.txt");
+    assert_eq!(
+        blocking(move || std::fs::read(kept)).await.unwrap(),
+        b"dois"
+    );
+    assert_eq!(h.saved_accounts(), ["ana@example.com"]);
+    assert!(h.tokens.load(&h.fake.email()).await.unwrap().is_none());
+    assert!(h.tokens.load("ana@example.com").await.unwrap().is_some());
+    let first = h.home.join("Google Drive");
+    assert!(blocking(move || std::fs::read_dir(first).unwrap().next().is_none()).await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn fifth_account_is_refused() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    for n in 2..=4 {
+        let email = format!("conta{n}@example.com");
+        h.fake.add_account(&email);
+        h.logged_in_as(&email).await;
+    }
+    h.fake.add_account("conta5@example.com");
+    let opened = h.opened().len();
+
+    let err = h
+        .proxy
+        .begin_login("id-de-teste", "segredo")
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.short_name(), "Refused", "{err}");
+    assert_eq!(err.into_message(), "too-many-accounts");
+    assert_eq!(h.opened().len(), opened, "o navegador não abriu");
+    assert_eq!(h.saved_accounts().len(), 4);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn same_account_twice_is_refused() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let engine = h.daemon.engine().await.unwrap();
+
+    let (ok, email, error) = h.login().await;
+
+    assert!(!ok);
+    assert_eq!(email, h.fake.email());
+    assert_eq!(error, "already-connected");
+    assert!(std::sync::Arc::ptr_eq(
+        &engine,
+        &h.daemon.engine().await.unwrap()
+    ));
+    assert_eq!(h.saved_accounts(), [h.fake.email()]);
+    assert!(h.drive().is_dir());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disable_add_account_keeps_only_the_first() {
+    let h = Harness::with_policy("DisableAddAccount = true").await;
+    h.fake.add_account("ana@example.com");
+    // Sem conta nenhuma, o primeiro login vale.
+    h.logged_in().await;
+
+    let err = h
+        .proxy
+        .begin_login("id-de-teste", "segredo")
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.short_name(), "Refused", "{err}");
+    assert_eq!(err.into_message(), "add-account-disabled");
+    assert_eq!(h.saved_accounts(), [h.fake.email()]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn all_accounts_resume_after_restart() {
+    let mut h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "da-primeira.txt", b"um".to_vec());
+    for (n, name) in ["b", "c"].iter().enumerate() {
+        let acct = h.fake.add_account(&format!("{name}@example.com"));
+        acct.add_file(&acct.root_id(), &format!("arquivo-{n}.txt"), b"x".to_vec());
+    }
+    h.logged_in().await;
+    h.logged_in_as("b@example.com").await;
+    h.logged_in_as("c@example.com").await;
+    let order = h.saved_accounts();
+
+    h.restart(None).await;
+
+    assert_eq!(h.saved_accounts(), order);
+    let (first, b, c) = (
+        h.drive().join("da-primeira.txt"),
+        h.mount_of("b@example.com")
+            .join("Meu Drive")
+            .join("arquivo-0.txt"),
+        h.mount_of("c@example.com")
+            .join("Meu Drive")
+            .join("arquivo-1.txt"),
+    );
+    let read = blocking(move || (std::fs::read(first), std::fs::read(b), std::fs::read(c))).await;
+    assert_eq!(read.0.unwrap(), b"um");
+    assert!(read.1.is_ok() && read.2.is_ok());
+}

@@ -165,6 +165,11 @@ fn align_down(n: u64) -> u64 {
     n / BLOCK * BLOCK
 }
 
+/// `[start, end)` estendido aos blocos inteiros, sem passar do fim do arquivo.
+fn aligned(start: u64, end: u64, size: u64) -> (u64, u64) {
+    (align_down(start), end.next_multiple_of(BLOCK).min(size))
+}
+
 impl BlockCache {
     pub fn new(
         store: Arc<Store>,
@@ -305,12 +310,21 @@ impl BlockCache {
             self.0.store.touch_access(id, now)?;
         }
         if let Some(ahead_end) = prefetch {
-            let (cache, id) = (self.clone(), id.clone());
-            tokio::spawn(async move {
-                if let Err(e) = cache.ensure_range(&id, end, ahead_end, size).await {
-                    tracing::debug!(erro = %e, "leitura antecipada interrompida");
-                }
-            });
+            // O primeiro trecho é reservado já, não na tarefa: a próxima leitura chegaria antes
+            // dela (com a máquina ocupada) e pediria à parte um bloco que vem na antecipada.
+            let (start, ahead_end) = aligned(end, ahead_end, size);
+            let first = self.claim(id, start, ahead_end)?;
+            if !matches!(first, Claim::Done) {
+                let (cache, id) = (self.clone(), id.clone());
+                tokio::spawn(async move {
+                    if let Err(e) = cache
+                        .ensure_claimed(&id, start, ahead_end, Some(first))
+                        .await
+                    {
+                        tracing::debug!(erro = %e, "leitura antecipada interrompida");
+                    }
+                });
+            }
         }
         self.ensure_range(id, offset, end, size).await?;
         let path = self.local_path(id);
@@ -333,14 +347,29 @@ impl BlockCache {
     /// Garante no cache os blocos que cobrem `[start, end)` de um item de `size` bytes: baixa o
     /// que ninguém está baixando e espera o resto chegar.
     async fn ensure_range(&self, id: &ItemId, start: u64, end: u64, size: u64) -> Result<()> {
-        let (start, end) = (align_down(start), end.next_multiple_of(BLOCK).min(size));
+        let (start, end) = aligned(start, end, size);
+        self.ensure_claimed(id, start, end, None).await
+    }
+
+    /// `ensure_range` com o trecho já alinhado, começando por `first` (uma reserva já feita).
+    async fn ensure_claimed(
+        &self,
+        id: &ItemId,
+        start: u64,
+        end: u64,
+        mut first: Option<Claim>,
+    ) -> Result<()> {
         loop {
             let item = self.0.store.get(id)?.ok_or(CacheError::NotFound)?;
             // Com edição local, o arquivo é dela e nada da nuvem entra nele.
             if item.local_state != LocalState::Clean {
                 return Ok(());
             }
-            match self.claim(id, start, end)? {
+            let claim = match first.take() {
+                Some(claim) => claim,
+                None => self.claim(id, start, end)?,
+            };
+            match claim {
                 Claim::Done => return Ok(()),
                 Claim::Wait(landed) => landed.await,
                 Claim::Fetch(fetching) => {

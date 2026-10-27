@@ -108,6 +108,8 @@ struct Account {
     _stop: DropGuard,
 }
 
+mod sharing;
+
 fn failed(e: impl std::fmt::Display) -> ServiceError {
     ServiceError::Failed(e.to_string())
 }

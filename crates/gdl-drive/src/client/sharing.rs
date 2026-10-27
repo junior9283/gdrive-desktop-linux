@@ -43,13 +43,12 @@ impl DriveClient {
         role: &str,
         notify: Option<&str>,
     ) -> Result<Permission> {
-        let body = match grantee {
-            Grantee::Person(email) => {
-                json!({ "type": "user", "role": role, "emailAddress": email })
-            }
-            Grantee::Domain(domain) => json!({ "type": "domain", "role": role, "domain": domain }),
-            Grantee::Anyone => json!({ "type": "anyone", "role": role }),
-        };
+        let mut body = json!({ "type": grantee.kind(), "role": role });
+        match grantee {
+            Grantee::Person(email) => body["emailAddress"] = email.as_str().into(),
+            Grantee::Domain(domain) => body["domain"] = domain.as_str().into(),
+            Grantee::Anyone => {}
+        }
         let person = matches!(grantee, Grantee::Person(_));
         let mut query = vec![("fields", PERMISSION_FIELDS)];
         if person {

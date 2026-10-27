@@ -220,6 +220,53 @@ pub struct SharedItem {
     pub shared_ms: i64,
 }
 
+/// Uma pessoa com acesso a um item (`Sharing`).
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct SharePerson {
+    /// O id da permissão, para mudar o papel ou tirar o acesso.
+    pub id: String,
+    pub email: String,
+    pub name: String,
+    /// `owner`, `writer`, `commenter` ou `reader`.
+    pub role: String,
+}
+
+/// Quem tem acesso a um item, para a janela "Compartilhar".
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct Sharing {
+    pub name: String,
+    pub link: String,
+    /// A conta pode mudar o acesso (só editores podem).
+    pub can_share: bool,
+    /// Acesso geral: `restricted`, `domain` ou `anyone`, com o papel (vazio em `restricted`).
+    pub general: String,
+    pub general_role: String,
+    /// O domínio da conta, para "todos do domínio"; vazio em contas pessoais.
+    pub domain: String,
+    pub people: Vec<SharePerson>,
+}
+
+/// Uma versão do conteúdo de um arquivo (`Versions`), da mais nova para a mais antiga.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct VersionItem {
+    pub id: String,
+    pub modified_ms: i64,
+    /// Tamanho em bytes; -1 quando o Drive não diz.
+    pub size: i64,
+    pub keep_forever: bool,
+    pub author: String,
+    /// A versão atual (a primeira da lista).
+    pub current: bool,
+}
+
+/// As versões de um arquivo, para a janela "Gerenciar versões".
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct Versions {
+    pub name: String,
+    pub can_edit: bool,
+    pub versions: Vec<VersionItem>,
+}
+
 /// Um item do menu "Google Drive" do botão direito (`Menu`), na ordem de exibição.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct MenuEntry {
@@ -335,6 +382,35 @@ pub trait Service {
     fn shared_with_me(&self) -> Result<Vec<SharedItem>, ServiceError>;
     /// Cria no Meu Drive um atalho para o item compartilhado.
     fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError>;
+    /// Quem tem acesso ao item.
+    fn sharing(&self, item_id: &str) -> Result<Sharing, ServiceError>;
+    /// Dá acesso às pessoas (`emails`) com o papel; `notify` manda o aviso com a mensagem.
+    fn share_add(
+        &self,
+        item_id: &str,
+        emails: &[&str],
+        role: &str,
+        notify: bool,
+        message: &str,
+    ) -> Result<(), ServiceError>;
+    /// Muda o papel de uma permissão; `role` vazio tira o acesso.
+    fn share_set_role(
+        &self,
+        item_id: &str,
+        permission_id: &str,
+        role: &str,
+    ) -> Result<(), ServiceError>;
+    /// Acesso geral: `restricted`, `domain` ou `anyone`, com o papel.
+    fn share_set_general(&self, item_id: &str, kind: &str, role: &str) -> Result<(), ServiceError>;
+    /// As versões do arquivo, da mais nova para a mais antiga.
+    fn versions(&self, item_id: &str) -> Result<Versions, ServiceError>;
+    /// Baixa a versão para a pasta de downloads e devolve o caminho do arquivo.
+    fn version_download(&self, item_id: &str, version_id: &str) -> Result<String, ServiceError>;
+    /// Volta o arquivo para a versão (enviada como versão nova).
+    fn version_restore(&self, item_id: &str, version_id: &str) -> Result<(), ServiceError>;
+    /// Marca ou desmarca "manter para sempre".
+    fn version_keep(&self, item_id: &str, version_id: &str, keep: bool)
+    -> Result<(), ServiceError>;
     /// O menu do botão direito para os caminhos; vazio fora do Meu Drive ou sem conta.
     fn menu(&self, paths: &[&str]) -> Result<Vec<MenuEntry>, ServiceError>;
     /// Faz a ação do menu nos caminhos; devolve o texto a copiar (o link), ou vazio.

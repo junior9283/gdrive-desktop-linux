@@ -35,12 +35,12 @@ pub enum Upload {
 }
 
 /// Nunca chegou ao Drive: ID temporário ou trava/temporário de editor.
-fn never_uploaded(item: &Item) -> bool {
+pub(crate) fn never_uploaded(item: &Item) -> bool {
     is_local_id(&item.id) || item.local_state == LocalState::LocalOnly
 }
 
 impl Engine {
-    fn item(&self, id: &ItemId) -> Result<Item> {
+    pub(crate) fn item(&self, id: &ItemId) -> Result<Item> {
         self.store.get(id)?.ok_or(EngineError::NotFound)
     }
 
@@ -117,7 +117,7 @@ impl Engine {
     }
 
     /// `false` se o arquivo nunca sobe (ver `commit_local_write_at`).
-    fn commit_write(
+    pub(crate) fn commit_write(
         &self,
         id: &ItemId,
         size: u64,

@@ -5,7 +5,8 @@ use std::sync::Arc;
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
     AccountInfo, ActivityItem, MenuEntry, NotificationItem, NotificationSetting, OfflineEntry,
-    OfflineSummary, Pref, SearchResult, ServiceError, SharedItem, Status, SyncErrorItem,
+    OfflineSummary, Pref, SearchResult, ServiceError, SharedItem, Sharing, Status, SyncErrorItem,
+    Versions,
 };
 use zbus::object_server::SignalEmitter;
 
@@ -160,6 +161,69 @@ impl Service {
     /// Cria no Meu Drive um atalho para o item compartilhado.
     async fn add_shortcut(&self, item_id: &str) -> Result<(), ServiceError> {
         self.daemon.add_shortcut(item_id).await
+    }
+
+    async fn sharing(&self, item_id: &str) -> Result<Sharing, ServiceError> {
+        self.daemon.sharing(item_id).await
+    }
+
+    async fn share_add(
+        &self,
+        item_id: &str,
+        emails: Vec<String>,
+        role: &str,
+        notify: bool,
+        message: &str,
+    ) -> Result<(), ServiceError> {
+        self.daemon
+            .share_add(item_id, &emails, role, notify, message)
+            .await
+    }
+
+    /// `role` vazio tira o acesso.
+    async fn share_set_role(
+        &self,
+        item_id: &str,
+        permission_id: &str,
+        role: &str,
+    ) -> Result<(), ServiceError> {
+        self.daemon
+            .share_set_role(item_id, permission_id, role)
+            .await
+    }
+
+    async fn share_set_general(
+        &self,
+        item_id: &str,
+        kind: &str,
+        role: &str,
+    ) -> Result<(), ServiceError> {
+        self.daemon.share_set_general(item_id, kind, role).await
+    }
+
+    async fn versions(&self, item_id: &str) -> Result<Versions, ServiceError> {
+        self.daemon.versions(item_id).await
+    }
+
+    async fn version_download(
+        &self,
+        item_id: &str,
+        version_id: &str,
+    ) -> Result<String, ServiceError> {
+        self.daemon.version_download(item_id, version_id).await
+    }
+
+    async fn version_restore(&self, item_id: &str, version_id: &str) -> Result<(), ServiceError> {
+        self.daemon.version_restore(item_id, version_id).await
+    }
+
+    async fn version_keep(
+        &self,
+        item_id: &str,
+        version_id: &str,
+        keep: bool,
+    ) -> Result<(), ServiceError> {
+        self.daemon.version_keep(item_id, version_id, keep).await
     }
 
     /// O menu "Google Drive" do botão direito para os caminhos; vazio fora do Meu Drive.

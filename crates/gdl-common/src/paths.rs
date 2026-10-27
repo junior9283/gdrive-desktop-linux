@@ -20,6 +20,25 @@ pub fn exe_dir() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
 }
 
+/// Uma pasta do usuário do `user-dirs.dirs` (`kind` como `DOWNLOAD` ou `DESKTOP`), já com o
+/// `$HOME` trocado; sem a linha, `<home>/<default>`.
+pub fn user_dir(config_home: &Path, home: &Path, kind: &str, default: &str) -> PathBuf {
+    let key = format!("XDG_{kind}_DIR=");
+    std::fs::read_to_string(config_home.join("user-dirs.dirs"))
+        .ok()
+        .and_then(|text| {
+            let line = text
+                .lines()
+                .find_map(|l| l.trim().strip_prefix(key.as_str()))?;
+            let value = line.trim().trim_matches('"');
+            match value.strip_prefix("$HOME") {
+                Some(rest) => Some(home.join(rest.trim_start_matches('/'))),
+                None => Some(PathBuf::from(value)).filter(|p| p.is_absolute()),
+            }
+        })
+        .unwrap_or_else(|| home.join(default))
+}
+
 /// Base XDG: o valor da variável só vale se for caminho absoluto; senão, `<home>/<padrão>`.
 fn xdg_base(value: Option<std::ffi::OsString>, home: &Path, default: &str) -> PathBuf {
     value
@@ -88,6 +107,31 @@ impl Paths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_dir_reads_user_dirs_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (config, home) = (tmp.path().join("config"), Path::new("/home/ana"));
+        assert_eq!(
+            user_dir(&config, home, "DOWNLOAD", "Downloads"),
+            Path::new("/home/ana/Downloads"),
+            "sem o arquivo, o padrão"
+        );
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(
+            config.join("user-dirs.dirs"),
+            "# comentário\nXDG_DESKTOP_DIR=\"$HOME/Área de trabalho\"\nXDG_DOWNLOAD_DIR=\"/dados/baixados\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            user_dir(&config, home, "DESKTOP", "Desktop"),
+            Path::new("/home/ana/Área de trabalho")
+        );
+        assert_eq!(
+            user_dir(&config, home, "DOWNLOAD", "Downloads"),
+            Path::new("/dados/baixados")
+        );
+    }
 
     #[test]
     fn for_test_puts_everything_under_root() {

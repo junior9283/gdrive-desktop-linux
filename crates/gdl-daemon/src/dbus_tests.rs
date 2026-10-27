@@ -1188,3 +1188,161 @@ async fn menu_actions_link_pin_create_refresh_and_trash() {
         .unwrap_err();
     assert_eq!(err.short_name(), "NotFound", "{err}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn share_window_adds_people_and_changes_general_access() {
+    let h = Harness::new().await;
+    let id = h
+        .fake
+        .add_file(&h.fake.root_id(), "Plano.txt", b"x".to_vec());
+    h.logged_in().await;
+
+    let before = h.proxy.sharing(&id).await.unwrap();
+    assert_eq!(before.name, "Plano.txt");
+    assert!(before.can_share);
+    assert_eq!(
+        (before.general.as_str(), before.domain.as_str()),
+        ("restricted", "example.com"),
+        "conta de domínio (a do Drive simulado)"
+    );
+    assert_eq!(before.people.len(), 1);
+    assert_eq!(before.people[0].role, "owner");
+
+    h.proxy
+        .share_add(
+            &id,
+            &[" ana@example.com ", "bia@example.com"],
+            "commenter",
+            true,
+            "Veja",
+        )
+        .await
+        .unwrap();
+    h.proxy
+        .share_set_general(&id, "anyone", "reader")
+        .await
+        .unwrap();
+    h.proxy
+        .share_set_general(&id, "anyone", "writer")
+        .await
+        .unwrap();
+
+    let after = h.proxy.sharing(&id).await.unwrap();
+    let people: Vec<_> = after
+        .people
+        .iter()
+        .map(|p| (p.email.as_str(), p.role.as_str()))
+        .collect();
+    assert_eq!(
+        people[1..],
+        [
+            ("ana@example.com", "commenter"),
+            ("bia@example.com", "commenter")
+        ]
+    );
+    assert_eq!(
+        (after.general.as_str(), after.general_role.as_str()),
+        ("anyone", "writer")
+    );
+    assert_eq!(h.fake.share_emails().len(), 2, "um aviso por pessoa");
+
+    h.proxy
+        .share_set_general(&id, "domain", "reader")
+        .await
+        .unwrap();
+    let domain = h.proxy.sharing(&id).await.unwrap();
+    assert_eq!(
+        (domain.general.as_str(), domain.general_role.as_str()),
+        ("domain", "reader")
+    );
+    let general =
+        |list: Vec<serde_json::Value>| list.iter().filter(|p| p["type"] != "user").count();
+    assert_eq!(
+        general(h.fake.permissions(&id)),
+        1,
+        "o de domínio substitui o do link"
+    );
+
+    h.proxy
+        .share_set_role(&id, &after.people[1].id, "")
+        .await
+        .unwrap();
+    h.proxy
+        .share_set_general(&id, "restricted", "")
+        .await
+        .unwrap();
+    let last = h.proxy.sharing(&id).await.unwrap();
+    assert_eq!(last.people.len(), 2, "tirou a Ana");
+    assert_eq!(last.general, "restricted");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn share_window_refuses_bad_input() {
+    let h = Harness::new().await;
+    let id = h
+        .fake
+        .add_file(&h.fake.root_id(), "Plano.txt", b"x".to_vec());
+    h.logged_in().await;
+
+    let name = |e: gdl_ipc::ServiceError| e.short_name();
+    let bad_email = h
+        .proxy
+        .share_add(&id, &["sem-arroba"], "reader", false, "")
+        .await;
+    assert_eq!(name(bad_email.unwrap_err()), "InvalidArgs");
+    let owner = h
+        .proxy
+        .share_add(&id, &["a@example.com"], "owner", false, "")
+        .await;
+    assert_eq!(
+        name(owner.unwrap_err()),
+        "InvalidArgs",
+        "dono não se dá por aqui"
+    );
+    let kind = h.proxy.share_set_general(&id, "todos", "reader").await;
+    assert_eq!(name(kind.unwrap_err()), "InvalidArgs");
+    assert_eq!(h.fake.permissions(&id).len(), 1, "nada mudou");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn versions_window_downloads_keeps_and_restores() {
+    let h = Harness::new().await;
+    let id = h
+        .fake
+        .add_file(&h.fake.root_id(), "notas.txt", b"primeira".to_vec());
+    h.fake.modify_remote(&id, b"segunda".to_vec());
+    h.logged_in().await;
+
+    let v = h.proxy.versions(&id).await.unwrap();
+    assert_eq!(v.name, "notas.txt");
+    let sizes: Vec<_> = v.versions.iter().map(|x| (x.size, x.current)).collect();
+    assert_eq!(sizes, [(7, true), (8, false)]);
+    let old = &v.versions[1];
+
+    let saved = h.proxy.version_download(&id, &old.id).await.unwrap();
+    let saved = std::path::PathBuf::from(saved);
+    assert_eq!(saved.parent().unwrap(), h.home.join("Downloads"));
+    let file_name = saved.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(
+        file_name.starts_with("notas (") && file_name.ends_with(").txt"),
+        "{file_name}"
+    );
+    assert_eq!(std::fs::read(&saved).unwrap(), b"primeira");
+    let again = h.proxy.version_download(&id, &old.id).await.unwrap();
+    assert_ne!(again, saved.to_string_lossy(), "não sobrescreve");
+
+    h.proxy.version_keep(&id, &old.id, true).await.unwrap();
+    assert!(h.proxy.versions(&id).await.unwrap().versions[1].keep_forever);
+
+    h.proxy.version_restore(&id, &old.id).await.unwrap();
+    let content = h.drive().join("notas.txt");
+    assert_eq!(
+        blocking(move || std::fs::read(content).unwrap()).await,
+        b"primeira"
+    );
+    wait_until("a versão restaurada subir", || {
+        h.fake.content(&id) == b"primeira"
+    })
+    .await;
+    assert_eq!(h.proxy.versions(&id).await.unwrap().versions.len(), 3);
+}

@@ -61,6 +61,14 @@ impl<'a> Args<'a> {
         self.get(key)?.as_bool().ok_or_else(|| wrong(key))
     }
 
+    /// `["a", "b", …]`.
+    fn strs(&self, key: &str) -> Result<Vec<&'a str>, UiError> {
+        self.get(key)?
+            .as_array()
+            .and_then(|list| list.iter().map(Value::as_str).collect())
+            .ok_or_else(|| wrong(key))
+    }
+
     /// `[[chave, valor], …]`.
     fn pairs(&self, key: &str) -> Result<Vec<(&'a str, &'a str)>, UiError> {
         fn pair(v: &Value) -> Option<(&str, &str)> {
@@ -145,6 +153,28 @@ impl Bridge {
             "web_link" => j!(s.web_link(a.str("item_id")?)),
             "shared_with_me" => j!(s.shared_with_me()),
             "add_shortcut" => j!(s.add_shortcut(a.str("item_id")?)),
+            "sharing" => j!(s.sharing(a.str("item_id")?)),
+            "share_add" => j!(s.share_add(
+                a.str("item_id")?,
+                &a.strs("emails")?,
+                a.str("role")?,
+                a.bool("notify")?,
+                a.str("message")?
+            )),
+            "share_set_role" => {
+                j!(s.share_set_role(a.str("item_id")?, a.str("permission_id")?, a.str("role")?))
+            }
+            "share_set_general" => {
+                j!(s.share_set_general(a.str("item_id")?, a.str("kind")?, a.str("role")?))
+            }
+            "versions" => j!(s.versions(a.str("item_id")?)),
+            "version_download" => {
+                j!(s.version_download(a.str("item_id")?, a.str("version_id")?))
+            }
+            "version_restore" => j!(s.version_restore(a.str("item_id")?, a.str("version_id")?)),
+            "version_keep" => {
+                j!(s.version_keep(a.str("item_id")?, a.str("version_id")?, a.bool("keep")?))
+            }
             "logout" => j!(s.logout(a.str("mode")?, a.str("dir")?)),
             "preferences" => j!(s.preferences()),
             "set_preferences" => j!(s.set_preferences(&a.pairs("values")?)),

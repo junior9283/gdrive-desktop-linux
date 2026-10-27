@@ -83,6 +83,13 @@ pub struct Permission {
     pub display_name: Option<String>,
 }
 
+impl Permission {
+    /// O acesso geral: o de domínio ou o de qualquer pessoa com o link.
+    pub fn is_general(&self) -> bool {
+        matches!(self.kind.as_str(), "anyone" | "domain")
+    }
+}
+
 /// A quem uma permissão nova dá acesso.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Grantee {
@@ -92,6 +99,17 @@ pub enum Grantee {
     Domain(String),
     /// Qualquer pessoa com o link.
     Anyone,
+}
+
+impl Grantee {
+    /// O `type` da permissão na API.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Grantee::Person(_) => "user",
+            Grantee::Domain(_) => "domain",
+            Grantee::Anyone => "anyone",
+        }
+    }
 }
 
 /// Uma versão do conteúdo de um arquivo (`revisions`).

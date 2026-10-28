@@ -7,7 +7,7 @@ pub mod retry;
 pub mod throttle;
 pub mod token_store;
 
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// Como os clientes HTTP saem para a internet (`DirectConnection`, `ProxyServer`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -21,24 +21,71 @@ pub enum Network {
     Proxy(String),
 }
 
-static NETWORK: RwLock<Network> = RwLock::new(Network::System);
+/// As raízes de certificado e a validação do TLS: as políticas `TrustedRootCertsFile`,
+/// `TrustSystemRootCerts` e `DisableSSLValidation`. Sem `system_roots`, valem só as
+/// `extra_roots` (o app não traz raízes próprias).
+#[derive(Clone)]
+pub struct Tls {
+    pub extra_roots: Vec<reqwest::Certificate>,
+    pub system_roots: bool,
+    pub accept_invalid: bool,
+}
+
+impl Default for Tls {
+    fn default() -> Tls {
+        Tls {
+            extra_roots: Vec::new(),
+            system_roots: true,
+            accept_invalid: false,
+        }
+    }
+}
+
+/// As raízes de um arquivo PEM (uma ou mais).
+pub fn read_roots(path: &std::path::Path) -> std::io::Result<Vec<reqwest::Certificate>> {
+    reqwest::Certificate::from_pem_bundle(&std::fs::read(path)?).map_err(std::io::Error::other)
+}
+
+/// A rede e o TLS de todos os clientes HTTP.
+#[derive(Default)]
+struct Http {
+    network: Network,
+    tls: Tls,
+}
+
+static HTTP: RwLock<Option<Arc<Http>>> = RwLock::new(None);
 
 /// Vale para os clientes criados depois: muda só quando o serviço (re)inicia, como no original.
-pub fn set_network(network: Network) {
-    *NETWORK.write().unwrap_or_else(|e| e.into_inner()) = network;
+pub fn set_http(network: Network, tls: Tls) {
+    *HTTP.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(Http { network, tls }));
 }
 
 /// Base dos clientes HTTP do app: prazo de conexão para um servidor mudo não travar nada, e a
-/// rede escolhida (`set_network`).
+/// rede e o TLS de `set_http`.
 pub(crate) fn http_builder() -> reqwest::ClientBuilder {
-    let builder = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(10));
-    let network = NETWORK.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let base = || reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(10));
+    let http = HTTP
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_default();
     // `SetPreferences` recusa um endereço inválido; este só vem de edição à mão. O endereço não
     // vai para o log: pode ter usuário e senha.
-    with_network(builder, &network).unwrap_or_else(|e| {
+    let builder = with_network(base(), &http.network).unwrap_or_else(|e| {
         tracing::warn!(erro = %e, "ProxyServer inválido; usando o proxy do sistema");
-        reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(10))
-    })
+        base()
+    });
+    with_tls(builder, &http.tls)
+}
+
+fn with_tls(builder: reqwest::ClientBuilder, tls: &Tls) -> reqwest::ClientBuilder {
+    let roots = tls.extra_roots.iter().cloned();
+    let builder = match (tls.system_roots, tls.extra_roots.is_empty()) {
+        (true, true) => builder,
+        (true, false) => builder.tls_certs_merge(roots),
+        (false, _) => builder.tls_certs_only(roots),
+    };
+    builder.tls_danger_accept_invalid_certs(tls.accept_invalid)
 }
 
 fn with_network(
@@ -55,6 +102,81 @@ fn with_network(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Servidor HTTPS mínimo com certificado autoassinado para `localhost`: responde "ok" a
+    /// qualquer pedido. Devolve o endereço e o certificado em PEM.
+    async fn self_signed_server() -> (String, String) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_rustls::rustls;
+        let made = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let key = rustls::pki_types::PrivatePkcs8KeyDer::from(made.signing_key.serialize_der());
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![made.cert.der().clone()], key.into())
+            .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(mut tls) = acceptor.accept(tcp).await else {
+                        return;
+                    };
+                    let mut buf = [0; 4096];
+                    let _ = tls.read(&mut buf).await;
+                    let reply =
+                        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok";
+                    let _ = tls.write_all(reply.as_bytes()).await;
+                    let _ = tls.shutdown().await;
+                });
+            }
+        });
+        (format!("https://localhost:{port}/"), made.cert.pem())
+    }
+
+    async fn fetch(tls: &Tls, url: &str) -> reqwest::Result<String> {
+        let client = with_tls(reqwest::Client::builder(), tls).build()?;
+        client.get(url).send().await?.text().await
+    }
+
+    #[tokio::test]
+    async fn trusted_root_file_reaches_a_self_signed_server() {
+        let (url, pem) = self_signed_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("raizes.pem");
+        std::fs::write(&file, pem).unwrap();
+
+        let refused = fetch(&Tls::default(), &url).await;
+        let roots = read_roots(&file).unwrap();
+        let merged = Tls {
+            extra_roots: roots.clone(),
+            ..Tls::default()
+        };
+        let only = Tls {
+            extra_roots: roots,
+            system_roots: false,
+            accept_invalid: false,
+        };
+        let invalid = Tls {
+            accept_invalid: true,
+            ..Tls::default()
+        };
+
+        assert!(refused.is_err(), "sem a raiz, o certificado é recusado");
+        assert_eq!(fetch(&merged, &url).await.unwrap(), "ok");
+        assert_eq!(
+            fetch(&only, &url).await.unwrap(),
+            "ok",
+            "só as raízes do arquivo"
+        );
+        assert_eq!(fetch(&invalid, &url).await.unwrap(), "ok");
+        assert!(read_roots(&dir.path().join("falta.pem")).is_err());
+    }
 
     #[test]
     fn every_accepted_proxy_scheme_builds_a_client() {

@@ -21,6 +21,7 @@ pub(crate) const XATTRS: [(&str, XattrValue); 3] = [
 ];
 
 /// Nomes das pastas da raiz no idioma do sistema.
+#[derive(Clone)]
 pub struct Layout {
     pub my_drive: String,
     pub shared_drives: String,

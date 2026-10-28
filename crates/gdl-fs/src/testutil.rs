@@ -15,7 +15,7 @@ use gdl_engine::engine::{Engine, Intervals};
 use gdl_fake_drive::{FakeDrive, TEST_ACCESS_TOKEN};
 use tokio_util::sync::CancellationToken;
 
-use crate::{DriveFs, mount};
+use crate::{DriveFs, Layout, mount};
 
 pub(crate) const MIB: usize = 1024 * 1024;
 
@@ -75,7 +75,13 @@ impl Mounted {
         let engine = Arc::new(engine);
         let mnt = dir.path().join("montagem");
         std::fs::create_dir(&mnt).unwrap();
-        let fs = DriveFs::new(engine.clone(), I18n::new(lang), uid(), gid(), mnt.clone());
+        let fs = DriveFs::new(
+            engine.clone(),
+            Layout::new(&I18n::new(lang)),
+            uid(),
+            gid(),
+            mnt.clone(),
+        );
         let session = mount(fs.clone(), &mnt).unwrap();
         Mounted {
             fake,

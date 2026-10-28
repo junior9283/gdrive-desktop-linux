@@ -17,7 +17,6 @@ use fuser::{
     ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs,
     ReplyWrite, ReplyXattr, Request, TimeOrNow, WriteFlags,
 };
-use gdl_common::i18n::I18n;
 use gdl_engine::EngineError;
 use gdl_engine::cache::CacheError;
 use gdl_engine::engine::Engine;
@@ -238,13 +237,13 @@ impl DriveFs {
     /// Precisa ser criado dentro do runtime do tokio onde o motor roda.
     pub fn new(
         engine: Arc<Engine>,
-        i18n: I18n,
+        layout: Layout,
         uid: u32,
         gid: u32,
         mount_point: PathBuf,
     ) -> DriveFs {
         DriveFs(Arc::new(Inner {
-            layout: Layout::new(&i18n),
+            layout,
             mount_point,
             inodes: Inodes::default(),
             kio: KioTrash::new(uid, engine.data_dir()),

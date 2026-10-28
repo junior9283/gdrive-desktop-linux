@@ -1612,7 +1612,7 @@ mod tests {
         let fake = FakeDrive::start().await;
         let root = fake.root_id();
 
-        crate::set_network(crate::Network::System);
+        crate::set_http(crate::Network::System, crate::Tls::default());
         let err = client(&fake).get(&root).await.unwrap_err();
         assert!(
             matches!(err, DriveError::Offline),
@@ -1620,13 +1620,16 @@ mod tests {
         );
 
         // O próprio simulado atende como proxy (aceita a URL completa no pedido).
-        crate::set_network(crate::Network::Proxy(fake.base_url().to_string()));
+        crate::set_http(
+            crate::Network::Proxy(fake.base_url().to_string()),
+            crate::Tls::default(),
+        );
         client(&fake)
             .get(&root)
             .await
             .expect("o proxy manual substitui o do sistema");
 
-        crate::set_network(crate::Network::Direct);
+        crate::set_http(crate::Network::Direct, crate::Tls::default());
         client(&fake).get(&root).await.unwrap();
     }
 

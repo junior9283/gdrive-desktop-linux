@@ -3232,3 +3232,18 @@ async fn reset_preferences_keeps_policies() {
     let managed = get("BandwidthRxKBPS");
     assert_eq!((managed.value.as_str(), managed.managed), ("500", true));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn localized_folders_can_be_turned_off() {
+    let h = Harness::with_policy("DisableLocalizedVirtualFolders = true\n").await;
+    h.fake.add_file(&h.fake.root_id(), "a.txt", b"oi".to_vec());
+    h.logged_in().await;
+
+    let mount = h.home.join("Google Drive");
+    let names = blocking(move || names_in(&mount)).await;
+    assert!(names.contains(&"My Drive".to_string()), "{names:?}");
+    assert!(names.contains(&"Shared drives".to_string()), "{names:?}");
+    assert!(!names.contains(&"Meu Drive".to_string()), "{names:?}");
+    let file = h.home.join("Google Drive/My Drive/a.txt");
+    assert!(blocking(move || file.exists()).await);
+}

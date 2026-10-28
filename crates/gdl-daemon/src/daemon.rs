@@ -16,10 +16,10 @@ use gdl_common::i18n::I18n;
 use gdl_common::links::DRIVE_TRASH;
 use gdl_common::names::{create_numbered, split_ext};
 use gdl_common::paths::Paths;
-use gdl_drive::Network;
 use gdl_drive::client::{Backoff, Bandwidth, DriveClient, DriveError, FOLDER_MIME, SHORTCUT_MIME};
 use gdl_drive::oauth::{AccessTokens, LoginFlow, OAuthEndpoints};
 use gdl_drive::token_store::{ClientCredentials, TokenSet, TokenStore};
+use gdl_drive::{Network, Tls};
 use gdl_engine::EngineError;
 use gdl_engine::engine::{Engine, Intervals, pending_cache_move};
 use gdl_engine::errors::ErrorSource;
@@ -352,10 +352,38 @@ fn network_of(prefs: &Preferences) -> Network {
     }
 }
 
+/// As políticas de TLS. Um arquivo de raízes ilegível vai para o log e fica de fora.
+fn tls_of(prefs: &Preferences) -> Tls {
+    let (system_roots, accept_invalid) =
+        (prefs.trust_system_root_certs, prefs.disable_ssl_validation);
+    if accept_invalid {
+        tracing::warn!(
+            "DisableSSLValidation: a validação dos certificados está desligada pela política"
+        );
+    }
+    let file = prefs.trusted_root_certs_file.as_deref();
+    if !system_roots && file.is_none() {
+        tracing::warn!(
+            "TrustSystemRootCerts desligado sem TrustedRootCertsFile: nenhum certificado será aceito"
+        );
+    }
+    let extra_roots = file.map_or_else(Vec::new, |path| {
+        gdl_drive::read_roots(path).unwrap_or_else(|e| {
+            tracing::warn!(erro = %e, "TrustedRootCertsFile ilegível; usando só as outras raízes");
+            Vec::new()
+        })
+    });
+    Tls {
+        extra_roots,
+        system_roots,
+        accept_invalid,
+    }
+}
+
 impl Daemon {
     pub fn new(config: Config) -> Result<Arc<Daemon>, ConfigError> {
         let (prefs, _) = load_preferences(&config.paths)?;
-        gdl_drive::set_network(network_of(&prefs));
+        gdl_drive::set_http(network_of(&prefs), tls_of(&prefs));
         let bandwidth = Arc::new(Bandwidth::default());
         let i18n = I18n::new(&config.lang);
         apply_bandwidth(&bandwidth, &prefs);
@@ -368,7 +396,12 @@ impl Daemon {
             paused: AtomicBool::new(false),
             devices: devices::Devices::load(config.paths.data_dir.join("devices")),
             not_started: Mutex::default(),
-            layout: Layout::new(&i18n),
+            // `DisableLocalizedVirtualFolders`: as pastas da montagem ficam com os nomes em inglês.
+            layout: if prefs.disable_localized_virtual_folders {
+                Layout::new(&I18n::new("en_US"))
+            } else {
+                Layout::new(&i18n)
+            },
             i18n,
             history: History::load(config.paths.state_dir.join(HISTORY_FILE)),
             prefs: RwLock::new(Arc::new(prefs)),
@@ -1166,7 +1199,7 @@ impl Daemon {
         let gid = rustix::process::getgid().as_raw();
         let fs = DriveFs::new(
             engine.clone(),
-            I18n::new(&config.lang),
+            self.layout.clone(),
             uid,
             gid,
             mount_point.clone(),

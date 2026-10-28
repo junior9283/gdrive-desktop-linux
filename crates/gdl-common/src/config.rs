@@ -198,7 +198,10 @@ pub fn load_preferences(
     let (policy, managed) = read_layer(&policies_path(paths))?;
     let user = read_user_layer(paths);
     let (defaults, _) = read_layer(&defaults_path(paths))?;
-    Ok((policy.over(user).over(defaults).resolve(), managed))
+    let mut prefs = policy.over(user).over(defaults).resolve();
+    // Desligar a validação do TLS é decisão do administrador: só vale vindo da política.
+    prefs.disable_ssl_validation &= managed.contains("DisableSSLValidation");
+    Ok((prefs, managed))
 }
 
 /// O navegador de `DefaultWebBrowser` (`None`: o padrão do usuário, também com as preferências
@@ -214,6 +217,8 @@ const RESTART_KEYS: &[&str] = &[
     "ContentCachePath",
     "DefaultMountPoint",
     "DirectConnection",
+    "DisableLocalizedVirtualFolders",
+    "DisableSSLValidation",
     "ProxyServer",
     "TrustSystemRootCerts",
     "TrustedRootCertsFile",
@@ -361,6 +366,19 @@ mod tests {
     fn write(path: &std::path::Path, body: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn ssl_validation_only_from_policies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let on = "DisableSSLValidation = true\n";
+        write(&paths.config_dir.join("preferences.toml"), on);
+        write(&paths.etc_dir.join("defaults.toml"), on);
+        assert!(!load_preferences(&paths).unwrap().0.disable_ssl_validation);
+
+        write(&paths.etc_dir.join("policies.toml"), on);
+        assert!(load_preferences(&paths).unwrap().0.disable_ssl_validation);
     }
 
     #[test]

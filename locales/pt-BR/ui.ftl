@@ -177,6 +177,7 @@ more-errors = { $count ->
    *[other] Lista de erros ({ $count })
 }
 more-notification-settings = Preferências de notificação
+more-shared-drives = Gerenciar drives compartilhados
 more-reset = Redefinir as preferências
 more-preferences = Preferências
 more-about = Sobre

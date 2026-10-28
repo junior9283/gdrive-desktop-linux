@@ -4,7 +4,8 @@
 import { attempt, el, icon, stylesheet } from '../components.js';
 import { accountButton, accountMenu } from './home/account.js';
 import { headerFor, shownStatus, withoutAccount } from './home/model.js';
-import { moreMenu } from './home/more.js';
+import { moreMenu, runArg } from './home/more.js';
+import { screenArg } from '../router.js';
 import * as activity from './home/activity.js';
 import * as folders from './home/folders.js';
 import * as links from './home/links.js';
@@ -46,6 +47,12 @@ export async function render(root, ctx) {
   await css;
   root.replaceChildren(page);
   await update({ status: true, badge: true, view: true });
+  // O argumento de quando a janela abriu vale uma vez (`render` roda de novo quando o serviço
+  // volta).
+  if (!home.argDone) {
+    home.argDone = true;
+    runArg(screenArg(location.search), context());
+  }
 }
 
 function layout({ api, t }) {
@@ -106,6 +113,7 @@ function context() {
 
 function wire({ api }) {
   home.wired = true;
+  api.on('screen-arg', (arg) => runArg(arg, context()));
   for (const [event, work] of Object.entries(EVENTS)) api.on(event, () => schedule(work));
   // Outra conta escolhida (aqui ou em outra janela): tudo é lido de novo.
   onAccountChange(() => schedule(EVERYTHING));

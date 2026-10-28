@@ -3,6 +3,7 @@
 import { attempt, confirmDialog, popupMenu, toast } from '../../components.js';
 import { disconnect, disconnectAll } from './disconnect.js';
 import { withoutAccount } from './model.js';
+import { currentAccount } from '../../state.js';
 
 export async function moreMenu(anchor, ctx) {
   const { api, t, home } = ctx;
@@ -13,6 +14,7 @@ export async function moreMenu(anchor, ctx) {
     { id: 'offline', label: t('view-offline'), action: () => api.openScreen('offline'), disabled: !signedIn },
     { id: 'errors', label: t('more-errors', { count: errors }), action: () => api.openScreen('errors'), disabled: !signedIn },
     { id: 'notification-settings', label: t('more-notification-settings'), action: () => api.openScreen('notification-settings') },
+    { id: 'shared-drives', label: t('more-shared-drives'), action: () => api.openScreen('shared-drives', currentAccount()), disabled: !signedIn },
     '-',
     { id: 'feedback', label: t('more-feedback'), action: () => api.openScreen('feedback') },
     { id: 'diagnostics', label: t('more-diagnostics'), action: () => attempt(api.call('generate_diagnostics'), () => toast(t('diagnostics-done'))) },
@@ -31,6 +33,14 @@ export async function moreMenu(anchor, ctx) {
     { id: 'about', label: t('more-about'), action: () => api.openScreen('about') },
     { id: 'quit', label: t('more-quit'), action: () => quit(ctx) },
   ]);
+}
+
+// O que a bandeja pede ao abrir a janela (`home:<argumento>`): ela não tem diálogo, então a
+// confirmação acontece aqui.
+const ARG_ACTIONS = { 'reset-preferences': reset, 'disconnect-all': disconnectAll };
+
+export function runArg(arg, ctx) {
+  ARG_ACTIONS[arg]?.(ctx);
 }
 
 async function reset({ api, t }) {

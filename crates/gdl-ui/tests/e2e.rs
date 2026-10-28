@@ -1304,3 +1304,17 @@ async fn screenshots_for_the_readme() {
     onboarding.wait_text(".step-title", "Client ID").await;
     save(&onboarding, "primeiro-uso").await;
 }
+
+// Da bandeja, "Redefinir as preferências" abre a janela com a confirmação; nada muda sem ela.
+// "Mais opções" leva a "Gerenciar drives compartilhados".
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn home_arg_reset_preferences_asks_first() {
+    let session = Session::open("home:reset-preferences").await;
+    let question = session.text("dialog[open] .dialog-body").await;
+    session.click("dialog[open] .dialog-cancel").await;
+    assert!(!question.is_empty());
+
+    session.click(".more-button").await;
+    session.find("[data-action='shared-drives']").await;
+}

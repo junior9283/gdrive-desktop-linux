@@ -39,6 +39,8 @@ pub enum Action {
     Resume,
     /// Grava o pacote de diagnóstico; o serviço abre a pasta onde ele ficou.
     GenerateDiagnostics,
+    /// Liga ou desliga o registro detalhado.
+    SetVerbose(bool),
     StartService,
     Quit,
 }
@@ -71,8 +73,9 @@ pub fn is_signed_out(status: &Status) -> bool {
 }
 
 impl TrayView {
-    /// Com mais de uma conta conectada (`Status::accounts`), a dica diz quantas são.
-    pub fn from_status(status: &Status, i18n: &I18n) -> TrayView {
+    /// Com mais de uma conta conectada (`Status::accounts`), a dica diz quantas são. `verbose` é
+    /// o registro detalhado do serviço (o item do menu o inverte).
+    pub fn from_status(status: &Status, verbose: bool, i18n: &I18n) -> TrayView {
         let pending = u64::from(status.syncing);
         let errors = u64::from(status.errors);
         let still = Icon::Still;
@@ -96,6 +99,11 @@ impl TrayView {
         } else {
             item(i18n, "tray-pause", Action::Pause)
         };
+        let verbose_item = if verbose {
+            item(i18n, "tray-verbose-off", Action::SetVerbose(false))
+        } else {
+            item(i18n, "tray-verbose-on", Action::SetVerbose(true))
+        };
         TrayView {
             icon,
             tooltip,
@@ -112,8 +120,18 @@ impl TrayView {
                 },
                 item(i18n, "tray-preferences", Action::Open("preferences")),
                 item(i18n, "tray-about", Action::Open("about")),
+                item(i18n, "tray-shared-drives", Action::Open("shared-drives")),
                 item(i18n, "tray-feedback", Action::Open("feedback")),
+                verbose_item,
                 item(i18n, "tray-diagnostics", Action::GenerateDiagnostics),
+                MenuItem::Separator,
+                // A bandeja não tem diálogo: abre a janela, que pede a confirmação.
+                item(i18n, "tray-reset", Action::Open("home:reset-preferences")),
+                item(
+                    i18n,
+                    "tray-disconnect-all",
+                    Action::Open("home:disconnect-all"),
+                ),
                 MenuItem::Separator,
                 item(i18n, "tray-quit", Action::Quit),
             ],
@@ -247,33 +265,33 @@ mod tests {
             ),
         ];
         for (status, icon, pt_tip, en_tip) in table {
-            let view = TrayView::from_status(&status, &pt);
+            let view = TrayView::from_status(&status, false, &pt);
             assert_eq!(
                 (view.icon_at(0), view.tooltip.as_str()),
                 (icon, pt_tip),
                 "{status:?}"
             );
-            let view = TrayView::from_status(&status, &en);
+            let view = TrayView::from_status(&status, false, &en);
             assert_eq!(view.tooltip, en_tip, "{status:?}");
         }
         let mut two = status("synced", 0, 0);
         two.accounts = vec![AccountSummary::default(); 2];
         assert_eq!(
-            TrayView::from_status(&two, &pt).tooltip,
+            TrayView::from_status(&two, false, &pt).tooltip,
             "Conectado com 2 contas"
         );
         assert_eq!(
-            TrayView::from_status(&two, &en).tooltip,
+            TrayView::from_status(&two, false, &en).tooltip,
             "Connected with 2 accounts"
         );
         two.state = "paused".into();
-        assert_eq!(TrayView::from_status(&two, &pt).tooltip, "Pausado");
+        assert_eq!(TrayView::from_status(&two, false, &pt).tooltip, "Pausado");
     }
 
     #[test]
     fn syncing_icon_is_animated() {
         let i18n = I18n::new("en");
-        let view = TrayView::from_status(&status("syncing", 1, 0), &i18n);
+        let view = TrayView::from_status(&status("syncing", 1, 0), false, &i18n);
         let frames: Vec<&str> = (0..5).map(|f| view.icon_at(f)).collect();
         assert_eq!(
             frames,
@@ -285,14 +303,14 @@ mod tests {
                 "gdl-syncing-1"
             ]
         );
-        let still = TrayView::from_status(&status("synced", 0, 0), &i18n);
+        let still = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
         assert_eq!(still.icon_at(3), "gdl-synced");
     }
 
     #[test]
     fn menu_without_login_has_sign_in_only() {
         let i18n = I18n::new("pt_BR");
-        let view = TrayView::from_status(&status("signed-out", 0, 0), &i18n);
+        let view = TrayView::from_status(&status("signed-out", 0, 0), false, &i18n);
         assert_eq!(labels(&view), ["Fazer login", "Sobre", "---", "Sair"]);
         assert_eq!(view.click, Action::Open("onboarding"));
 
@@ -304,7 +322,7 @@ mod tests {
     #[test]
     fn starting_service_does_not_ask_to_sign_in() {
         let i18n = I18n::new("pt_BR");
-        let view = TrayView::from_status(&status("starting", 0, 0), &i18n);
+        let view = TrayView::from_status(&status("starting", 0, 0), false, &i18n);
         assert_eq!(view.click, Action::Open("home"));
         assert!(view.animated());
         assert_eq!(view.tooltip, "Conectando à sua conta…");
@@ -314,7 +332,7 @@ mod tests {
     #[test]
     fn signed_in_menu_follows_the_spec() {
         let i18n = I18n::new("pt_BR");
-        let view = TrayView::from_status(&status("synced", 0, 0), &i18n);
+        let view = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
         assert_eq!(
             labels(&view),
             [
@@ -327,8 +345,13 @@ mod tests {
                 "Lista de erros",
                 "Preferências",
                 "Sobre",
+                "Gerenciar drives compartilhados",
                 "Enviar feedback",
+                "Ativar o registro detalhado",
                 "Gerar informações de diagnóstico",
+                "---",
+                "Redefinir as preferências",
+                "Desconectar todas as contas",
                 "---",
                 "Sair",
             ]
@@ -342,14 +365,65 @@ mod tests {
             action: Action::GenerateDiagnostics,
         }));
         assert_eq!(view.click, Action::Open("home"));
-        let paused = TrayView::from_status(&status("paused", 0, 0), &i18n);
+        let paused = TrayView::from_status(&status("paused", 0, 0), false, &i18n);
         assert!(labels(&paused).contains(&"Retomar a sincronização"));
+    }
+
+    fn action_of(view: &TrayView, wanted: &str) -> Option<Action> {
+        view.items.iter().find_map(|i| match i {
+            MenuItem::Item { label, action } if label == wanted => Some(*action),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn menu_has_every_more_options_item() {
+        let i18n = I18n::new("en");
+        let view = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
+        assert_eq!(
+            action_of(&view, "Manage shared drives"),
+            Some(Action::Open("shared-drives"))
+        );
+        assert_eq!(
+            action_of(&view, "Turn on detailed logging"),
+            Some(Action::SetVerbose(true))
+        );
+        // Sem conta, nada que dependa dela.
+        let out = TrayView::from_status(&status("signed-out", 0, 0), false, &i18n);
+        assert_eq!(action_of(&out, "Disconnect all accounts"), None);
+        assert_eq!(action_of(&out, "Manage shared drives"), None);
+    }
+
+    #[test]
+    fn verbose_label_follows_the_service() {
+        let i18n = I18n::new("pt_BR");
+        let view = TrayView::from_status(&status("synced", 0, 0), true, &i18n);
+        assert_eq!(
+            action_of(&view, "Desativar o registro detalhado"),
+            Some(Action::SetVerbose(false))
+        );
+        assert_eq!(action_of(&view, "Ativar o registro detalhado"), None);
+    }
+
+    #[test]
+    fn tray_confirming_items_open_the_window() {
+        // A bandeja não tem diálogo: o que pede confirmação abre a janela com ele.
+        let i18n = I18n::new("pt_BR");
+        let view = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
+        assert_eq!(
+            action_of(&view, "Redefinir as preferências"),
+            Some(Action::Open("home:reset-preferences"))
+        );
+        assert_eq!(
+            action_of(&view, "Desconectar todas as contas"),
+            Some(Action::Open("home:disconnect-all"))
+        );
     }
 
     #[test]
     fn error_item_shows_count() {
         let i18n = I18n::new("pt_BR");
-        let view = TrayView::from_status(&status("error", 0, 3), &i18n);
+        let view = TrayView::from_status(&status("error", 0, 3), false, &i18n);
         let errors = view.items.iter().find_map(|i| match i {
             MenuItem::Item {
                 label,

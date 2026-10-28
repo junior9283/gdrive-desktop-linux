@@ -133,10 +133,14 @@ impl App {
     /// Relê o estado e atualiza o ícone, se algo visível mudou. Na primeira vez sem conta, abre
     /// o primeiro uso (salvo `DisableOnboardingDialog`).
     async fn refresh(&mut self) {
-        self.status = self.service.status("").await.ok();
+        // O registro detalhado pode mudar pela janela: é lido junto, a cada vez.
+        let (status, verbose) =
+            tokio::join!(self.service.status(""), self.service.verbose_logging());
+        self.status = status.ok();
+        let verbose = verbose.unwrap_or(false);
         let signed_out = self.status.as_ref().is_some_and(is_signed_out);
         let view = match &self.status {
-            Some(status) => TrayView::from_status(status, &self.i18n),
+            Some(status) => TrayView::from_status(status, verbose, &self.i18n),
             None => TrayView::service_down(&self.i18n),
         };
         if view != self.view {
@@ -174,6 +178,12 @@ impl App {
                 .await
                 .map(drop)
                 .map_err(Error::from),
+            Action::SetVerbose(on) => {
+                let done = self.service.set_verbose_logging(on).await;
+                // O rótulo do item segue o serviço.
+                self.refresh().await;
+                done.map_err(Error::from)
+            }
             Action::StartService => self.start_service().await,
             // Com o serviço no ar, a saída vem com `Quitting`; sem ele, sai já.
             Action::Quit => return self.service.quit().await.is_ok(),

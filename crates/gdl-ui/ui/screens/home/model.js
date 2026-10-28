@@ -68,6 +68,14 @@ export function headerFor(status, now, locale) {
   return { title, subtitle, pause, signIn };
 }
 
+// O texto do cartão "Drives compartilhados": quantos são e, se houver, quantos estão desligados
+// (fora da montagem).
+export function drivesCard(drives) {
+  if (!drives.length) return ['card-drives-none'];
+  const off = drives.filter((d) => !d.enabled).length;
+  return off ? ['card-drives-off', { count: drives.length, off }] : ['card-drives-text', { count: drives.length }];
+}
+
 // "N itens off-line (tamanho)" do `OfflineSummary`.
 export function offlineText(summary, locale) {
   return ['card-offline-text', { count: summary.pinned_count, size: formatSize(summary.pinned_bytes, locale) }];

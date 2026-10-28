@@ -3,17 +3,20 @@
 
 import { card, el } from '../../components.js';
 import { foldersCard } from '../preferences/folders.js';
-import { headerFor, offlineText } from './model.js';
+import { drivesCard, headerFor, offlineText } from './model.js';
+import { currentAccount } from '../../state.js';
 
-// Os números do off-line e dos compartilhados (`shared_with_me` vai ao Drive) valem por um
-// minuto: o Início redesenha a cada mudança do estado.
+// Os números do off-line, dos compartilhados e dos drives (`shared_with_me` e `shared_drives` vão ao
+// Drive) valem por um minuto: o Início redesenha a cada mudança do estado.
 const FRESH_MS = 60_000;
 let cached = null;
 
+// Guardados por conta: trocar de conta lê de novo.
 function extras(api) {
-  if (!cached || Date.now() - cached.at > FRESH_MS) {
-    const data = Promise.all([api.call('offline_summary'), api.call('shared_with_me')]);
-    cached = { at: Date.now(), data };
+  const account = currentAccount();
+  if (!cached || cached.account !== account || Date.now() - cached.at > FRESH_MS) {
+    const data = Promise.all([api.call('offline_summary'), api.call('shared_with_me'), api.call('shared_drives')]);
+    cached = { account, at: Date.now(), data };
     // Um erro não fica guardado.
     data.catch(() => {
       if (cached?.data === data) cached = null;
@@ -34,21 +37,23 @@ function attention({ status, t, api }) {
   return card(title, el('p', {}, t('card-attention-none')));
 }
 
-// Os cartões aparecem na hora com o `Status`; off-line e compartilhados chegam depois.
+// Os cartões aparecem na hora com o `Status`; off-line, compartilhados e drives chegam depois.
 export async function render({ api, t, locale, home }) {
   const status = home.status;
   const offlineCount = el('p');
   const sharedCount = el('p');
   const foldersCount = el('p');
+  const drivesCount = el('p');
   api.call('local_folders')
     .then((list) => {
       foldersCount.textContent = t(...foldersCard(list));
     })
     .catch(() => {});
   extras(api)
-    .then(([summary, sharedItems]) => {
+    .then(([summary, sharedItems, drives]) => {
       offlineCount.textContent = t(...offlineText(summary, locale));
       sharedCount.textContent = t('card-shared-text', { count: sharedItems.length });
+      drivesCount.textContent = t(...drivesCard(drives));
     })
     .catch(() => {});
   return el(
@@ -58,6 +63,7 @@ export async function render({ api, t, locale, home }) {
     card(t('card-offline'), offlineCount, t('card-offline-open'), () => home.show('offline')),
     card(t('card-folders'), foldersCount, t('card-folders-open'), () => home.show('folders')),
     card(t('card-shared'), sharedCount, t('card-shared-open'), () => home.show('shared')),
+    card(t('card-drives'), drivesCount, t('card-drives-open'), () => home.show('drives')),
     card(t('card-sync'), el('p', {}, t(...headerFor(status, Date.now(), locale).title)),
       t('card-sync-open'), () => home.show('activity')),
     card(t('card-gemini'), el('p', {}, t('card-gemini-text')), t('card-gemini-open'), () => api.openLink('gemini')),

@@ -83,6 +83,21 @@ card-folders-attention = { $count ->
    *[other] { $count } folders need attention.
 }
 card-folders-open = See folders
+card-drives = Shared drives
+card-drives-none = You are not a member of any shared drive.
+card-drives-text = { $count ->
+    [one] 1 shared drive
+   *[other] { $count } shared drives
+}
+card-drives-off = { $off ->
+    [one] { $count } shared drives (1 turned off)
+   *[other] { $count } shared drives ({ $off } turned off)
+}
+card-drives-open = See drives
+view-drives = Shared drives
+drives-empty = You are not a member of any shared drive. Create one or ask to be added.
+drives-off = Turned off
+drives-open-folder = Open in folder
 card-shared = Shared with me
 card-shared-text = { $count ->
     [0] Nobody shared files with you

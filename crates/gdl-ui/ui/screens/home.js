@@ -7,6 +7,7 @@ import { headerFor, shownStatus, withoutAccount } from './home/model.js';
 import { moreMenu, runArg } from './home/more.js';
 import { screenArg } from '../router.js';
 import * as activity from './home/activity.js';
+import * as drives from './home/drives.js';
 import * as folders from './home/folders.js';
 import * as links from './home/links.js';
 import * as notifications from './home/notifications.js';
@@ -15,7 +16,7 @@ import * as shared from './home/shared.js';
 import * as start from './home/start.js';
 import { currentAccount, onAccountChange, setCurrentAccount } from '../state.js';
 
-const VIEWS = { start, activity, folders, offline, shared, notifications, links };
+const VIEWS = { start, activity, folders, offline, shared, drives, notifications, links };
 // Tudo de uma vez: o login que terminou e a conta mostrada que mudou.
 const EVERYTHING = { status: true, badge: true, views: Object.keys(VIEWS) };
 // O que cada evento da ponte atualiza: o cabeçalho (`status`), o selo das notificações (`badge`)

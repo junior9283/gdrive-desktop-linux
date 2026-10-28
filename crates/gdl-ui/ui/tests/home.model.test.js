@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { I18n, parseFtl } from '../i18n.js';
 import { formatSize } from '../format.js';
-import { accountMenuFor, headerFor, offlineText, paginate, shownStatus, sortRows } from '../screens/home/model.js';
+import { accountMenuFor, drivesCard, headerFor, offlineText, paginate, shownStatus, sortRows } from '../screens/home/model.js';
 
 const load = (lang) =>
   new I18n(
@@ -154,4 +154,18 @@ test('o cabeçalho mostra o estado da própria conta, não o pior entre elas', (
   const both = { account: 'a@x', state: 'error', accounts: accounts(['a@x'], ['b@x', 'error']) };
   assert.equal(shownStatus(both).state, 'synced');
   assert.equal(shownStatus({ account: '', state: 'signed-out', accounts: [] }).state, 'signed-out');
+});
+
+test('cartão dos Drives compartilhados conta os drives e diz quantos estão desligados', () => {
+  const pt = load('pt-BR');
+  assert.deepEqual(drivesCard([]), ['card-drives-none']);
+  const drives = [
+    { id: 'a', name: 'Equipe', enabled: true },
+    { id: 'b', name: 'Vendas', enabled: false },
+  ];
+  assert.deepEqual(drivesCard(drives), ['card-drives-off', { count: 2, off: 1 }]);
+  assert.deepEqual(drivesCard([drives[0]]), ['card-drives-text', { count: 1 }]);
+  assert.equal(pt.t(...drivesCard(drives)), '2 drives compartilhados (1 desligado)');
+  assert.equal(pt.t(...drivesCard([drives[0]])), '1 drive compartilhado');
+  assert.equal(pt.t(...drivesCard([])), 'Você não participa de nenhum drive compartilhado.');
 });

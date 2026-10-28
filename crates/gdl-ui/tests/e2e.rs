@@ -1318,3 +1318,16 @@ async fn home_arg_reset_preferences_asks_first() {
     session.click(".more-button").await;
     session.find("[data-action='shared-drives']").await;
 }
+
+// Início tem o cartão "Drives compartilhados", que leva à visão com os drives da conta.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn shared_drives_view_lists_the_fake_drives() {
+    let session = Session::open("home").await;
+    session.wait_text(".cards", "Drives compartilhados").await;
+    session.click("[data-view='drives']").await;
+    let list = session.wait_text(".drives", "Equipe").await;
+    session.find(".drives .open-folder").await;
+    session.find(".manage-shared-drives").await;
+    assert!(list.contains("Equipe"), "{list}");
+}

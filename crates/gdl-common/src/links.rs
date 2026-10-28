@@ -9,9 +9,9 @@ pub const DRIVE_WEB: &str = "https://drive.google.com/drive/my-drive";
 /// A lixeira do Drive na web.
 pub const DRIVE_TRASH: &str = "https://drive.google.com/drive/trash";
 
-/// O endereço de `name` (`drive-web`, `storage`, `gemini`, `project`, `privacy`, `terms`,
-/// `faq`, `help`, `client-id-guide` ou as páginas do Google Cloud do guia do primeiro uso,
-/// `gcp-*`).
+/// O endereço de `name` (`drive-web`, `storage`, `gemini`, `create-account`, `project`,
+/// `privacy`, `terms`, `faq`, `help`, `client-id-guide` ou as páginas do Google Cloud do guia do
+/// primeiro uso, `gcp-*`).
 pub fn url(name: &str) -> Option<String> {
     let doc = |file: &str| format!("{PROJECT}/blob/main/docs/{file}");
     // O Google Cloud Console, no projeto que estiver escolhido lá.
@@ -20,6 +20,7 @@ pub fn url(name: &str) -> Option<String> {
         "drive-web" => DRIVE_WEB.into(),
         "storage" => "https://one.google.com/storage".into(),
         "gemini" => "https://gemini.google.com/".into(),
+        "create-account" => "https://accounts.google.com/signup".into(),
         "project" => PROJECT.into(),
         "privacy" => doc("politica-de-privacidade.md"),
         "terms" => doc("termos-de-uso.md"),
@@ -92,6 +93,10 @@ mod tests {
     #[test]
     fn only_known_names_have_an_address() {
         assert_eq!(url("drive-web").as_deref(), Some(DRIVE_WEB));
+        assert_eq!(
+            url("create-account").as_deref(),
+            Some("https://accounts.google.com/signup")
+        );
         assert!(url("terms").unwrap().ends_with("/docs/termos-de-uso.md"));
         assert_eq!(url("https://example.com"), None);
     }

@@ -78,12 +78,16 @@ pub enum AuthError {
 }
 
 impl LoginError {
-    /// O motivo que a janela traduz (`LoginFinished`); os outros erros vão como texto.
-    pub fn reason(&self) -> Option<&'static str> {
+    /// O motivo que a janela traduz (`LoginFinished`); o texto do erro fica só no log.
+    pub fn reason(&self) -> &'static str {
         match self {
-            LoginError::BlockedByOrg => Some("blocked-by-organization"),
-            LoginError::AccountDisabled => Some("account-disabled"),
-            _ => None,
+            LoginError::Timeout => "timeout",
+            LoginError::Denied => "access-denied",
+            LoginError::BlockedByOrg => "blocked-by-organization",
+            LoginError::AccountDisabled => "account-disabled",
+            LoginError::MissingRefreshToken => "missing-refresh-token",
+            LoginError::Auth(AuthError::Network(_)) => "offline",
+            LoginError::Loopback(_) | LoginError::Auth(_) => "failed",
         }
     }
 }
@@ -599,7 +603,7 @@ mod tests {
                 .unwrap();
             let e = flow.wait(Duration::from_secs(5)).await.unwrap_err();
             assert!(matches!(e, LoginError::BlockedByOrg), "{error}: {e:?}");
-            assert_eq!(e.reason(), Some("blocked-by-organization"));
+            assert_eq!(e.reason(), "blocked-by-organization");
         }
     }
 
@@ -614,8 +618,30 @@ mod tests {
         let e = flow.wait(Duration::from_secs(5)).await.unwrap_err();
 
         assert!(matches!(e, LoginError::AccountDisabled), "{e:?}");
-        assert_eq!(e.reason(), Some("account-disabled"));
-        assert_eq!(LoginError::Denied.reason(), None);
+        assert_eq!(e.reason(), "account-disabled");
+    }
+
+    /// Todo erro de login vira um motivo que a janela traduz: o texto do erro (em pt-BR, com
+    /// detalhes técnicos) nunca chega à tela.
+    #[test]
+    fn login_errors_have_reasons() {
+        let io = || std::io::Error::other("porta ocupada");
+        for (error, reason) in [
+            (LoginError::Timeout, "timeout"),
+            (LoginError::Denied, "access-denied"),
+            (LoginError::BlockedByOrg, "blocked-by-organization"),
+            (LoginError::AccountDisabled, "account-disabled"),
+            (LoginError::MissingRefreshToken, "missing-refresh-token"),
+            (LoginError::Loopback(io()), "failed"),
+            (
+                LoginError::Auth(AuthError::Network("dns".into())),
+                "offline",
+            ),
+            (LoginError::Auth(AuthError::Revoked), "failed"),
+            (LoginError::Auth(AuthError::Http(500)), "failed"),
+        ] {
+            assert_eq!(error.reason(), reason, "{error:?}");
+        }
     }
 
     #[tokio::test]

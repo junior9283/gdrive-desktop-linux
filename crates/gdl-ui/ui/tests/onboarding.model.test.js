@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { GUIDE, actions, firstState, loginFailure, nextStep, slowLogin, SLOW_LOGIN_MS, stepsFor, summaryRows } from '../screens/onboarding/model.js';
+import { GUIDE, REASONS, actions, firstState, loginFailure, nextStep, slowLogin, SLOW_LOGIN_MS, stepsFor, summaryRows } from '../screens/onboarding/model.js';
 
 const signIn = (fields = {}) => ({ ...firstState({ signedIn: false, loginOnly: false }), step: 'sign-in', ...fields });
 
@@ -208,9 +208,10 @@ test('entrar de novo com outra conta: erro próprio e tentar de novo', () => {
   assert.equal(actions(failed).primary, 'retry');
 });
 
-test('o motivo do serviço vira o texto do erro; outro texto vai como veio', () => {
-  for (const reason of ['already-connected', 'other-account', 'too-many-accounts', 'add-account-disabled']) {
-    assert.deepEqual(loginFailure(reason), [`onboarding-login-failed-${reason}`]);
+test('todo motivo do serviço vira o texto do erro; outro texto (a recusa da política) vai como veio', () => {
+  for (const reason of REASONS) assert.deepEqual(loginFailure(reason), [`onboarding-login-failed-${reason}`]);
+  for (const reason of ['timeout', 'access-denied', 'offline', 'missing-refresh-token', 'failed']) {
+    assert.ok(REASONS.includes(reason), reason);
   }
   assert.deepEqual(loginFailure('tempo esgotado'), ['onboarding-login-failed', { error: 'tempo esgotado' }]);
 });
@@ -226,11 +227,6 @@ test('o resumo mostra conta, modo, pasta do Drive e as pastas escolhidas', () =>
   const none = summaryRows({ email: 'eu@example.com', mirror: true, mount: '/m', folders: [] });
   assert.deepEqual(none[1], ['onboarding-summary-mode', ['onboarding-summary-mirror']]);
   assert.deepEqual(none[3], ['onboarding-summary-folders', ['onboarding-summary-no-folders']]);
-});
-
-test('loginFailure traduz o bloqueio da organização e a conta desativada', () => {
-  assert.deepEqual(loginFailure('blocked-by-organization'), ['onboarding-login-failed-blocked-by-organization']);
-  assert.deepEqual(loginFailure('account-disabled'), ['onboarding-login-failed-account-disabled']);
 });
 
 test('slowLogin depois de 60 s esperando o navegador', () => {

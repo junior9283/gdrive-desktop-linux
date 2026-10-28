@@ -173,7 +173,7 @@ const STEPS = {
     ];
   },
 
-  'sign-in'({ t }, state) {
+  'sign-in'({ api, t }, state) {
     const error = el('p', { class: 'step-error', role: 'alert' }, state.error ? t(...state.error) : []);
     const field = (id, key, label, type) => {
       const input = el('input', { id, type, value: state[key], autocomplete: 'off', spellcheck: 'false' });
@@ -193,6 +193,8 @@ const STEPS = {
       field('client-secret', 'secret', t('onboarding-client-secret'), 'password'),
       el('p', { class: 'meta' }, t('onboarding-client-note')),
       error,
+      el('button', { class: 'text create-account', onclick: () => attempt(api.openLink('create-account')) },
+        t('onboarding-create-account')),
     ];
   },
 

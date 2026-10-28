@@ -1082,14 +1082,15 @@ impl Daemon {
         expected: &str,
     ) -> Result<String, (String, String)> {
         let tokens = flow.wait(LOGIN_TIMEOUT).await.map_err(|e| {
-            let error = e
-                .reason()
-                .map(str::to_owned)
-                .unwrap_or_else(|| e.to_string());
-            (String::new(), error)
+            tracing::warn!(erro = %e, "o login não deu certo");
+            (String::new(), e.reason().to_owned())
         })?;
         let email = tokens.email.clone();
-        let fail = |e: &dyn std::fmt::Display| (email.clone(), e.to_string());
+        // Falha daqui em diante é do computador (guardar o login, montar): o texto fica no log.
+        let fail = |e: &dyn std::fmt::Display| {
+            tracing::warn!(erro = %e, "o login não deu certo");
+            (email.clone(), "failed".to_owned())
+        };
         let (connected, already) = {
             let accounts = self.accounts.lock().await;
             (accounts.len(), accounts.iter().any(|a| a.email == email))

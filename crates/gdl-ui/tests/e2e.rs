@@ -599,7 +599,7 @@ async fn about_lists_third_party_licenses() {
 async fn managed_pref_is_locked() {
     let session = Session::open("preferences").await;
 
-    session.click("[data-tab='settings']").await;
+    session.click(".settings-gear").await;
     let row = session
         .wait_text(
             ".pref[data-key='AutoStartOnLogin']",
@@ -624,7 +624,7 @@ async fn saving_restart_key_shows_restart_banner() {
     let service = service().await;
     let session = Session::open("preferences").await;
 
-    session.click("[data-tab='settings']").await;
+    session.click(".settings-gear").await;
     session
         .fill(".pref[data-key='ContentCacheMaxKbytes'] input", "2")
         .await;
@@ -1349,4 +1349,47 @@ async fn activity_share_opens_the_share_window() {
     session.post("window", json!({ "handle": share })).await;
     let title = session.wait_text(".share", "Compartilhar").await;
     assert!(title.contains("enviado-pelo-teste.txt"), "{title}");
+}
+
+// Preferências como no original: duas abas e as configurações atrás da engrenagem, com "Voltar".
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn preferences_has_two_tabs_and_a_gear() {
+    let session = Session::open("preferences:drive").await;
+    session.find("[data-tab='drive'][aria-selected='true']").await;
+    let tabs = session
+        .eval("return [...document.querySelectorAll('[role=tab]')].map(t => t.dataset.tab)")
+        .await;
+    session.click(".settings-gear").await;
+    let settings = session.wait_text(".tab-content", "Iniciar").await;
+    session.click(".settings-back").await;
+    session.find("[data-tab='drive'][aria-selected='true']").await;
+
+    assert_eq!(tabs, json!(["computer", "drive"]));
+    assert!(settings.contains("Configurações"), "{settings}");
+}
+
+// O que muda atrás da engrenagem continua pendente ao voltar às abas, e o Salvar grava junto.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn gear_changes_are_saved_with_the_tabs() {
+    let service = service().await;
+    let session = Session::open("preferences:drive").await;
+    session.click(".settings-gear").await;
+    session
+        .click(".pref[data-key='PauseSyncingOnMeteredConnection'] input")
+        .await;
+    session.click(".settings-back").await;
+    let pending = session.text(".pending-changes").await;
+    session.click(".save").await;
+    session.wait_text(".toast", "salv").await;
+    let prefs = service.preferences().await.unwrap();
+    service.reset_preferences().await.unwrap();
+
+    let metered = prefs
+        .iter()
+        .find(|p| p.key == "PauseSyncingOnMeteredConnection")
+        .unwrap();
+    assert!(pending.contains("pendentes"), "{pending}");
+    assert_eq!(metered.value, "true");
 }

@@ -2,7 +2,7 @@
 // "Alterações pendentes", Cancelar e Salvar (todas as mudanças num `set_preferences` só). Uma
 // chave da política aparece bloqueada. A lógica fica em `preferences/model.js`.
 
-import { attempt, choice, confirmDialog, el, saveFooter, stylesheet, toast, toastError } from '../components.js';
+import { attempt, choice, confirmDialog, el, icon, saveFooter, stylesheet, toast, toastError } from '../components.js';
 import { folderItems, refusalToast } from './folder-actions.js';
 import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
@@ -18,7 +18,7 @@ import {
 // O atalho quando `SearchHotKey` não foi definido (o mesmo `DEFAULT_TRIGGER` da bandeja).
 const DEFAULT_HOTKEY = 'Ctrl+Alt+G';
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
-const screen = { root: null, ctx: null, tab: 'drive', listening: null, listeningArg: null };
+const screen = { root: null, ctx: null, tab: 'drive', back: 'drive', listening: null, listeningArg: null };
 // O que veio do serviço e o que o usuário mudou.
 const form = { original: {}, edited: {}, managed: new Set(), limits: {}, mount: '', restartDue: false };
 // As pastas do computador (`LocalFolders`), os dispositivos (`Devices`) e as contas, para o
@@ -62,14 +62,14 @@ function listenArg({ api }) {
   const arg = screenArg(location.search);
   screen.folderArg = folderArg(arg);
   if (screen.folderArg) screen.tab = 'computer';
-  else if (TABS[arg]) screen.tab = arg;
+  else if (isPage(arg)) screen.tab = arg;
   return api.on('screen-arg', (wanted) => {
     if (!ui.tabs) return;
     const folder = folderArg(wanted);
     if (folder) {
       showTab('computer');
       addFolder(folder);
-    } else if (TABS[wanted]) showTab(wanted);
+    } else if (isPage(wanted)) showTab(wanted);
   });
 }
 
@@ -113,12 +113,22 @@ async function loadComputer() {
 
 const pending = () => diff(form.original, form.edited);
 
-const TABS = { computer: computerTab, drive: driveTab, settings: settingsTab };
+// As duas abas, como no original; as configurações são uma página à parte, aberta pela
+// engrenagem. O formulário e o rodapé valem para as três.
+const TABS = { computer: computerTab, drive: driveTab };
+const SETTINGS = 'settings';
+const isPage = (name) => name === SETTINGS || Boolean(TABS[name]);
 
 function draw() {
   const { api, t } = screen.ctx;
   ui.tabs = Object.keys(TABS).map((tab) =>
     el('button', { role: 'tab', 'data-tab': tab, onclick: () => showTab(tab) }, t(`pref-tab-${tab}`)));
+  ui.gear = el('button', {
+    class: 'icon-button settings-gear',
+    'aria-label': t('pref-tab-settings'),
+    title: t('pref-tab-settings'),
+    onclick: () => showTab(SETTINGS),
+  }, icon('settings'));
   ui.content = el('main', { class: 'tab-content', role: 'tabpanel' });
   ui.footer = saveFooter(t, { onSave: save, onCancel: cancel });
   ui.banner = el('div', { class: 'banner restart-banner', role: 'status', hidden: !form.restartDue },
@@ -126,7 +136,7 @@ function draw() {
     el('button', { onclick: () => attempt(api.call('restart')) }, t('pref-restart-now')));
   screen.root.replaceChildren(
     el('div', { class: 'preferences' },
-      el('nav', { class: 'tabs', role: 'tablist' }, ui.tabs),
+      el('div', { class: 'tabs-bar' }, el('nav', { class: 'tabs', role: 'tablist' }, ui.tabs), ui.gear),
       ui.content,
       ui.banner,
       ui.footer.footer),
@@ -136,10 +146,12 @@ function draw() {
 
 // Troca só o conteúdo da aba (o resto da página e o foco ficam).
 function showTab(tab) {
+  if (TABS[tab]) screen.back = tab;
   screen.tab = tab;
   for (const button of ui.tabs) button.setAttribute('aria-selected', String(button.dataset.tab === tab));
+  ui.gear.setAttribute('aria-pressed', String(tab === SETTINGS));
   ui.errors = {};
-  ui.content.replaceChildren(...TABS[tab]());
+  ui.content.replaceChildren(...(tab === SETTINGS ? settingsPage() : TABS[tab]()));
   updateFooter();
 }
 
@@ -399,10 +411,15 @@ async function toStream() {
   showTab('drive');
 }
 
-function settingsTab() {
+// As configurações, com "Voltar" para a aba de onde se veio.
+function settingsPage() {
   const { api, t } = screen.ctx;
   const section = (title, ...rows) => el('section', { class: 'pref-section' }, el('h2', {}, t(title)), ...rows);
   return [
+    el('div', { class: 'settings-head' },
+      el('button', { class: 'text settings-back', onclick: () => showTab(screen.back) },
+        icon('chevron_left'), t('onboarding-back')),
+      el('h2', {}, t('pref-tab-settings'))),
     section('pref-section-location',
       folder('DefaultMountPoint', 'pref-mount', form.mount),
       checkbox('ShowMountPointInSidebar', 'pref-sidebar')),

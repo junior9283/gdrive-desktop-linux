@@ -6,11 +6,28 @@
   height: 100vh;
 }
 
+.tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 8px;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+
 .tabs {
   display: flex;
   gap: 4px;
   padding: 8px 16px 0;
-  border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.settings-gear[aria-pressed='true'] {
+  color: var(--md-primary);
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .tabs button {

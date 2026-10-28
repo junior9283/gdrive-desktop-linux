@@ -23,13 +23,32 @@ async fn root_shows_localized_my_drive() {
             ".Lost and Found",
             ".Uploads cancelados",
             ".shortcut-targets-by-id",
-            "Drives compartilhados",
             "Meu Drive"
         ]
     );
-    let en = Mounted::with_lang(FakeDrive::start().await, "en").await;
+    let fake = FakeDrive::start().await;
+    team_drive(&fake);
+    let en = Mounted::with_lang(fake, "en").await;
     assert!(names(&en.mnt).contains(&"My Drive".to_string()));
     assert!(names(&en.mnt).contains(&"Shared drives".to_string()));
+}
+
+/// Como no Windows, "Drives compartilhados" só aparece quando a conta tem algum (ligado ou não:
+/// desligar todos deixa a pasta vazia, com o menu de ligar).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shared_drives_folder_only_when_there_are_drives() {
+    let m = Mounted::new(FakeDrive::start().await).await;
+    let shared = m.mnt.join("Drives compartilhados");
+    assert!(!names(&m.mnt).contains(&"Drives compartilhados".to_string()));
+    assert_eq!(
+        std::fs::metadata(&shared).unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+
+    team_drive(&m.fake);
+    m.engine.shared_drives().await.unwrap();
+    assert!(names(&m.mnt).contains(&"Drives compartilhados".to_string()));
+    assert_eq!(names(&shared), ["Equipe"]);
 }
 
 /// Um Drive compartilhado (da Ana, com o Drive simulado como membro) com `Planos/plano.txt`.

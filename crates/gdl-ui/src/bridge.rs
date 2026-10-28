@@ -223,6 +223,7 @@ impl Bridge {
             "mirror_check" => j!(s.mirror_check(a.account(), a.str("path")?)),
             "set_mirror" => j!(s.set_mirror(a.account(), a.str("path")?)),
             "set_stream" => j!(s.set_stream(a.account(), a.bool("remove_old")?)),
+            "set_mount_point" => j!(s.set_mount_point(a.account(), a.str("path")?)),
             "versions" => j!(s.versions(a.account(), a.str("item_id")?)),
             "version_download" => {
                 j!(s.version_download(a.account(), a.str("item_id")?, a.str("version_id")?))

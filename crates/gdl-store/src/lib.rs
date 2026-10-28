@@ -904,6 +904,13 @@ impl Store {
         Ok(roots)
     }
 
+    /// A conta tem algum Drive compartilhado, ligado ou não.
+    pub fn has_shared_drives(&self) -> Result<bool> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached("SELECT EXISTS (SELECT 1 FROM shared_drives)")?;
+        Ok(stmt.query_row([], |r| r.get(0))?)
+    }
+
     /// Os Drives compartilhados da conta, em ordem de nome.
     pub fn shared_drives(&self) -> Result<Vec<StoredDrive>> {
         let conn = self.conn();

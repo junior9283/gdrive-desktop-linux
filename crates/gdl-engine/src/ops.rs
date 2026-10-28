@@ -278,6 +278,7 @@ impl Engine {
         };
         let moved = (self.relocate(item, id, parent, name).await)
             .map_err(|e| self.denied(action, &old_name, e))?;
+        self.screen_rename(&old_name, name, now_ms());
         if let Some(exposure) = exposure {
             let name = moved.local_name.clone();
             let _ = self.events.send(match exposure {

@@ -992,9 +992,11 @@ async fn quit_emits_quitting_and_ends_the_service() {
     );
 }
 
+/// Salvar `ContentCachePath` muda o cache de lugar sem reiniciar: as contas param, o conteúdo
+/// vai junto (nada é baixado de novo) e elas voltam, com o aviso da mudança.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn cache_path_change_moves_cache_on_start() {
-    let mut h = Harness::new().await;
+async fn cache_moves_without_restart() {
+    let h = Harness::new().await;
     let root = h.fake.root_id();
     h.fake
         .add_file(&root, "fixo.txt", b"conteudo off-line".to_vec());
@@ -1008,13 +1010,24 @@ async fn cache_path_change_moves_cache_on_start() {
     let new_cache = h.home.join("outro disco");
     let value = serde_json::to_string(&new_cache.display().to_string()).unwrap();
 
-    assert!(
-        h.proxy
-            .set_preferences(&[("ContentCachePath", &value)])
-            .await
-            .unwrap()
-    );
-    h.restart(None).await;
+    let restart = h
+        .proxy
+        .set_preferences(&[("ContentCachePath", &value)])
+        .await
+        .unwrap();
+    assert!(!restart, "não pede para reiniciar");
+    let start = std::time::Instant::now();
+    loop {
+        let engine = h.daemon.engine().await;
+        if engine.is_some_and(|e| e.cache().dir().starts_with(&new_cache)) {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "esperando: contas no cache novo"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 
     let read = blocking(move || std::fs::read(path).unwrap()).await;
     assert_eq!(read, b"conteudo off-line");
@@ -1023,8 +1036,6 @@ async fn cache_path_change_moves_cache_on_start() {
         downloaded,
         "nada baixado de novo"
     );
-    let engine = h.daemon.engine().await.unwrap();
-    assert!(engine.cache().dir().starts_with(&new_cache));
     let notes = h.proxy.notifications().await.unwrap();
     assert_eq!(notes[0].kind, "cache-moved", "{notes:?}");
 }
@@ -3176,7 +3187,7 @@ async fn my_drive_leaves_the_mount_in_mirror_mode() {
 
     wait_until("Meu Drive fora da montagem", || !h.drive().exists()).await;
     let mount = h.drive().parent().unwrap().to_path_buf();
-    assert!(names_in(&mount).contains(&"Drives compartilhados".to_string()));
+    assert!(names_in(&mount).contains(&".Lixeira do Drive".to_string()));
     assert!(
         h.proxy
             .set_mirror("", mirror.to_str().unwrap())
@@ -3541,6 +3552,7 @@ async fn reset_preferences_keeps_policies() {
 async fn localized_folders_can_be_turned_off() {
     let h = Harness::with_policy("DisableLocalizedVirtualFolders = true\n").await;
     h.fake.add_file(&h.fake.root_id(), "a.txt", b"oi".to_vec());
+    team_drive(&h);
     h.logged_in().await;
 
     let mount = h.home.join("Google Drive");
@@ -3550,4 +3562,49 @@ async fn localized_folders_can_be_turned_off() {
     assert!(!names.contains(&"Meu Drive".to_string()), "{names:?}");
     let file = h.home.join("Google Drive/My Drive/a.txt");
     assert!(blocking(move || file.exists()).await);
+}
+
+/// "Alterar" na aba Google Drive muda a pasta só da conta mostrada; a outra fica onde estava.
+/// Como `DefaultMountPoint`, vale ao reiniciar; vazio volta ao padrão. Com a pasta definida pela
+/// política, recusa.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mount_point_per_account() {
+    let mut h = Harness::new().await;
+    h.two_accounts(ANA).await;
+    let first = h.home.join("Google Drive");
+    let chosen = h.home.join("Drive da Ana");
+    let refused = h.proxy.set_mount_point(ANA, "relativo").await.unwrap_err();
+    assert_eq!(refused.short_name(), "InvalidArgs");
+
+    h.proxy
+        .set_mount_point(ANA, chosen.to_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        h.proxy.status(ANA).await.unwrap().mount_point,
+        h.mount_of(ANA).display().to_string()
+    );
+    h.restart(None).await;
+
+    assert_eq!(
+        h.proxy.status(ANA).await.unwrap().mount_point,
+        chosen.display().to_string()
+    );
+    assert_eq!(
+        h.proxy.status("").await.unwrap().mount_point,
+        first.display().to_string()
+    );
+    assert!(blocking(move || chosen.join("Meu Drive").exists()).await);
+
+    h.proxy.set_mount_point(ANA, "").await.unwrap();
+    let fixed = h.home.join("Fixo");
+    let policy = format!("DefaultMountPoint = \"{}\"\n", fixed.display());
+    h.restart(Some(&policy)).await;
+    let beside = h.home.join("Fixo (ana@example.com)");
+    assert_eq!(
+        h.proxy.status(ANA).await.unwrap().mount_point,
+        beside.display().to_string()
+    );
+    let managed = h.proxy.set_mount_point(ANA, "/outro").await.unwrap_err();
+    assert_eq!(managed.short_name(), "Managed");
 }

@@ -435,8 +435,13 @@ impl Inner {
             Node::MountRoot if name == OsStr::new(&self.layout.computers) => self.computers()?,
             Node::MountRoot => {
                 let node = self.layout.lookup_root(name).ok_or(Errno::ENOENT)?;
-                // Só "Meu Drive" depende do modo: o banco não é lido para as outras.
-                if node == Node::Item(Inode::ROOT) && self.mirrored()? {
+                // Só "Meu Drive" e "Drives compartilhados" dependem do banco: as outras não o leem.
+                let hidden = match node {
+                    Node::Item(Inode::ROOT) => self.mirrored()?,
+                    Node::SharedDrives => !self.has_drives()?,
+                    _ => false,
+                };
+                if hidden {
                     return Err(Errno::ENOENT);
                 }
                 return self.node_attr(&node);
@@ -491,6 +496,11 @@ impl Inner {
         }
     }
 
+    /// A conta tem algum Drive compartilhado, ligado ou não.
+    fn has_drives(&self) -> Res<bool> {
+        self.engine.store().has_shared_drives().map_err(errno)
+    }
+
     /// A conta está no modo Espelho: o Meu Drive fica numa pasta do computador.
     fn mirrored(&self) -> Res<bool> {
         Ok(self.engine.store().mirror().map_err(errno)?.is_some())
@@ -528,7 +538,7 @@ impl Inner {
         Ok(match node {
             Node::MountRoot => self
                 .layout
-                .root_entries(self.mirrored()?)
+                .root_entries(self.mirrored()?, self.has_drives()?)
                 .into_iter()
                 .map(|(name, node)| Entry {
                     ino: self.inodes.ino(&node),

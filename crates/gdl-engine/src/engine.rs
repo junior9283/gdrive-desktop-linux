@@ -26,7 +26,9 @@ use crate::events::{EngineEvent, SyncSummary};
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, initial_index};
 use crate::kept::{Kept, KeptCopies, KeptFolder};
 use crate::pins::PinManager;
-use crate::ransomware::{Detector, MIN_ENTROPY, SAMPLE_BYTES, entropy, is_compressed};
+use crate::ransomware::{
+    Detector, MIN_ENTROPY, SAMPLE_BYTES, entropy, is_compressed, is_encrypted_name,
+};
 use crate::recovery;
 use crate::thumbs::seeder::ThumbSeeder;
 use crate::uploads::{CancelOutcome, UploadOutcome, UploadWorker, recover_on_start};
@@ -135,22 +137,26 @@ pub fn pending_cache_move(
 
 /// Move o conteúdo do cache: `rename` no mesmo disco; entre discos (ou com o destino já
 /// ocupado), cada arquivo que não pode ser renomeado é copiado e só então apagado da origem.
-fn move_content(from: &Path, to: &Path) -> std::io::Result<()> {
+fn move_content(from: &Path, to: &Path, progress: &dyn Fn(u8)) -> std::io::Result<()> {
     if std::fs::rename(from, to).is_ok() {
         return Ok(());
     }
     create_private_dir(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let (src, dst) = {
-            let entry = entry?;
-            (entry.path(), to.join(entry.file_name()))
-        };
+    let entries = std::fs::read_dir(from)?.collect::<std::io::Result<Vec<_>>>()?;
+    for (done, entry) in entries.iter().enumerate() {
+        let (src, dst) = (entry.path(), to.join(entry.file_name()));
         if std::fs::rename(&src, &dst).is_err() {
             std::fs::copy(&src, &dst)?;
             std::fs::remove_file(&src)?;
         }
+        progress(percent(done + 1, entries.len()));
     }
     std::fs::remove_dir(from)
+}
+
+/// `done` de `total` em porcentagem inteira (0 a 100).
+fn percent(done: usize, total: usize) -> u8 {
+    (done * 100 / total.max(1)) as u8
 }
 
 /// Espera `rx` mudar; se o provedor de tokens foi embora, não muda mais.
@@ -170,12 +176,28 @@ impl Engine {
         account: &str,
         client: DriveClient,
     ) -> Result<Engine> {
+        Engine::open_moving(paths, prefs, account, client, &|_| {})
+    }
+
+    /// `open`, com `progress` recebendo a porcentagem da mudança do cache de lugar (só quando
+    /// `ContentCachePath` mudou e a mudança é uma cópia entre discos).
+    pub fn open_moving(
+        paths: &Paths,
+        prefs: &Preferences,
+        account: &str,
+        client: DriveClient,
+        progress: &dyn Fn(u8),
+    ) -> Result<Engine> {
         let data_dir = data_dir_of(paths, account);
         let cache_dir = cache_dir_of(paths, prefs, account);
         create_private_dir(&data_dir)?;
         create_private_dir(&cache_dir)?;
         if let Some((from, _)) = pending_cache_move(paths, prefs, account) {
-            move_content(&from.join(CONTENT_DIR), &cache_dir.join(CONTENT_DIR))?;
+            move_content(
+                &from.join(CONTENT_DIR),
+                &cache_dir.join(CONTENT_DIR),
+                progress,
+            )?;
         }
         let marker = data_dir.join(CACHE_DIR_FILE);
         let cache_bytes = cache_dir.as_os_str().as_bytes();
@@ -401,13 +423,26 @@ impl Engine {
             return true;
         }
         let head = read_head(path, SAMPLE_BYTES);
-        if head.is_ok_and(|head| entropy(&head) > MIN_ENTROPY)
-            && lock(&self.ransomware).observe(now)
-        {
+        if head.is_ok_and(|head| entropy(&head) > MIN_ENTROPY) {
+            self.observe_suspicious(now);
+        }
+        !lock(&self.pause_reasons).suspicious
+    }
+
+    /// Confere um renomear de `old` para `new`: ganhar extensão de arquivo cifrado conta como
+    /// um arquivo suspeito, no mesmo detector das gravações.
+    pub(crate) fn screen_rename(&self, old: &str, new: &str, now: i64) {
+        if is_encrypted_name(new) && !is_encrypted_name(old) {
+            self.observe_suspicious(now);
+        }
+    }
+
+    /// Mais um arquivo suspeito; o que completa `ransomware::THRESHOLD` pausa e avisa.
+    fn observe_suspicious(&self, now: i64) {
+        if lock(&self.ransomware).observe(now) {
             self.update_pause(|r| r.suspicious = true);
             let _ = self.events.send(EngineEvent::SuspiciousActivity);
         }
-        !lock(&self.pause_reasons).suspicious
     }
 
     /// "Eu reconheço esta atividade": desfaz a pausa dela (não a do usuário nem a da conexão
@@ -664,6 +699,27 @@ mod tests {
     use super::*;
     use crate::testutil::{fast_client, wait_until};
     use crate::uploads::{commit_local_write, create_local_item};
+
+    /// Arquivo a arquivo (aqui, com o destino já ocupado), a mudança do cache avisa a
+    /// porcentagem feita, até 100.
+    #[test]
+    fn cache_move_reports_progress() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (from, to) = (tmp.path().join("de"), tmp.path().join("para"));
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        std::fs::write(to.join("ocupado"), b"x").unwrap();
+        for n in 0..4 {
+            std::fs::write(from.join(format!("bloco{n}")), b"conteudo").unwrap();
+        }
+        let seen = std::sync::Mutex::new(vec![]);
+
+        move_content(&from, &to, &|p| seen.lock().unwrap().push(p)).unwrap();
+
+        assert_eq!(*seen.lock().unwrap(), [25, 50, 75, 100]);
+        assert!(!from.exists());
+        assert_eq!(std::fs::read(to.join("bloco3")).unwrap(), b"conteudo");
+    }
 
     fn fast() -> Intervals {
         Intervals {

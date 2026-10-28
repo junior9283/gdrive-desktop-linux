@@ -171,6 +171,17 @@ function set(patch) {
   updateFooter();
 }
 
+// "Alterar" na aba Google Drive: a pasta da conta mostrada, ao reiniciar (como DefaultMountPoint).
+function changeMount(path) {
+  const { api, t } = screen.ctx;
+  attempt(api.call('set_mount_point', { account: currentAccount(), path }), () => {
+    form.restartDue = true;
+    ui.banner.hidden = false;
+    document.querySelector('.drive-folder').textContent = path;
+    toast(t('pref-saved'));
+  });
+}
+
 function save() {
   const { api, t } = screen.ctx;
   attempt(api.call('set_preferences', { values: pending() }), (restart) => {
@@ -341,6 +352,8 @@ function driveTab() {
     el('h2', {}, t('pref-drive-folder')),
     el('p', { class: 'path drive-folder' }, drive.mirror || form.mount),
     el('button', { class: 'tonal', onclick: () => attempt(api.openMount()) }, t('pref-open-folder')),
+    mirrored || form.managed.has('DefaultMountPoint') ? []
+      : el('button', { class: 'text change-mount', onclick: pickDir(changeMount) }, t('pref-change')),
     el('button', { class: 'tonal manage-shared-drives', onclick: () => api.openScreen('shared-drives', currentAccount()) },
       t('pref-shared-drives')),
   ];

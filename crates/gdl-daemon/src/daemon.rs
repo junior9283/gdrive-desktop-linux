@@ -62,6 +62,8 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// ao lado da pasta preferida (`<preferida> (<e-mail>)`) leva `\tbeside` depois do e-mail.
 const ACCOUNTS: &str = "accounts";
 const BESIDE: &str = "beside";
+/// Chave no banco da conta com a pasta da montagem escolhida em "Alterar" (vazia: o padrão).
+const MOUNT_POINT: &str = "mount-point";
 /// Quantas contas ficam conectadas ao mesmo tempo.
 pub const MAX_ACCOUNTS: usize = 4;
 /// Arquivo da 0.7 (uma só conta); migrado para `accounts` ao iniciar.
@@ -314,6 +316,8 @@ pub struct Daemon {
     prefs: RwLock<Arc<Preferences>>,
     /// Serializa ler-modificar-gravar das preferências do usuário.
     saving: tokio::sync::Mutex<()>,
+    /// Uma reabertura das contas por vez (`restart_accounts`).
+    reopening: tokio::sync::Mutex<()>,
     exit: watch::Sender<Option<Exit>>,
     i18n: I18n,
     /// Os nomes das pastas da raiz da montagem, no idioma do sistema (como o FUSE mostra).
@@ -411,6 +415,7 @@ impl Daemon {
             history: History::load(config.paths.state_dir.join(HISTORY_FILE)),
             prefs: RwLock::new(Arc::new(prefs)),
             saving: tokio::sync::Mutex::default(),
+            reopening: tokio::sync::Mutex::default(),
             exit: watch::Sender::new(None),
             config,
             accounts: tokio::sync::Mutex::default(),
@@ -516,7 +521,7 @@ impl Daemon {
     /// Grava todas ou nenhuma (valor em JSON) e aplica o que vale na hora. `true` se alguma só
     /// vale depois de reiniciar.
     pub async fn set_preferences(
-        &self,
+        self: &Arc<Self>,
         values: Vec<(String, String)>,
     ) -> Result<bool, ServiceError> {
         let mut parsed = Vec::with_capacity(values.len());
@@ -532,15 +537,42 @@ impl Daemon {
             parsed.push((key, value));
         }
         let _saving = self.saving.lock().await;
+        let cache = self.prefs().content_cache_path.clone();
         set_user_preferences(&self.config.paths, &parsed).map_err(config_error)?;
         self.preferences_saved().await?;
+        self.reopen_if_cache_moved(cache);
         Ok(parsed.iter().any(|(key, _)| needs_restart(key)))
     }
 
-    pub async fn reset_preferences(&self) -> Result<(), ServiceError> {
+    pub async fn reset_preferences(self: &Arc<Self>) -> Result<(), ServiceError> {
         let _saving = self.saving.lock().await;
+        let cache = self.prefs().content_cache_path.clone();
         reset_user_preferences(&self.config.paths).map_err(failed)?;
-        self.preferences_saved().await
+        self.preferences_saved().await?;
+        self.reopen_if_cache_moved(cache);
+        Ok(())
+    }
+
+    /// `ContentCachePath` mudou (era `before`): sem reiniciar o serviço, para as contas, muda o
+    /// cache de lugar (ver `open_engine`) e as reabre, em segundo plano.
+    fn reopen_if_cache_moved(self: &Arc<Self>, before: Option<PathBuf>) {
+        if self.prefs().content_cache_path == before {
+            return;
+        }
+        let daemon = self.clone();
+        tokio::spawn(async move { daemon.restart_accounts().await });
+    }
+
+    /// Para todas as contas e as reabre com as preferências de agora, sem reiniciar o serviço;
+    /// uma reabertura espera a outra terminar.
+    async fn restart_accounts(self: &Arc<Self>) {
+        let _reopening = self.reopening.lock().await;
+        self.resuming.store(true, Ordering::Relaxed);
+        self.stop_all_accounts().await;
+        self.not_started().clear();
+        if let Err(e) = self.resume_saved_accounts().await {
+            tracing::warn!(erro = %e, "não deu para reabrir as contas");
+        }
     }
 
     /// Relê as preferências, aplica as da área de trabalho e avisa quem mostra.
@@ -1156,7 +1188,8 @@ impl Daemon {
     }
 
     /// Abre o motor fora das threads do runtime: com `ContentCachePath` novo, ele primeiro muda
-    /// o cache de lugar (que pode ser uma cópia entre discos), com um aviso no início e no fim.
+    /// o cache de lugar (que pode ser uma cópia entre discos), com um aviso que acompanha a
+    /// porcentagem e é trocado pelo do fim.
     async fn open_engine(
         &self,
         prefs: &Preferences,
@@ -1165,30 +1198,44 @@ impl Daemon {
     ) -> Result<Engine, ServiceError> {
         let paths = self.config.paths.clone();
         let moving = pending_cache_move(&paths, prefs, email);
-        // `stage`: `moving` (início) ou `moved` (fim, que substitui o do início).
-        let note = |stage: &str, to: &Path| Notification {
+        // `stage`: `moving` (início e cada porcentagem) ou `moved` (fim); cada um substitui o
+        // anterior.
+        let note = |stage: &str, to: &Path, percent: u8| Notification {
             kind_id: "cache-moved",
             summary: self.i18n.tr(&format!("notify-cache-{stage}-title"), &[]),
             body: self.i18n.tr(
                 &format!("notify-cache-{stage}-body"),
-                &[("path", &to.display().to_string())],
+                &[
+                    ("path", &to.display().to_string()),
+                    ("percent", &percent.to_string()),
+                ],
             ),
             action: None,
             replaces_key: Some("cache-moved".into()),
             account: email.into(),
         };
-        if let Some((_, to)) = &moving {
-            self.notify(&note("moving", to)).await;
-        }
+        let (progress, mut percents) = tokio::sync::mpsc::unbounded_channel();
         let (prefs_owned, email_owned) = (prefs.clone(), email.to_string());
-        let engine = tokio::task::spawn_blocking(move || {
-            Engine::open(&paths, &prefs_owned, &email_owned, client)
-        })
-        .await
-        .map_err(failed)?
-        .map_err(failed)?;
+        let opening = tokio::task::spawn_blocking(move || {
+            let report = |p: u8| {
+                let _ = progress.send(p);
+            };
+            Engine::open_moving(&paths, &prefs_owned, &email_owned, client, &report)
+        });
         if let Some((_, to)) = &moving {
-            self.notify(&note("moved", to)).await;
+            self.notify(&note("moving", to, 0)).await;
+            let mut shown = 0;
+            while let Some(percent) = percents.recv().await {
+                // De 10 em 10: o aviso não é refeito a cada arquivo.
+                if percent >= shown + 10 {
+                    shown = percent;
+                    self.notify(&note("moving", to, percent)).await;
+                }
+            }
+        }
+        let engine = opening.await.map_err(failed)?.map_err(failed)?;
+        if let Some((_, to)) = &moving {
+            self.notify(&note("moved", to, 100)).await;
         }
         Ok(engine)
     }
@@ -1231,10 +1278,14 @@ impl Daemon {
         engine.ensure_indexed().await.map_err(failed)?;
         folders::look_for_computers(&engine).await;
 
-        let mut preferred = self.preferred_mount_point(&prefs);
-        if is_beside {
-            preferred = beside(&preferred, email);
-        }
+        let chosen = engine.store().kv_get(MOUNT_POINT).map_err(failed)?;
+        let default = self.preferred_mount_point(&prefs);
+        let preferred = match chosen {
+            // A da política vale para todas as contas, como no `set_mount_point`.
+            Some(path) if !path.is_empty() && !self.policy_mount_point() => PathBuf::from(path),
+            _ if is_beside => beside(&default, email),
+            _ => default,
+        };
         let mount_point = mount::choose(&preferred).map_err(failed)?;
         let uid = rustix::process::getuid().as_raw();
         let gid = rustix::process::getgid().as_raw();
@@ -1599,6 +1650,24 @@ impl Daemon {
             .default_mount_point
             .clone()
             .unwrap_or_else(|| self.config.home.join("Google Drive"))
+    }
+
+    /// `DefaultMountPoint` vem da política do administrador.
+    fn policy_mount_point(&self) -> bool {
+        load_preferences(&self.config.paths)
+            .is_ok_and(|(_, managed)| managed.contains("DefaultMountPoint"))
+    }
+
+    /// "Alterar" na aba Google Drive: a pasta da montagem de `account`, ao reiniciar.
+    pub async fn set_mount_point(&self, account: &str, path: &str) -> Result<(), ServiceError> {
+        if self.policy_mount_point() {
+            return Err(ServiceError::Managed("DefaultMountPoint".into()));
+        }
+        if !path.is_empty() && !Path::new(path).is_absolute() {
+            return Err(ServiceError::InvalidArgs("not-absolute".into()));
+        }
+        let engine = self.account_engine(account).await?;
+        engine.store().kv_set(MOUNT_POINT, path).map_err(failed)
     }
 
     /// A montagem da conta `account`.

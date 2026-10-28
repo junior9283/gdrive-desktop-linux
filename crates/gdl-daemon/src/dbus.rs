@@ -275,6 +275,10 @@ impl Service {
         self.daemon.set_stream(account, remove_old).await
     }
 
+    async fn set_mount_point(&self, account: &str, path: &str) -> Result<(), ServiceError> {
+        self.daemon.set_mount_point(account, path).await
+    }
+
     async fn check_local_folder(
         &self,
         account: &str,

@@ -211,10 +211,9 @@ pub fn default_web_browser(paths: &Paths) -> Option<PathBuf> {
 }
 
 /// Preferências que só valem depois de reiniciar o serviço (cache, montagem e rede); as
-/// outras valem na hora.
+/// outras valem na hora (`ContentCachePath` reabre as contas sozinho).
 const RESTART_KEYS: &[&str] = &[
     "ContentCacheMaxKbytes",
-    "ContentCachePath",
     "DefaultMountPoint",
     "DirectConnection",
     "DisableLocalizedVirtualFolders",

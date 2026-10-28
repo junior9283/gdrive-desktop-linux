@@ -558,6 +558,10 @@ pub trait Service {
     /// Volta para o Stream. Com envios do Espelho pendentes, recusa `mirror-pending`; a pasta
     /// antiga fica, e `remove_old` a manda para a lixeira do sistema.
     fn set_stream(&self, account: &str, remove_old: bool) -> Result<(), ServiceError>;
+    /// A pasta da montagem da conta, que vale ao reiniciar o serviço; vazio volta ao padrão
+    /// (`DefaultMountPoint`, ou ao lado dela nas outras contas). Caminho relativo recusa
+    /// `InvalidArgs`; com `DefaultMountPoint` na política, `Managed`.
+    fn set_mount_point(&self, account: &str, path: &str) -> Result<(), ServiceError>;
     /// Liga a pasta a "Computadores/<este computador>/<nome>" no Drive; `merge` junta com a pasta
     /// de mesmo nome que já esteja lá. Recusa com `Refused` (`folders-disabled` ou o motivo de
     /// `CheckLocalFolder`). Devolve o ID da pasta.

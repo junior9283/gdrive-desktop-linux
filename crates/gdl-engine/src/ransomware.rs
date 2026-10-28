@@ -1,6 +1,7 @@
 //! Atividade suspeita: muitos arquivos regravados com cara de cifrados em pouco tempo. Um arquivo
 //! conta quando o começo do conteúdo novo tem entropia alta e a extensão não é de formato que já
-//! é comprimido; 20 em 60 s pausam os envios da conta (as versões anteriores ficam no Drive).
+//! é comprimido, ou quando é renomeado para uma extensão de arquivo cifrado (`.locked`…); 20 em
+//! 60 s pausam os envios da conta (as versões anteriores ficam no Drive).
 
 use gdl_common::names::split_ext;
 use std::collections::VecDeque;
@@ -21,6 +22,28 @@ const COMPRESSED: &[&str] = &[
     "mp4", "mkv", "mov", "avi", "ogg", "opus", "flac", "pdf", "docx", "xlsx", "pptx", "odt", "ods",
     "odp", "apk", "jar", "iso", "dmg",
 ];
+
+/// Extensões que programas de sequestro de dados põem nos arquivos que cifram.
+const ENCRYPTED: &[&str] = &[
+    "locked",
+    "encrypted",
+    "enc",
+    "crypt",
+    "crypted",
+    "crypto",
+    "cry",
+    "lock",
+    "ransom",
+    "pay",
+    "aes",
+    "rsa",
+];
+
+/// A extensão de `name` é de arquivo cifrado por sequestro de dados.
+pub fn is_encrypted_name(name: &str) -> bool {
+    let (_, ext) = split_ext(name);
+    ENCRYPTED.contains(&ext.trim_start_matches('.').to_ascii_lowercase().as_str())
+}
 
 /// Entropia de Shannon de `bytes`, em bits por byte (0 a 8).
 pub fn entropy(bytes: &[u8]) -> f64 {
@@ -195,6 +218,56 @@ mod tests {
         }
         assert!(!engine.is_paused(), "reconhecida, fica quieta por 1 h");
         assert_eq!(suspicious(&mut events), 0);
+    }
+
+    /// Renomear em massa para extensão de arquivo cifrado conta no mesmo detector: o vigésimo
+    /// pausa. Renomear um que já tinha a extensão, ou para outro nome qualquer, não conta.
+    #[tokio::test]
+    async fn mass_rename_to_encrypted_pauses() {
+        use gdl_store::ItemId;
+
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let root = fake.root_id();
+        let ids: Vec<_> = (0..THRESHOLD)
+            .map(|n| fake.add_file(&root, &format!("doc{n}.txt"), b"texto".to_vec()))
+            .collect();
+        fake.add_file(&root, "antigo.locked", b"x".to_vec());
+        let (engine, _tmp) = crate::testutil::indexed_engine(&fake).await;
+        let root = ItemId(root);
+        let old = engine
+            .store()
+            .lookup(&root, "antigo.locked")
+            .unwrap()
+            .unwrap();
+        engine
+            .move_item(&old.id, &root, "antigo2.locked")
+            .await
+            .unwrap();
+        for (n, id) in ids.iter().take(5).enumerate() {
+            let id = ItemId(id.clone());
+            engine
+                .move_item(&id, &root, &format!("novo{n}.txt"))
+                .await
+                .unwrap();
+        }
+
+        for (n, id) in ids.iter().enumerate() {
+            assert!(!engine.is_paused(), "pausou antes da hora, no {n}");
+            let name = format!("doc{n}.txt.locked");
+            engine
+                .move_item(&ItemId(id.clone()), &root, &name)
+                .await
+                .unwrap();
+        }
+        assert!(engine.is_paused(), "o vigésimo pausa os envios");
+    }
+
+    #[test]
+    fn encrypted_extensions() {
+        assert!(is_encrypted_name("relatorio.docx.locked"));
+        assert!(is_encrypted_name("FOTO.JPG.Encrypted"));
+        assert!(!is_encrypted_name("relatorio.docx"));
+        assert!(!is_encrypted_name("locked"));
     }
 
     /// A pausa por atividade suspeita continua depois de reabrir a conta, e "Eu reconheço" não

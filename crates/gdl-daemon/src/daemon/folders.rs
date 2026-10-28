@@ -334,6 +334,8 @@ impl Daemon {
                 let _ = old.await;
             }
             let moved = async {
+                // A política pode ter mudado durante a espera.
+                daemon.folders_refused()?;
                 let store = account.engine.store();
                 store.set_pair_local(id, &local).map_err(failed)?;
                 store
@@ -460,19 +462,30 @@ impl Daemon {
         let pairs = self.all_pairs().await;
         pairs
             .iter()
-            .map(|(_, p)| p.local.display().to_string())
+            .map(|info| info.pair.local.display().to_string())
             .collect()
     }
 
     /// Os pares que são pastas no computador, de todas as contas conectadas, com o motor de cada
     /// um. Os backups de dispositivo ficam de fora: são envios avulsos, e o ponto de montagem
     /// guardado pode ser hoje de outro disco.
-    async fn all_pairs(&self) -> Vec<(Arc<Engine>, Pair)> {
+    async fn all_pairs(&self) -> Vec<PairInfo> {
+        // O banco é lido depois de soltar a lista de contas.
+        let accounts: Vec<_> = {
+            let accounts = self.accounts.lock().await;
+            let copy = |a: &super::Account| (a.engine.clone(), a.folders.clone());
+            accounts.iter().map(copy).collect()
+        };
         let mut pairs = vec![];
-        for (_, engine, _) in self.folder_accounts().await {
+        for (engine, runners) in accounts {
             for pair in engine.store().pairs().unwrap_or_default() {
                 if pair.kind != PairKind::Device {
-                    pairs.push((engine.clone(), pair));
+                    let sync = runners.get(pair.id);
+                    pairs.push(PairInfo {
+                        engine: engine.clone(),
+                        pair,
+                        sync,
+                    });
                 }
             }
         }
@@ -679,18 +692,24 @@ fn remember(engine: &Engine, r: RemoteFile) -> Result<String, ServiceError> {
     Ok(id)
 }
 
+/// Um par de pasta do computador: o motor da conta, o par e o laço dele, se está rodando.
+struct PairInfo {
+    engine: Arc<Engine>,
+    pair: Pair,
+    sync: Option<Arc<FolderSync>>,
+}
+
 /// O emblema de `path` (`FolderStates`) e o motor do par que o contém.
-fn pair_state<'a>(
-    pairs: &'a [(Arc<Engine>, Pair)],
-    path: &Path,
-) -> Option<(&'a Arc<Engine>, &'static str)> {
-    let (engine, pair, rel) = pairs.iter().find_map(|(engine, pair)| {
-        let rel = path.strip_prefix(&pair.local).ok()?;
-        Some((engine, pair, rel.to_string_lossy()))
+fn pair_state<'a>(pairs: &'a [PairInfo], path: &Path) -> Option<(&'a Arc<Engine>, &'static str)> {
+    let (info, rel) = pairs.iter().find_map(|info| {
+        let rel = path.strip_prefix(&info.pair.local).ok()?;
+        Some((info, rel.to_string_lossy()))
     })?;
+    let PairInfo { engine, pair, sync } = info;
     let state = match (rel.is_empty(), pair.state) {
         (true, PairState::Active) => "offline",
         (true, _) => "conflict",
+        _ if sync.as_ref().is_some_and(|s| s.has_failed(&rel)) => "error",
         _ if engine.store().is_synced(pair.id, &rel).unwrap_or(false) => "offline",
         _ => "syncing",
     };

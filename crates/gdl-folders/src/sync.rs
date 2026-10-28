@@ -1,7 +1,7 @@
 //! Um par em ação: lê o computador, o Drive (pelo banco que o motor da conta mantém em dia) e o
 //! último estado sincronizado, decide cada caminho (`decide`) e aplica.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -91,9 +91,12 @@ pub struct FolderSync {
     /// Quantos itens as comparações já mandaram para a lixeira do sistema (para o aviso: quem
     /// ouve avisa a diferença, e duas comparações seguidas não se perdem).
     trashed: tokio::sync::watch::Sender<usize>,
-    /// Os caminhos relativos que ficaram sincronizados desde `take_synced` (para os emblemas;
+    /// Os caminhos relativos cujo emblema mudou desde `take_synced`: ficaram sincronizados ou
+    /// entraram ou saíram da lista de falhas (para os emblemas;
     /// um caminho que some ou muda de nome o gerenciador de arquivos já redesenha sozinho).
     newly_synced: Mutex<Vec<String>>,
+    /// Os caminhos relativos que falharam na última comparação (emblema de erro).
+    failed: Mutex<HashSet<String>>,
     /// Avisa que `newly_synced` deixou de estar vazio.
     synced_notify: tokio::sync::Notify,
     links: Option<Links>,
@@ -122,6 +125,7 @@ impl FolderSync {
             state_changed: tokio::sync::watch::Sender::new(state),
             trashed: tokio::sync::watch::Sender::new(0),
             newly_synced: Mutex::default(),
+            failed: Mutex::default(),
             synced_notify: tokio::sync::Notify::new(),
             links: None,
             is_mount_point: guard::is_mount_point,
@@ -190,10 +194,43 @@ impl FolderSync {
         Ok(pending.count())
     }
 
-    /// Os caminhos que ficaram sincronizados desde a última chamada.
+    /// Os caminhos cujo emblema mudou desde a última chamada.
     pub fn take_synced(&self) -> Vec<PathBuf> {
         let rels = std::mem::take(&mut *self.newly_synced.lock().unwrap());
         rels.iter().map(|rel| self.path(rel)).collect()
+    }
+
+    /// `rel` falhou na última comparação.
+    pub fn has_failed(&self, rel: &str) -> bool {
+        self.failed.lock().unwrap().contains(rel)
+    }
+
+    /// Guarda os caminhos que falharam agora; os que entraram ou saíram da lista mudam de emblema.
+    fn remember_failed(&self, report: &Report) {
+        // A raiz (`""`) tem emblema próprio, pelo estado do par.
+        let now: HashSet<String> = report
+            .failed
+            .iter()
+            .filter(|(rel, _)| !rel.is_empty())
+            .map(|(rel, _)| rel.clone())
+            .collect();
+        let changed: Vec<String> = {
+            let mut failed = self.failed.lock().unwrap();
+            let changed = failed.symmetric_difference(&now).cloned().collect();
+            *failed = now;
+            changed
+        };
+        self.emblems_changed(changed);
+    }
+
+    /// Avisa quem redesenha os emblemas (`take_synced`).
+    fn emblems_changed(&self, rels: impl IntoIterator<Item = String>) {
+        let mut synced = self.newly_synced.lock().unwrap();
+        let was_empty = synced.is_empty();
+        synced.extend(rels);
+        if was_empty && !synced.is_empty() {
+            self.synced_notify.notify_one();
+        }
     }
 
     /// Termina quando há caminhos novos para `take_synced`.
@@ -242,6 +279,7 @@ impl FolderSync {
         if report.trashed > 0 {
             self.trashed.send_modify(|total| *total += report.trashed);
         }
+        self.remember_failed(&report);
         Ok(report)
     }
 
@@ -697,11 +735,7 @@ impl FolderSync {
             md5,
         };
         self.store.put_synced(self.pair.id, &[synced])?;
-        let mut synced = self.newly_synced.lock().unwrap();
-        if synced.is_empty() {
-            self.synced_notify.notify_one();
-        }
-        synced.push(rel.into());
+        self.emblems_changed([rel.to_owned()]);
         Ok(())
     }
 
@@ -1445,6 +1479,28 @@ mod tests {
             std::fs::read(w.trash_dir.join("files/velho.txt")).unwrap(),
             b"velho"
         );
+    }
+
+    /// O caminho que falhou na última comparação fica marcado (emblema de erro) até sincronizar.
+    #[tokio::test]
+    async fn failed_path_is_remembered_until_it_syncs() {
+        let w = World::new().await;
+        w.write("x.txt", b"um");
+        let sync = w.sync_with(1);
+        w.fake
+            .inject(gdl_fake_drive::Fault::QuotaExceeded { times: 1000 });
+
+        let report = sync.reconcile().await.unwrap();
+        assert!(
+            report.failed.iter().any(|(rel, _)| rel == "x.txt"),
+            "{report:?}"
+        );
+        assert!(sync.has_failed("x.txt"));
+        assert!(!sync.has_failed("outro.txt"));
+
+        w.fake.clear_faults();
+        sync.reconcile().await.unwrap();
+        assert!(!sync.has_failed("x.txt"));
     }
 
     #[tokio::test]

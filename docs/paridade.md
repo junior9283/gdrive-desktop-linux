@@ -258,7 +258,7 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Gerenciar versões | FEITO | `Action::Versions` abre a janela `versions:<id>` (só arquivos com versões), que diz quando não há versões ou a lista não carregou, com "Tentar de novo" (`versions.js` `versionsNote`, `drawFailed`). |
 | Ver lixeira | FEITO | `Action::Trash` (`menu.rs`). |
 | Atualizar pasta | FEITO | `Action::Refresh`. |
-| Enviar ou sincronizar esta pasta (fora da montagem) | FEITO | `Action::SyncFolder` abre o configurador; emblemas nas pastas sincronizadas (`FolderStates`). |
+| Enviar ou sincronizar esta pasta (fora da montagem) | FEITO | `Action::SyncFolder` abre o configurador; emblemas nas pastas sincronizadas (`FolderStates`), com `error` no arquivo que falhou na última comparação (`FolderSync::has_failed`, teste `folder_states_show_errors_inside_a_pair`). |
 | Adicionar ao espelho da conta 1–4 | FALTA | Serve ao Espelho de pastas escolhidas, que não existe no Linux; registrado em "Diferenças inevitáveis". |
 | Gerenciar / Criar drive compartilhado | FEITO | `menu.rs` `NewSharedDrive`/`ManageSharedDrives` na pasta "Drives compartilhados" |
 | Criar novo documento, planilha, apresentação | FEITO | `Action::NewDocument/NewSpreadsheet/NewPresentation` (`menu.rs`). |

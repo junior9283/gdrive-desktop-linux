@@ -24,8 +24,9 @@ static SECRETS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
         (r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer ***"),
         (r"\bya29\.[A-Za-z0-9._-]+", "***"),
         (r"\b1//[A-Za-z0-9._-]+", "***"),
-        // Usuário e senha dentro de um endereço (proxy).
-        (r"(://)[^/@\s:]+:[^/@\s]+@", "$1***@"),
+        // Usuário e senha dentro de um endereço (proxy): até o último `@` antes da `/`, porque
+        // a senha pode ter `:` e `@`.
+        (r"(://)[^/\s]*@", "$1***@"),
         (
             r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})",
             "$1***@$2",
@@ -118,6 +119,7 @@ mod tests {
             "POST /token code=4/0Ab_xyz&client_secret=GOCSPX-abc&grant_type=authorization_code\n",
             "token solto 1//0eXyZ-123 e ya29.outro\n",
             "proxy socks5://usuario:senha@10.0.0.1:1080\n",
+            "proxy http://outro:p@ss:w0rd@proxy.local:3128/ e https://soutoken@host.local/x\n",
             "pasta /home/geraldo/Documentos sem segredo\n",
         );
 
@@ -131,6 +133,10 @@ mod tests {
             "4/0Ab_xyz",
             "GOCSPX",
             "usuario:senha",
+            "p@ss",
+            "w0rd",
+            "outro",
+            "soutoken",
         ] {
             assert!(!clean.contains(secret), "{secret} ficou:\n{clean}");
         }
@@ -141,6 +147,8 @@ mod tests {
         );
         assert!(clean.contains("grant_type=authorization_code"), "{clean}");
         assert!(clean.contains("socks5://***@10.0.0.1:1080"), "{clean}");
+        assert!(clean.contains("http://***@proxy.local:3128/"), "{clean}");
+        assert!(clean.contains("https://***@host.local/x"), "{clean}");
         assert!(
             clean.contains("/home/geraldo/Documentos sem segredo"),
             "{clean}"

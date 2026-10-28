@@ -1,7 +1,7 @@
 //! As pastas do computador ("Computadores"): o serviço guarda os pares no banco de cada conta,
 //! roda um laço por par enquanto a conta está conectada e cria as pastas de apoio no Drive.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -76,9 +76,12 @@ async fn pretty_hostname() -> Option<String> {
     .flatten()
 }
 
-/// O que o serviço guarda de cada conta: um laço por par.
+/// O que o serviço guarda de cada conta: um laço por par e os pares mudando de lugar.
 #[derive(Default)]
-pub(super) struct Runners(Mutex<RunnerMap>);
+pub(super) struct Runners {
+    running: Mutex<RunnerMap>,
+    moving: Mutex<HashSet<i64>>,
+}
 
 /// O que os pares de uma conta precisam: o e-mail (para os avisos), o motor, os laços que rodam e
 /// o cancelamento da conta.
@@ -91,11 +94,31 @@ pub(super) struct FolderAccount {
     pub mount: PathBuf,
 }
 
+/// Enquanto existe, o par consta como mudando de lugar (mesmo se a troca entrar em pânico).
+struct Moving {
+    runners: Arc<Runners>,
+    id: i64,
+}
+
+impl Drop for Moving {
+    fn drop(&mut self) {
+        crate::lock(&self.runners.moving).remove(&self.id);
+    }
+}
+
 type RunnerMap = HashMap<i64, (Arc<FolderSync>, CancellationToken, JoinHandle<()>)>;
 
 impl Runners {
     fn lock(&self) -> std::sync::MutexGuard<'_, RunnerMap> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner())
+        crate::lock(&self.running)
+    }
+
+    /// Marca o par como mudando de lugar até a guarda sair; nada se ele já estava.
+    fn begin_move(self: &Arc<Self>, id: i64) -> Option<Moving> {
+        crate::lock(&self.moving).insert(id).then(|| Moving {
+            runners: self.clone(),
+            id,
+        })
     }
 
     /// Pede ao laço do par para parar; ele termina a passada em andamento, e quem vai subir
@@ -220,7 +243,11 @@ impl Daemon {
             }
         });
         self.forward_folder_states(sync.clone(), stop.clone());
-        runners.lock().insert(id, (sync, stop, running));
+        // Um laço por par: um que ainda estivesse ali não pode seguir rodando sem dono.
+        if let Some((_, orphan, _)) = runners.lock().insert(id, (sync, stop, running)) {
+            tracing::warn!(par = id, "um laço já rodava neste par; parado");
+            orphan.cancel();
+        }
     }
 
     pub async fn local_folders(&self) -> Result<Vec<LocalFolder>, ServiceError> {
@@ -325,11 +352,15 @@ impl Daemon {
         self.folders_refused()?;
         let account = self.folder_account(account).await?;
         let local = self.validated(path, Some(id)).await?;
+        let Some(moving) = account.runners.begin_move(id) else {
+            return Err(ServiceError::Refused("moving".into()));
+        };
         let old = account.runners.stop(id);
         // A passada em andamento do laço antigo ainda grava o estado sincronizado do par: o lugar
         // novo (que zera esse estado) só entra quando ele termina, e a resposta não espera.
         let daemon = self.clone();
         tokio::spawn(async move {
+            let _moving = moving;
             if let Some(old) = old {
                 let _ = old.await;
             }

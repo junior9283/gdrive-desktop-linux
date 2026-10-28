@@ -3046,6 +3046,50 @@ async fn relocating_to_another_folder_merges_and_trashes_nothing() {
     );
 }
 
+/// Uma segunda troca de lugar da mesma pasta, antes de a primeira terminar, é recusada: senão
+/// dois laços rodavam no mesmo par.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn second_relocation_waits_for_the_first() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    let id = h
+        .proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+    let (first, second) = (local_folder(&h, "Primeira"), local_folder(&h, "Segunda"));
+    // O laço antigo fica preso num envio lento: a primeira troca espera por ele.
+    h.fake.inject(gdl_fake_drive::Fault::DelayUploads(
+        std::time::Duration::from_secs(2),
+    ));
+    std::fs::write(docs.join("b.txt"), b"dois").unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    h.proxy
+        .relocate_local_folder("", id, first.to_str().unwrap())
+        .await
+        .unwrap();
+    let err = h
+        .proxy
+        .relocate_local_folder("", id, second.to_str().unwrap())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, ServiceError::Refused(r) if r == "moving"),
+        "{err:?}"
+    );
+
+    h.fake.clear_faults();
+    wait_until("a.txt na primeira pasta nova", || {
+        first.join("a.txt").exists()
+    })
+    .await;
+    assert!(!second.join("a.txt").exists());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn missing_folder_is_announced() {
     let h = Harness::new().await;

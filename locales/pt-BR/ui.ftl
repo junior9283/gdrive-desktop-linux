@@ -395,6 +395,7 @@ folder-refused-folders-disabled = O administrador desativou a sincronização de
 folder-refused-devices-disabled = O administrador desativou o backup de dispositivos.
 folder-refused-mirror-disabled = O administrador desativou o espelhamento do Meu Drive.
 folder-refused-mirror-pending = Ainda há arquivos do Espelho sendo enviados. Tente de novo quando terminarem.
+folder-refused-moving = Esta pasta ainda está mudando de lugar. Tente de novo em instantes.
 pref-mirror-name = Meu Drive
 mirror-config-title = Espelhar os arquivos
 mirror-config-text = Uma cópia de todo o Meu Drive fica nesta pasta do computador, disponível mesmo sem internet. Os Drives compartilhados continuam na pasta do Google Drive.

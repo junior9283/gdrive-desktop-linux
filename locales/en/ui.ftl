@@ -395,6 +395,7 @@ folder-refused-folders-disabled = Your administrator turned off syncing folders 
 folder-refused-devices-disabled = Your administrator turned off device backup.
 folder-refused-mirror-disabled = Your administrator turned off mirroring My Drive.
 folder-refused-mirror-pending = Files in the mirror are still uploading. Try again when they finish.
+folder-refused-moving = This folder is still moving. Try again in a moment.
 pref-mirror-name = My Drive
 mirror-config-title = Mirror files
 mirror-config-text = A copy of all of My Drive stays in this folder on your computer, available even without internet. Shared drives stay in the Google Drive folder.

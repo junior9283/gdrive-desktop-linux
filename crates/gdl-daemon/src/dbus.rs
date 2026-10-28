@@ -5,7 +5,8 @@ use std::sync::Arc;
 use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
     AccountInfo, ActivityItem, DeviceItem, FolderCheck, FolderItem, LocalFolder, MenuEntry,
-    MirrorCheck, NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary, Pref,
+    MirrorCheck, NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary, PathStatus,
+    Pref,
     SearchResult, ServiceError, SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem,
     Versions,
 };
@@ -385,6 +386,32 @@ impl Service {
     /// Faz a ação do menu; devolve o texto a copiar (o link em `copy-link`), ou vazio.
     async fn menu_action(&self, action: &str, paths: Vec<String>) -> Result<String, ServiceError> {
         self.daemon.menu_action(action, &paths).await
+    }
+
+    async fn path_status(&self, path: &str) -> Result<PathStatus, ServiceError> {
+        self.daemon.path_status(path).await
+    }
+
+    async fn web_link_of_path(&self, path: &str) -> Result<String, ServiceError> {
+        self.daemon.web_link_of_path(path).await
+    }
+
+    async fn open_share(
+        &self,
+        account: &str,
+        item_id: &str,
+        email: &str,
+    ) -> Result<(), ServiceError> {
+        self.daemon.open_share(account, item_id, email).await
+    }
+
+    async fn move_to_drive(
+        &self,
+        account: &str,
+        path: &str,
+        drive_dir: &str,
+    ) -> Result<String, ServiceError> {
+        self.daemon.move_to_drive(account, path, drive_dir).await
     }
 
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.

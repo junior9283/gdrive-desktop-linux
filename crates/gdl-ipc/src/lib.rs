@@ -328,6 +328,17 @@ pub struct DeviceItem {
     pub busy: bool,
 }
 
+/// Resposta de `PathStatus`.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct PathStatus {
+    /// O e-mail da conta; vazio fora do Drive e das pastas sincronizadas.
+    pub account: String,
+    /// `offline`, `syncing`, `conflict`, `online` (só na nuvem) ou `outside`.
+    pub state: String,
+    /// O ID do item na montagem; vazio nas pastas do computador e fora.
+    pub item_id: String,
+}
+
 /// O que `CheckLocalFolder` acha de uma pasta antes de adicioná-la.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FolderCheck {
@@ -608,6 +619,21 @@ pub trait Service {
     fn folder_roots(&self) -> Result<Vec<String>, ServiceError>;
     /// Faz a ação do menu nos caminhos; devolve o texto a copiar (o link), ou vazio.
     fn menu_action(&self, action: &str, paths: &[&str]) -> Result<String, ServiceError>;
+    /// O estado de um caminho da montagem ou de uma pasta do computador (para o servidor MCP).
+    fn path_status(&self, path: &str) -> Result<PathStatus, ServiceError>;
+    /// O link da web do item da montagem em `path`.
+    fn web_link_of_path(&self, path: &str) -> Result<String, ServiceError>;
+    /// Abre a janela Compartilhar do item com `email` já digitado; não salva nada.
+    fn open_share(&self, account: &str, item_id: &str, email: &str) -> Result<(), ServiceError>;
+    /// Leva a pasta `path` para `drive_dir` no Meu Drive e deixa um link no lugar; a original vai
+    /// para a lixeira do sistema. Recusa com `Refused` (motivo de `CheckLocalFolder`,
+    /// `destination-missing`, `exists` ou `no-space`). Devolve o caminho novo.
+    fn move_to_drive(
+        &self,
+        account: &str,
+        path: &str,
+        drive_dir: &str,
+    ) -> Result<String, ServiceError>;
     /// `mode`: vazio, `finish`, `move` (para a pasta `dir`) ou `discard`.
     fn logout(&self, account: &str, mode: &str, dir: &str) -> Result<(), ServiceError>;
     /// Sai de todas as contas, com o mesmo `mode` e `dir` de `Logout`.

@@ -12,7 +12,7 @@ const GENERAL_ICONS = { restricted: 'lock', domain: 'domain', anyone: 'public' }
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta). `people`
 // e `general` são as partes redesenhadas a cada mudança (o que foi digitado em "Adicionar
 // pessoas" fica).
-const screen = { ctx: null, root: null, account: '', id: null, people: null, general: null };
+const screen = { ctx: null, root: null, account: '', id: null, email: '', people: null, general: null };
 
 export async function render(root, ctx) {
   Object.assign(screen, { ctx, root, ...itemArg(location.search) });
@@ -78,7 +78,8 @@ function roleSelect(label, value, extra = []) {
 // O campo de e-mails, o papel, o aviso por e-mail (com a mensagem) e o botão de enviar.
 function addPeople() {
   const { api, t } = screen.ctx;
-  const emails = el('input', { type: 'text', class: 'emails', placeholder: t('share-add-placeholder'), 'aria-label': t('share-add') });
+  // O e-mail que veio pedido (servidor MCP) fica digitado; quem envia é a pessoa.
+  const emails = el('input', { type: 'text', class: 'emails', value: screen.email, placeholder: t('share-add-placeholder'), 'aria-label': t('share-add') });
   const role = roleSelect(t('share-role'), 'reader');
   const notify = el('input', { type: 'checkbox', checked: true });
   const message = el('textarea', { class: 'message', rows: 3, placeholder: t('share-message') });

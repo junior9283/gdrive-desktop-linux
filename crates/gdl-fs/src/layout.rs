@@ -114,7 +114,7 @@ pub(crate) fn item_perm(item: &Item) -> u16 {
 
 /// `user.gdl.state`: `conflict`, `syncing` (edição local a enviar), `offline` (fixado ou só
 /// local) ou `cloud`.
-pub(crate) fn item_state(item: &Item) -> &'static str {
+pub fn item_state(item: &Item) -> &'static str {
     match item.local_state {
         LocalState::Conflict => "conflict",
         LocalState::Dirty | LocalState::Uploading => "syncing",

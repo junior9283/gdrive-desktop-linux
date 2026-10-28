@@ -47,6 +47,7 @@ required-features = ["testing"]
 
 [dev-dependencies]
 gdl-fake-drive.workspace = true
+gdl-mcp.workspace = true
 reqwest.workspace = true
 tempfile.workspace = true
 

@@ -136,6 +136,7 @@ struct Account {
 mod devices;
 mod diagnostics;
 mod folders;
+mod mcp;
 mod mirror;
 mod releases;
 mod sharing;

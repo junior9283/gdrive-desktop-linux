@@ -12,7 +12,15 @@ test('sem query é a principal', () => {
 });
 
 test('as telas de item levam a conta e o id', () => {
-  assert.deepEqual(itemArg('?screen=share&arg=ana%40example.com%2F1AbC'), { account: 'ana@example.com', id: '1AbC' });
-  assert.deepEqual(itemArg('?screen=versions&arg=1AbC'), { account: '', id: '1AbC' });
-  assert.deepEqual(itemArg('?screen=share'), { account: '', id: null });
+  assert.deepEqual(itemArg('?screen=share&arg=ana%40example.com%2F1AbC'), { account: 'ana@example.com', id: '1AbC', email: '' });
+  assert.deepEqual(itemArg('?screen=versions&arg=1AbC'), { account: '', id: '1AbC', email: '' });
+  assert.deepEqual(itemArg('?screen=share'), { account: '', id: null, email: '' });
+});
+
+test('Compartilhar pode vir com um e-mail já digitado', () => {
+  assert.deepEqual(itemArg('?screen=share&arg=ana%40example.com%2F1AbC%2Fbia%40example.com'), {
+    account: 'ana@example.com',
+    id: '1AbC',
+    email: 'bia@example.com',
+  });
 });

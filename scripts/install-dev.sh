@@ -31,10 +31,10 @@ case "$prefix" in
   *) prefix="$PWD/$prefix" ;;
 esac
 bin="$prefix/bin" share="$prefix/share"
-programs="gdrive-desktop-linuxd gdrive-desktop-linux gdrive-desktop-linux-tray gdrive-desktop-linux-ui"
+programs="gdrive-desktop-linuxd gdrive-desktop-linux gdrive-desktop-linux-tray gdrive-desktop-linux-ui gdrive-desktop-linux-mcp"
 
 if [ -z "$from" ] && ! $dry; then
-  (cd "$repo" && cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui --bins)
+  (cd "$repo" && cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui -p gdl-mcp --bins)
 fi
 from=${from:-$repo/target/release}
 

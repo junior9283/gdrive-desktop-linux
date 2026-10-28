@@ -49,8 +49,13 @@ pub fn check_folder(
         return Err(Refusal::Network);
     }
     std::fs::read_dir(&path).map_err(|_| Refusal::Unreadable)?;
+    Ok(measure(&path))
+}
+
+/// Quantos arquivos comuns há dentro de `path` e quanto somam (sem seguir links).
+pub fn measure(path: &Path) -> FolderInfo {
     let mut info = FolderInfo::default();
-    for entry in walkdir::WalkDir::new(&path)
+    for entry in walkdir::WalkDir::new(path)
         .min_depth(1)
         .into_iter()
         .flatten()
@@ -60,7 +65,7 @@ pub fn check_folder(
             info.size += entry.metadata().map_or(0, |m| m.len());
         }
     }
-    Ok(info)
+    info
 }
 
 /// `path` (canônico) é uma das pastas `taken`, está dentro de uma ou contém uma.

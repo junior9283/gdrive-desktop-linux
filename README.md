@@ -205,6 +205,24 @@ Também há uma CLI:
 | `menu-action <ação> <caminho>…` | faz uma ação do menu do botão direito (usado pelo COSMIC Files) |
 | `uninstall [--purge] [--yes]` | desinstala o app; `--purge` apaga também os dados deste computador (desconecte a conta antes) |
 
+**Servidor MCP:** o programa `gdrive-desktop-linux-mcp` deixa um assistente de IA compatível com
+o Model Context Protocol (Claude Desktop, Claude Code e outros) consultar e organizar o Drive pelo
+serviço do app, sem credencial própria: estado de sincronização de um caminho, link da web,
+pastas acompanhadas, abrir a janela Compartilhar com um e-mail já digitado (nada é compartilhado
+sem você confirmar) e adicionar uma pasta à sincronização — `backup` (cópia em "Computadores",
+a pasta fica onde está) ou `stream` (a pasta vai para o Meu Drive e um link fica no lugar; a
+original vai para a lixeira do sistema). Para registrar num cliente MCP:
+
+```json
+{
+  "mcpServers": {
+    "google-drive": { "command": "gdrive-desktop-linux-mcp" }
+  }
+}
+```
+
+No Claude Code: `claude mcp add google-drive -- gdrive-desktop-linux-mcp`.
+
 Limitações conhecidas:
 
 - **Vim e Neovim** (com o padrão `backupcopy=auto`) salvam renomeando o original e criando outro:

@@ -7,9 +7,15 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[[bin]]
+name = "gdrive-desktop-linux-mcp"
+path = "src/main.rs"
+
 [dependencies]
+gdl-ipc.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
+zbus.workspace = true
 
 [lints]
 workspace = true

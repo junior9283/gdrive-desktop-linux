@@ -423,21 +423,16 @@ impl Daemon {
     /// dentro `offline` se já sincronizado e `syncing` se não; fora das pastas, vazio.
     pub async fn folder_states(&self, paths: &[String]) -> Vec<String> {
         let pairs = self.all_pairs().await;
-        let state = |path: &str| {
-            let Some((engine, pair, rel)) = pairs.iter().find_map(|(engine, pair)| {
-                let rel = Path::new(path).strip_prefix(&pair.local).ok()?;
-                Some((engine, pair, rel.to_string_lossy()))
-            }) else {
-                return "";
-            };
-            match (rel.is_empty(), pair.state) {
-                (true, PairState::Active) => "offline",
-                (true, _) => "conflict",
-                _ if engine.store().is_synced(pair.id, &rel).unwrap_or(false) => "offline",
-                _ => "syncing",
-            }
-        };
-        paths.iter().map(|p| state(p).to_owned()).collect()
+        paths
+            .iter()
+            .map(|p| pair_state(&pairs, Path::new(p)).map_or("", |(_, s)| s).to_owned())
+            .collect()
+    }
+
+    /// O emblema de `path` numa pasta sincronizada e o motor da conta dela.
+    pub(super) async fn folder_state(&self, path: &Path) -> Option<(Arc<Engine>, &'static str)> {
+        let pairs = self.all_pairs().await;
+        pair_state(&pairs, path).map(|(engine, state)| (engine.clone(), state))
     }
 
     pub async fn folder_roots(&self) -> Vec<String> {
@@ -487,7 +482,7 @@ impl Daemon {
     }
 
     /// A pasta serve? Confere contra `taken` e devolve também o caminho canônico.
-    async fn check(
+    pub(super) async fn check(
         &self,
         path: &Path,
         except: Option<i64>,
@@ -661,6 +656,24 @@ fn remember(engine: &Engine, r: RemoteFile) -> Result<String, ServiceError> {
     gdl_engine::changes::apply_changes(engine.store(), vec![Change::Upsert(Box::new(r))])
         .map_err(failed)?;
     Ok(id)
+}
+
+/// O emblema de `path` (`FolderStates`) e o motor do par que o contém.
+fn pair_state<'a>(
+    pairs: &'a [(Arc<Engine>, Pair)],
+    path: &Path,
+) -> Option<(&'a Arc<Engine>, &'static str)> {
+    let (engine, pair, rel) = pairs.iter().find_map(|(engine, pair)| {
+        let rel = path.strip_prefix(&pair.local).ok()?;
+        Some((engine, pair, rel.to_string_lossy()))
+    })?;
+    let state = match (rel.is_empty(), pair.state) {
+        (true, PairState::Active) => "offline",
+        (true, _) => "conflict",
+        _ if engine.store().is_synced(pair.id, &rel).unwrap_or(false) => "offline",
+        _ => "syncing",
+    };
+    Some((engine, state))
 }
 
 pub(super) fn refusal_text(refusal: Refusal) -> &'static str {

@@ -27,7 +27,7 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo/Cargo.toml" | head -n 1)
 name=gdrive-desktop-linux
 
 if [ -z "$from" ]; then
-  (cd "$repo" && cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui --bins)
+  (cd "$repo" && cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui -p gdl-mcp --bins)
   from=$repo/target/release
 fi
 work=$(mktemp -d)

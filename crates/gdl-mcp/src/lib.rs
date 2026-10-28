@@ -2,6 +2,8 @@
 //! mensagem por linha, feito à mão sobre o `serde_json`. Responde a `initialize`, `ping`,
 //! `tools/list` e `tools/call`; as ferramentas vêm de quem implementa `Tools`.
 
+pub mod drive;
+
 use std::future::Future;
 
 use serde_json::{Value, json};

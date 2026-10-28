@@ -1076,7 +1076,10 @@ impl Filesystem for DriveFs {
 
     fn getxattr(&self, _req: &Request, ino: INodeNo, name: &OsStr, size: u32, reply: ReplyXattr) {
         let value = self.0.node(ino).and_then(|node| match node {
-            Node::Item(inode) => xattr_value(&self.0.item(inode)?, name).ok_or(Errno::NO_XATTR),
+            Node::Item(inode) => {
+                let item = self.0.item(inode)?;
+                xattr_value(&item, self.0.engine.store(), name).ok_or(Errno::NO_XATTR)
+            }
             _ => Err(Errno::NO_XATTR),
         });
         match value {

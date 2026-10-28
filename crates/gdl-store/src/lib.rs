@@ -195,6 +195,17 @@ impl Store {
              BEGIN
                -- Não `OR IGNORE`: num upsert, valeria a política de conflito do comando de fora.
                INSERT INTO temp.state_changes VALUES (NEW.id) ON CONFLICT DO NOTHING;
+             END;
+             -- O erro de envio também é estado (`has_upload_error`): entrar e sair da lista.
+             CREATE TEMP TRIGGER upload_error_set AFTER UPDATE OF error_category ON main.upload_queue
+             WHEN (OLD.error_category IS NULL) IS NOT (NEW.error_category IS NULL)
+             BEGIN
+               INSERT INTO temp.state_changes VALUES (NEW.item_id) ON CONFLICT DO NOTHING;
+             END;
+             CREATE TEMP TRIGGER upload_error_gone AFTER DELETE ON main.upload_queue
+             WHEN OLD.error_category IS NOT NULL
+             BEGIN
+               INSERT INTO temp.state_changes VALUES (OLD.item_id) ON CONFLICT DO NOTHING;
              END;",
         )?;
         Ok(Store {
@@ -451,6 +462,16 @@ impl Store {
             })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(errors)
+    }
+
+    /// O item tem envio com erro registrado: está em `job_errors` (mesmo critério, por item).
+    pub fn has_upload_error(&self, id: &ItemId) -> Result<bool> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT EXISTS (SELECT 1 FROM upload_queue \
+             WHERE item_id = ?1 AND error_category IS NOT NULL)",
+        )?;
+        Ok(stmt.query_row([&id.0], |r| r.get(0))?)
     }
 
     /// "Tentar de novo": os envios do item vão para agora, com as tentativas zeradas.
@@ -1330,6 +1351,46 @@ mod tests {
             store.take_state_changes().unwrap().is_empty(),
             "sem mudança de verdade, nada"
         );
+    }
+
+    /// O erro de envio entra no estado do item (emblema de erro): entrar e sair da lista de erros
+    /// é uma troca de estado, e só o erro conta.
+    #[test]
+    fn upload_errors_change_the_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store.upsert_item(&item("a", None)).unwrap();
+        let job = store
+            .enqueue(NewUploadJob {
+                item: id("a"),
+                kind: UploadKind::Update,
+                next_try_ms: 0,
+                file_id: None,
+            })
+            .unwrap();
+        let changed = |store: &Store| -> Vec<ItemId> {
+            let items = store.take_state_changes().unwrap();
+            items.into_iter().map(|i| i.id).collect()
+        };
+
+        store.retry_job(job, 10, None).unwrap();
+        assert!(changed(&store).is_empty(), "tentar de novo sem erro, nada");
+        assert!(!store.has_upload_error(&id("a")).unwrap());
+        store.retry_job(job, 20, Some(("quota", "cheio"))).unwrap();
+        assert_eq!(changed(&store), [id("a")]);
+        assert!(store.has_upload_error(&id("a")).unwrap());
+        store.retry_job(job, 30, Some(("quota", "cheio"))).unwrap();
+        assert!(changed(&store).is_empty(), "o mesmo erro de novo, nada");
+
+        store.retry_now(&id("a")).unwrap();
+        assert_eq!(changed(&store), [id("a")]);
+        assert!(!store.has_upload_error(&id("a")).unwrap());
+
+        store.retry_job(job, 40, Some(("quota", "cheio"))).unwrap();
+        changed(&store);
+        store.finish_job(job).unwrap();
+        assert_eq!(changed(&store), [id("a")], "o envio deu certo");
+        assert!(!store.has_upload_error(&id("a")).unwrap());
     }
 
     #[test]

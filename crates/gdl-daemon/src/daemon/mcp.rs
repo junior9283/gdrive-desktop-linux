@@ -19,7 +19,8 @@ impl Daemon {
     /// numa pasta do computador, o emblema dela; fora das duas, `outside` sem conta.
     pub async fn path_status(&self, path: &str) -> Result<PathStatus, ServiceError> {
         let (engine, state, item_id) = if let Ok((engine, id)) = self.item_at(path).await {
-            let state = match gdl_fs::item_state(&live_item(&engine, &id.0)?) {
+            let item = live_item(&engine, &id.0)?;
+            let state = match gdl_fs::item_state(&item, engine.store()).map_err(super::failed)? {
                 "cloud" => "online",
                 state => state,
             };

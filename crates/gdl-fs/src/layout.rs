@@ -12,12 +12,16 @@ use gdl_store::{DrivePath, DriveRoot, Inode, Item, ItemKind, LocalState, PinStat
 use crate::inodes::Node;
 
 /// Atributos estendidos somente leitura de cada item, com o valor de cada um.
-type XattrValue = fn(&Item) -> Option<String>;
+type XattrValue = fn(&Item, &Store) -> Option<String>;
 
 pub(crate) const XATTRS: [(&str, XattrValue); 3] = [
-    ("user.gdl.id", |item| Some(item.id.0.clone())),
-    ("user.gdl.state", |item| Some(item_state(item).into())),
-    ("user.gdl.web_url", web_url),
+    ("user.gdl.id", |item, _| Some(item.id.0.clone())),
+    ("user.gdl.state", |item, store| {
+        let state = item_state(item, store);
+        let state = state.inspect_err(|e| tracing::warn!(erro = %e, "estado do item"));
+        Some(state.ok()?.into())
+    }),
+    ("user.gdl.web_url", |item, _| web_url(item)),
 ];
 
 /// Nomes das pastas da raiz no idioma do sistema.
@@ -112,19 +116,20 @@ pub(crate) fn item_perm(item: &Item) -> u16 {
     }
 }
 
-/// `user.gdl.state`: `conflict`, `syncing` (edição local a enviar), `offline` (fixado ou só
-/// local) ou `cloud`.
-pub fn item_state(item: &Item) -> &'static str {
-    match item.local_state {
+/// `user.gdl.state`: `conflict`, `error` (na lista de erros), `syncing` (edição local a enviar),
+/// `offline` (fixado ou só local) ou `cloud`.
+pub fn item_state(item: &Item, store: &Store) -> gdl_store::Result<&'static str> {
+    Ok(match item.local_state {
         LocalState::Conflict => "conflict",
+        _ if store.has_upload_error(&item.id)? => "error",
         LocalState::Dirty | LocalState::Uploading => "syncing",
         LocalState::LocalOnly => "offline",
         LocalState::Clean if item.pin != PinState::None => "offline",
         LocalState::Clean => "cloud",
-    }
+    })
 }
 
-pub(crate) fn xattr_value(item: &Item, name: &OsStr) -> Option<String> {
+pub(crate) fn xattr_value(item: &Item, store: &Store, name: &OsStr) -> Option<String> {
     let (_, value) = XATTRS.iter().find(|(n, _)| OsStr::new(n) == name)?;
-    value(item)
+    value(item, store)
 }

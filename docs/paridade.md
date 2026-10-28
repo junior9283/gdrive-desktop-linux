@@ -248,7 +248,7 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Ícones de status (KOverlayIconPlugin) | FEITO | `integrations/dolphin/gdriveoverlay.cpp` (emblemas `gdl-emblem-{cloud,offline,syncing,conflict}` pelo xattr `user.gdl.state`, atualizados pelo sinal D-Bus `StatesChanged`). Outros gerenciadores seguem sem ícones. |
+| Ícones de status (KOverlayIconPlugin) | FEITO | `integrations/dolphin/gdriveoverlay.cpp` (emblemas `gdl-emblem-{cloud,offline,syncing,conflict,error}` pelo xattr `user.gdl.state`, atualizados pelo sinal D-Bus `StatesChanged`). Outros gerenciadores seguem sem ícones. |
 | Abrir com Drive web | FEITO | `Action::OpenWeb`, `crates/gdl-daemon/src/menu.rs:43`. |
 | Abrir com Docs / Planilhas / Apresentações | FEITO | `Action::OpenDocs/OpenSheets/OpenSlides` para arquivos do Office (`menu.rs`, `gdl-engine/src/gdocs.rs` `OfficeEditor`). |
 | Compartilhar | FEITO | `Action::Share` abre a janela `share:<id>` (`ui/screens/share.js`). |

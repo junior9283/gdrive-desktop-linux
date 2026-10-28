@@ -778,3 +778,40 @@ async fn drive_trash_stays_read_only() {
     assert_eq!(std::fs::read(trash.join("lixo.txt")).unwrap(), b"velho");
     assert_eq!(names(&m.drive()), ["vivo.txt"]);
 }
+
+/// Envio que falhou (aqui, armazenamento cheio) aparece como `error` no estado do arquivo, que é
+/// o que o Dolphin usa para o emblema.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn failed_upload_shows_error_state() {
+    let m = Mounted::new(FakeDrive::start().await).await;
+    m.fake.inject(Fault::QuotaExceeded { times: 1_000 });
+    m.run_engine();
+    let path = m.drive().join("cheio.txt");
+    std::fs::write(&path, b"sem espaco").unwrap();
+
+    wait_until("estado de erro", || {
+        xattr(&path, "user.gdl.state") == "error"
+    });
+}
+
+/// O estado de erro some quando o erro sai da lista: "Tentar de novo" e o envio dá certo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn error_state_clears_after_retry() {
+    let m = Mounted::new(FakeDrive::start().await).await;
+    m.fake.inject(Fault::QuotaExceeded { times: 1_000 });
+    m.run_engine();
+    let path = m.drive().join("cheio.txt");
+    std::fs::write(&path, b"sem espaco").unwrap();
+    wait_until("estado de erro", || {
+        xattr(&path, "user.gdl.state") == "error"
+    });
+    let id = ItemId(xattr(&path, "user.gdl.id"));
+
+    m.fake.clear_faults();
+    m.engine.retry(&id).unwrap();
+
+    wait_until("erro resolvido", || {
+        xattr(&path, "user.gdl.state") != "error"
+    });
+    assert!(m.engine.errors().unwrap().is_empty());
+}

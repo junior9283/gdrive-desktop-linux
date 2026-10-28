@@ -65,9 +65,11 @@ mkdir -p "$work/fora" && touch "$work/fora/b.txt"
 state() { python3 -I -c 'import os, sys; os.setxattr(sys.argv[1], "user.gdl.state", sys.argv[2].encode())' "$@"; }
 state "$d/a.txt" offline
 state "$d/pasta" cloud
+touch "$d/falhou.txt" && state "$d/falhou.txt" error
 expect "um emblema para cada estado" "a.txt: gdl-emblem-offline
 pasta: gdl-emblem-cloud
-b.txt: " "$("$overlay" "$d/a.txt" "$d/pasta" "$work/fora/b.txt")"
+falhou.txt: gdl-emblem-error
+b.txt: " "$("$overlay" "$d/a.txt" "$d/pasta" "$d/falhou.txt" "$work/fora/b.txt")"
 expect "pasta sincronizada: o estado vem do serviço, sem esperar" "Documentos: 
 c.txt: 
 mudou Documentos: gdl-emblem-offline

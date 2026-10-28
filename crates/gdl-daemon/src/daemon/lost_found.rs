@@ -25,14 +25,8 @@ impl Daemon {
             .get(KeptFolder::LostAndFound)
             .dir()
             .to_path_buf();
-        let paths = &self.config.paths;
-        let mut forbidden = self.mount_points().await;
-        forbidden.extend([
-            paths.config_dir.clone(),
-            paths.data_dir.clone(),
-            paths.state_dir.clone(),
-            kept.clone(),
-        ]);
+        let mut forbidden = self.app_places().await;
+        forbidden.push(kept.clone());
         let refuse = ServiceError::InvalidArgs(dest.to_owned());
         let dest = PathBuf::from(dest);
         // Tudo que toca o disco fica fora da thread assíncrona.

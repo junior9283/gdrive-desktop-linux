@@ -268,6 +268,22 @@ impl DriveFs {
     pub fn listings(&self) -> usize {
         self.0.listings.load(Ordering::Relaxed)
     }
+
+    /// Os arquivos abertos nesta montagem, para olhar de fora depois de montada.
+    pub fn open_files(&self) -> OpenFiles {
+        OpenFiles(Arc::downgrade(&self.0))
+    }
+}
+
+/// Os arquivos abertos numa montagem, sem segurá-la viva: desmontada de vez, são zero. Uma
+/// montagem desfeita com arquivos ainda abertos continua atendendo esses arquivos até fecharem.
+#[derive(Clone)]
+pub struct OpenFiles(std::sync::Weak<Inner>);
+
+impl OpenFiles {
+    pub fn count(&self) -> usize {
+        self.0.upgrade().map_or(0, |inner| lock(&inner.files).len())
+    }
 }
 
 impl Inner {

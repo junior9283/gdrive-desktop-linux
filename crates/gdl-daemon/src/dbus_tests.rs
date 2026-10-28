@@ -1040,6 +1040,33 @@ async fn cache_moves_without_restart() {
     assert_eq!(notes[0].kind, "cache-moved", "{notes:?}");
 }
 
+/// Bug (revisão da 1.0): mudar o cache com um arquivo aberto na montagem o tirava de baixo do
+/// editor, e as gravações seguintes se perdiam. Com algo aberto, nada muda agora: vale ao
+/// reiniciar, como antes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cache_change_waits_for_open_files() {
+    let h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "aberto.txt", b"antes".to_vec());
+    h.logged_in().await;
+    let path = h.drive().join("aberto.txt");
+    let open = blocking(move || std::fs::OpenOptions::new().append(true).open(path).unwrap()).await;
+    let old_cache = h.daemon.engine().await.unwrap().cache().dir().to_path_buf();
+    let value = serde_json::to_string(&h.home.join("outro disco").display().to_string()).unwrap();
+
+    let restart = h
+        .proxy
+        .set_preferences(&[("ContentCachePath", &value)])
+        .await
+        .unwrap();
+
+    assert!(restart, "com arquivo aberto, vale ao reiniciar");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let engine = h.daemon.engine().await.unwrap();
+    assert_eq!(engine.cache().dir(), old_cache, "o cache não saiu do lugar");
+    drop(open);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn metered_connection_pauses_and_resumes() {
     let h = Harness::new().await;
@@ -3575,6 +3602,17 @@ async fn mount_point_per_account() {
     let chosen = h.home.join("Drive da Ana");
     let refused = h.proxy.set_mount_point(ANA, "relativo").await.unwrap_err();
     assert_eq!(refused.short_name(), "InvalidArgs");
+    let inside = first.join("Meu Drive/Ana");
+    let refused = h
+        .proxy
+        .set_mount_point(ANA, inside.to_str().unwrap())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused.short_name(),
+        "InvalidArgs",
+        "dentro da montagem da outra conta"
+    );
 
     h.proxy
         .set_mount_point(ANA, chosen.to_str().unwrap())

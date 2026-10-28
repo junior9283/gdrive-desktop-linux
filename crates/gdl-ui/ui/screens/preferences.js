@@ -351,9 +351,10 @@ function driveTab() {
       })),
     el('h2', {}, t('pref-drive-folder')),
     el('p', { class: 'path drive-folder' }, drive.mirror || form.mount),
-    el('button', { class: 'tonal', onclick: () => attempt(api.openMount()) }, t('pref-open-folder')),
-    mirrored || form.managed.has('DefaultMountPoint') ? []
-      : el('button', { class: 'text change-mount', onclick: pickDir(changeMount) }, t('pref-change')),
+    el('div', { class: 'row-buttons' },
+      el('button', { class: 'tonal', onclick: () => attempt(api.openMount()) }, t('pref-open-folder')),
+      mirrored || form.managed.has('DefaultMountPoint') ? []
+        : el('button', { class: 'text change-mount', onclick: pickDir(changeMount) }, t('pref-change'))),
     el('button', { class: 'tonal manage-shared-drives', onclick: () => api.openScreen('shared-drives', currentAccount()) },
       t('pref-shared-drives')),
   ];

@@ -62,6 +62,8 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// ao lado da pasta preferida (`<preferida> (<e-mail>)`) leva `\tbeside` depois do e-mail.
 const ACCOUNTS: &str = "accounts";
 const BESIDE: &str = "beside";
+/// Quanto a reabertura das contas espera as tarefas dos motores antigos terminarem.
+const ENGINE_STOP_LIMIT: Duration = Duration::from_secs(10);
 /// Chave no banco da conta com a pasta da montagem escolhida em "Alterar" (vazia: o padrão).
 const MOUNT_POINT: &str = "mount-point";
 /// Quantas contas ficam conectadas ao mesmo tempo.
@@ -132,6 +134,8 @@ struct Account {
     shutdown: CancellationToken,
     /// As pastas do computador da conta, cada uma com seu laço.
     folders: Arc<folders::Runners>,
+    /// Os arquivos abertos na montagem, que continua atendendo-os depois de desmontada.
+    open_files: gdl_fs::OpenFiles,
     _session: fuser::BackgroundSession,
     _stop: DropGuard,
 }
@@ -540,8 +544,8 @@ impl Daemon {
         let cache = self.prefs().content_cache_path.clone();
         set_user_preferences(&self.config.paths, &parsed).map_err(config_error)?;
         self.preferences_saved().await?;
-        self.reopen_if_cache_moved(cache);
-        Ok(parsed.iter().any(|(key, _)| needs_restart(key)))
+        let deferred = self.reopen_if_cache_moved(cache).await;
+        Ok(deferred || parsed.iter().any(|(key, _)| needs_restart(key)))
     }
 
     pub async fn reset_preferences(self: &Arc<Self>) -> Result<(), ServiceError> {
@@ -549,26 +553,63 @@ impl Daemon {
         let cache = self.prefs().content_cache_path.clone();
         reset_user_preferences(&self.config.paths).map_err(failed)?;
         self.preferences_saved().await?;
-        self.reopen_if_cache_moved(cache);
+        self.reopen_if_cache_moved(cache).await;
         Ok(())
     }
 
     /// `ContentCachePath` mudou (era `before`): sem reiniciar o serviço, para as contas, muda o
-    /// cache de lugar (ver `open_engine`) e as reabre, em segundo plano.
-    fn reopen_if_cache_moved(self: &Arc<Self>, before: Option<PathBuf>) {
+    /// cache de lugar (ver `open_engine`) e as reabre, em segundo plano. Com algum arquivo aberto
+    /// numa montagem, não mexe em nada e devolve `true`: vale ao reiniciar, como antes (mudar o
+    /// cache debaixo de um editor perderia as últimas gravações).
+    async fn reopen_if_cache_moved(self: &Arc<Self>, before: Option<PathBuf>) -> bool {
         if self.prefs().content_cache_path == before {
-            return;
+            return false;
         }
-        let daemon = self.clone();
-        tokio::spawn(async move { daemon.restart_accounts().await });
+        let busy = self
+            .accounts
+            .lock()
+            .await
+            .iter()
+            .any(|a| a.open_files.count() > 0);
+        if !busy {
+            let daemon = self.clone();
+            tokio::spawn(async move { daemon.restart_accounts().await });
+        }
+        busy
     }
 
     /// Para todas as contas e as reabre com as preferências de agora, sem reiniciar o serviço;
-    /// uma reabertura espera a outra terminar.
+    /// uma reabertura espera a outra terminar, e um login espera a reabertura. Antes de reabrir,
+    /// espera fechar o que ficou aberto nas montagens desfeitas e as tarefas dos motores antigos
+    /// terminarem (com limite: uma que não termina vai para o log).
     async fn restart_accounts(self: &Arc<Self>) {
         let _reopening = self.reopening.lock().await;
         self.resuming.store(true, Ordering::Relaxed);
+        let old: Vec<_> = self
+            .accounts
+            .lock()
+            .await
+            .iter()
+            .map(|a| (a.open_files.clone(), Arc::downgrade(&a.engine)))
+            .collect();
         self.stop_all_accounts().await;
+        // Sem limite de propósito: reabrir com um arquivo aberto na montagem antiga perderia o
+        // que for gravado nele (quem chama já recusa quando há arquivo aberto; aqui só sobra
+        // um aberto no meio-tempo, e o editor fechá-lo libera a espera).
+        if old.iter().any(|(files, _)| files.count() > 0) {
+            tracing::info!("esperando fechar os arquivos abertos nas montagens antigas");
+        }
+        while old.iter().any(|(files, _)| files.count() > 0) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let deadline = tokio::time::Instant::now() + ENGINE_STOP_LIMIT;
+        while old.iter().any(|(_, engine)| engine.strong_count() > 0) {
+            if tokio::time::Instant::now() > deadline {
+                tracing::warn!("um motor antigo não terminou; reabrindo assim mesmo");
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
         self.not_started().clear();
         if let Err(e) = self.resume_saved_accounts().await {
             tracing::warn!(erro = %e, "não deu para reabrir as contas");
@@ -1134,6 +1175,8 @@ impl Daemon {
             tracing::warn!(erro = %e, "o login não deu certo");
             (email.clone(), "failed".to_owned())
         };
+        // Com as contas sendo reabertas, a lista está vazia: espera, para não montar duas vezes.
+        let _reopening = self.reopening.lock().await;
         let (connected, already) = {
             let accounts = self.accounts.lock().await;
             (accounts.len(), accounts.iter().any(|a| a.email == email))
@@ -1296,6 +1339,7 @@ impl Daemon {
             gid,
             mount_point.clone(),
         );
+        let open_files = fs.open_files();
         let session = gdl_fs::mount(fs, &mount_point).map_err(failed)?;
 
         // Daqui em diante nada falha: o motor só roda com a conta guardada em `account`.
@@ -1327,6 +1371,7 @@ impl Daemon {
             folders,
             _stop: shutdown.clone().drop_guard(),
             shutdown,
+            open_files,
             _session: session,
         };
         Ok((account, moved))
@@ -1488,6 +1533,18 @@ impl Daemon {
     async fn mount_points(&self) -> Vec<PathBuf> {
         let accounts = self.accounts.lock().await;
         accounts.iter().map(|a| a.mount_point.clone()).collect()
+    }
+
+    /// As montagens e as pastas do próprio app: lugares onde o usuário não pode pôr nada.
+    async fn app_places(&self) -> Vec<PathBuf> {
+        let paths = &self.config.paths;
+        let mut places = self.mount_points().await;
+        places.extend([
+            paths.config_dir.clone(),
+            paths.data_dir.clone(),
+            paths.state_dir.clone(),
+        ]);
+        places
     }
 
     fn not_logged_in(&self) -> ServiceError {
@@ -1665,6 +1722,16 @@ impl Daemon {
         }
         if !path.is_empty() && !Path::new(path).is_absolute() {
             return Err(ServiceError::InvalidArgs("not-absolute".into()));
+        }
+        // Dentro de uma montagem, criar a pasta criaria uma pasta no Drive.
+        if !path.is_empty()
+            && self
+                .app_places()
+                .await
+                .iter()
+                .any(|f| Path::new(path).starts_with(f))
+        {
+            return Err(ServiceError::InvalidArgs("inside-app-folder".into()));
         }
         let engine = self.account_engine(account).await?;
         engine.store().kv_set(MOUNT_POINT, path).map_err(failed)

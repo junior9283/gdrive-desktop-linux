@@ -582,13 +582,21 @@ impl BlockCache {
         Ok(())
     }
 
-    /// Libera o item se ninguém o estiver usando agora. Devolve se liberou.
+    /// Libera o item se ninguém o estiver usando agora. Devolve se liberou. Quem chama escolhe
+    /// pelo banco antes da trava; com ela na mão, o item é conferido de novo (pode ter sido aberto
+    /// para gravação ou fixado nesse meio-tempo).
     async fn try_evict(&self, id: &ItemId) -> Result<bool> {
         let lock = self.item_lock(id);
         let Ok(_guard) = lock.try_lock() else {
             return Ok(false);
         };
-        if self.items().get(id).is_some_and(|s| !s.fetching.is_empty()) {
+        if self.items().get(id).is_some_and(|s| !s.fetching.is_empty())
+            || self
+                .0
+                .store
+                .evictable_among(std::slice::from_ref(id))?
+                .is_empty()
+        {
             return Ok(false);
         }
         self.drop_content(id).await?;
@@ -982,6 +990,25 @@ mod tests {
         assert!(!s.cache.local_path(&ids[0]).exists());
         assert!(s.cache.local_path(&ids[2]).exists());
         assert_eq!(s.cache.evict_if_needed().await.unwrap(), 0);
+    }
+
+    /// Bug (revisão da 1.0): "Somente on-line" e o despejo escolhem os itens antes de pegar a
+    /// trava de cada um; um arquivo aberto para gravação nesse meio-tempo (já `Dirty`) perdia o
+    /// conteúdo. Com a trava na mão, o estado é conferido de novo.
+    #[tokio::test]
+    async fn evicting_rechecks_the_item_under_its_lock() {
+        let (s, ids) = setup(&[("aberto.txt", MIB)], None).await;
+        s.cache.ensure_full(&ids[0]).await.unwrap();
+        let store = &s.env.store;
+        let mut opened = store.get(&ids[0]).unwrap().unwrap();
+        opened.local_state = LocalState::Dirty;
+        store.upsert_items(&[opened]).unwrap();
+
+        assert!(!s.cache.try_evict(&ids[0]).await.unwrap());
+        assert!(
+            s.cache.local_path(&ids[0]).exists(),
+            "a edição continua no cache"
+        );
     }
 
     /// Espaço livre que só volta quando o arquivo dado sai do disco.

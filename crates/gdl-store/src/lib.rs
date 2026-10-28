@@ -601,6 +601,8 @@ impl Store {
             "UPDATE ranges SET item_id = ?2 WHERE item_id = ?1",
             "UPDATE access SET item_id = ?2 WHERE item_id = ?1",
             "UPDATE upload_queue SET item_id = ?2 WHERE item_id = ?1",
+            // A mudança de estado ainda não recolhida vai junto (o ID velho não acha mais item).
+            "UPDATE OR REPLACE temp.state_changes SET id = ?2 WHERE id = ?1",
         ] {
             tx.execute(sql, [&old.0, &new.0])?;
         }
@@ -2091,6 +2093,39 @@ mod tests {
         assert_eq!(store.get(&id("real")).unwrap().unwrap().inode, inode);
         assert!(store.by_inode(copy).unwrap().is_none());
         assert_eq!(store.children(&id("real")).unwrap().len(), 1);
+    }
+
+    /// A mudança de estado ainda não recolhida acompanha o item quando ele ganha o ID do Drive:
+    /// sem isso, ela ficava presa no ID temporário, que não acha mais item.
+    #[test]
+    fn replace_id_carries_the_pending_state_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        store.upsert_item(&item("local:1", Some("root"))).unwrap();
+        let job = store
+            .enqueue(NewUploadJob {
+                item: id("local:1"),
+                kind: UploadKind::Create,
+                next_try_ms: 0,
+                file_id: None,
+            })
+            .unwrap();
+        store.retry_job(job, 10, Some(("quota", "cheio"))).unwrap();
+        // A consulta de mudanças já trouxe o item real, com mudança pendente também.
+        store.upsert_item(&item("real", Some("root"))).unwrap();
+        store
+            .set_local_state(&id("real"), LocalState::Dirty)
+            .unwrap();
+
+        store.replace_id(&id("local:1"), &id("real")).unwrap();
+
+        let changed: Vec<_> = store
+            .take_state_changes()
+            .unwrap()
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+        assert_eq!(changed, [id("real")]);
     }
 
     #[test]

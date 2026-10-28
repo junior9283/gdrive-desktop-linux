@@ -443,7 +443,7 @@ impl FakeDrive {
 
     /// Emite um código de autorização ligado ao `code_challenge` (S256), como faria a tela de consentimento.
     pub fn issue_code(&self, code_challenge: &str) -> String {
-        self.shared.state().issue_code(code_challenge)
+        self.shared.state().issue_code(code_challenge, None)
     }
 
     /// Validade, em segundos, dos próximos tokens de acesso emitidos.

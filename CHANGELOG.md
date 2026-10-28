@@ -36,6 +36,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   `download-limit`, `folder-too-deep` e `shared-drive-full`; `LoginFinished` com os motivos
   `blocked-by-organization` e `account-disabled`.
 - O banco ganha a coluna `owned_by_me` (migração automática).
+- Ao entrar de novo numa conta, a página de login do Google já mostra essa conta (`login_hint`).
 
 ## [0.10.0] - 2026-10-27
 

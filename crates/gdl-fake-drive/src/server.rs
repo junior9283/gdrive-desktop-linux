@@ -734,7 +734,9 @@ async fn authorize(State(shared): Shr, Query(params): Params) -> Response {
     let Ok(mut target) = url::Url::parse(redirect) else {
         return oauth_error("invalid_request");
     };
-    let code = shared.state().issue_code(challenge);
+    let code = shared
+        .state()
+        .issue_code(challenge, params.get("login_hint").map(String::as_str));
     target.query_pairs_mut().append_pair("code", &code);
     if let Some(state) = params.get("state") {
         target.query_pairs_mut().append_pair("state", state);

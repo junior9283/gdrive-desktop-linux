@@ -716,10 +716,18 @@ impl State {
         }
     }
 
-    /// Código para a conta do próximo login (`next_login`, que vale uma vez) ou a principal.
-    pub(crate) fn issue_code(&mut self, challenge: &str) -> String {
+    /// Código para a conta escolhida no próximo login (`next_login`, que vale uma vez), a do
+    /// `hint` (se existe; como no Google, é só uma sugestão) ou a principal.
+    pub(crate) fn issue_code(&mut self, challenge: &str, hint: Option<&str>) -> String {
         let code = random_id(32);
-        let account = self.next_login.take().unwrap_or_else(|| self.email.clone());
+        let account = self
+            .next_login
+            .take()
+            .or_else(|| {
+                hint.filter(|h| self.accounts.contains_key(*h))
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| self.email.clone());
         self.codes.insert(code.clone(), (challenge.into(), account));
         code
     }

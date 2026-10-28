@@ -789,7 +789,7 @@ async fn errors_screen_points_to_the_other_account() {
     let service = service().await;
     let _cleanup = SecondAccount;
     let url = service
-        .begin_login("id-de-teste", "segredo", "")
+        .begin_login("id-de-teste", "segredo", ANA)
         .await
         .unwrap();
     reqwest::get(url).await.unwrap();

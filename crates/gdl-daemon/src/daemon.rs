@@ -1045,7 +1045,7 @@ impl Daemon {
         let flow = LoginFlow::start(creds.clone(), self.config.oauth.clone())
             .await
             .map_err(failed)?;
-        let url = flow.auth_url().to_string();
+        let url = flow.auth_url(&expected).to_string();
         self.open(url.clone());
         let daemon = self.clone();
         let task = tokio::spawn(async move {

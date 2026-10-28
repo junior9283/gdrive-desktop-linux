@@ -156,7 +156,7 @@ struct Callback {
     i18n: I18n,
 }
 
-/// Login no navegador: abre `auth_url()` e espera o Google redirecionar para o loopback.
+/// Login no navegador: abre `auth_url("")` e espera o Google redirecionar para o loopback.
 pub struct LoginFlow {
     creds: ClientCredentials,
     endpoints: OAuthEndpoints,
@@ -208,8 +208,9 @@ impl LoginFlow {
         })
     }
 
-    /// Endereço a abrir no navegador.
-    pub fn auth_url(&self) -> Url {
+    /// Endereço a abrir no navegador, já apontando a conta `email` (vazio: nenhuma) na escolha de
+    /// conta do Google.
+    pub fn auth_url(&self, email: &str) -> Url {
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(self.verifier.as_bytes()));
         let mut url = self.endpoints.auth.clone();
         url.query_pairs_mut()
@@ -222,6 +223,9 @@ impl LoginFlow {
             .append_pair("state", &self.state)
             .append_pair("code_challenge", &challenge)
             .append_pair("code_challenge_method", "S256");
+        if !email.is_empty() {
+            url.query_pairs_mut().append_pair("login_hint", email);
+        }
         url
     }
 
@@ -467,7 +471,7 @@ mod tests {
 
     /// Faz o papel do navegador: abre a URL de autorização e segue o redirecionamento ao loopback.
     async fn approve_in_browser(flow: &LoginFlow) -> reqwest::Response {
-        reqwest::get(flow.auth_url()).await.unwrap()
+        reqwest::get(flow.auth_url("")).await.unwrap()
     }
 
     async fn login(fake: &FakeDrive) -> TokenSet {
@@ -480,7 +484,7 @@ mod tests {
     async fn auth_url_asks_for_offline_drive_access_with_pkce() {
         let fake = FakeDrive::start().await;
         let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
-        let url = flow.auth_url();
+        let url = flow.auth_url("");
         assert_eq!(param(&url, "access_type").as_deref(), Some("offline"));
         assert_eq!(param(&url, "prompt").as_deref(), Some("consent"));
         assert_eq!(param(&url, "response_type").as_deref(), Some("code"));
@@ -501,6 +505,31 @@ mod tests {
                 .starts_with("http://127.0.0.1:")
         );
         assert!(param(&url, "code_challenge").is_some_and(|c| c.len() == 43));
+    }
+
+    #[tokio::test]
+    async fn auth_url_hints_the_expected_account() {
+        let fake = FakeDrive::start().await;
+        let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
+        let hinted = flow.auth_url("ana@example.com");
+        assert_eq!(
+            param(&hinted, "login_hint").as_deref(),
+            Some("ana@example.com")
+        );
+        assert_eq!(param(&flow.auth_url(""), "login_hint"), None);
+    }
+
+    // Como o Google, o Drive simulado entra na conta do `login_hint` quando a conhece.
+    #[tokio::test]
+    async fn login_hint_picks_the_account() {
+        let fake = FakeDrive::start().await;
+        fake.add_account("ana@example.com");
+        let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
+        reqwest::get(flow.auth_url("ana@example.com"))
+            .await
+            .unwrap();
+        let tokens = flow.wait(Duration::from_secs(5)).await.unwrap();
+        assert_eq!(tokens.email, "ana@example.com");
     }
 
     #[tokio::test]
@@ -525,7 +554,7 @@ mod tests {
     async fn wrong_state_is_rejected_without_ending_the_login() {
         let fake = FakeDrive::start().await;
         let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
-        let redirect: Url = param(&flow.auth_url(), "redirect_uri")
+        let redirect: Url = param(&flow.auth_url(""), "redirect_uri")
             .unwrap()
             .parse()
             .unwrap();
@@ -545,7 +574,7 @@ mod tests {
     async fn user_denial_is_reported() {
         let fake = FakeDrive::start().await;
         let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
-        let url = flow.auth_url();
+        let url = flow.auth_url("");
         let redirect = param(&url, "redirect_uri").unwrap();
         let state = param(&url, "state").unwrap();
         reqwest::get(format!("{redirect}?error=access_denied&state={state}"))
@@ -562,7 +591,7 @@ mod tests {
         for error in ["admin_policy_enforced", "org_internal"] {
             let fake = FakeDrive::start().await;
             let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
-            let url = flow.auth_url();
+            let url = flow.auth_url("");
             let redirect = param(&url, "redirect_uri").unwrap();
             let state = param(&url, "state").unwrap();
             reqwest::get(format!("{redirect}?error={error}&state={state}"))

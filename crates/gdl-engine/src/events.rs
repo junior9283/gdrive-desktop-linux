@@ -121,6 +121,17 @@ pub enum EngineEvent {
     MovedToSharedDrive {
         name: String,
     },
+    /// Um arquivo do usuário foi movido para uma pasta do Meu Drive que é de outra pessoa: quem
+    /// tem acesso a ela passa a ver o arquivo.
+    MovedToSharedFolder {
+        name: String,
+        folder: String,
+    },
+    /// Um Drive compartilhado teve mais de 1 000 mudanças numa consulta: a sincronização dele
+    /// pode demorar (no máximo um aviso por drive a cada 24 h).
+    BusySharedDrive {
+        name: String,
+    },
     /// Itens do banco mudaram pelo Drive (consulta de mudanças): as pastas sincronizadas que os
     /// contêm comparam de novo.
     ItemsChanged {

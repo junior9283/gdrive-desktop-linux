@@ -458,6 +458,7 @@ mod tests {
             created_ms: 0,
             trashed: false,
             can_edit: true,
+            owned_by_me: true,
             local_state: LocalState::Clean,
             pin: PinState::None,
         }

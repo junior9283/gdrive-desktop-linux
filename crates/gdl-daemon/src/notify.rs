@@ -38,9 +38,11 @@ pub const SEND_CRASH_REPORT: &str = "send-crash-report";
 
 /// Os avisos que o usuário pode desligar (Preferências > Notificações); os outros avisam de
 /// algo que ele precisa saber e sempre aparecem.
-pub const OPTIONAL_KINDS: [&str; 9] = [
+pub const OPTIONAL_KINDS: &[&str] = &[
     "copied-as-shortcut",
     "moved-to-shared-drive",
+    "moved-to-shared-folder",
+    "busy-shared-drive",
     "mount-moved",
     "resume-syncing",
     "offline",
@@ -199,6 +201,22 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
             "notify-moved-shared-title",
             i18n.tr("notify-moved-shared-body", &[("name", name)]),
         ),
+        EngineEvent::MovedToSharedFolder { name, folder } => note(
+            "moved-to-shared-folder",
+            "notify-moved-folder-title",
+            i18n.tr(
+                "notify-moved-folder-body",
+                &[("name", name), ("folder", folder)],
+            ),
+        ),
+        EngineEvent::BusySharedDrive { name } => Notification {
+            replaces_key: Some(format!("busy-shared-drive:{name}")),
+            ..note(
+                "busy-shared-drive",
+                "notify-busy-drive-title",
+                i18n.tr("notify-busy-drive-body", &[("name", name)]),
+            )
+        },
         EngineEvent::FolderMoveUnsupported { name } => note(
             "folder-move-unsupported",
             "notify-folder-move-title",

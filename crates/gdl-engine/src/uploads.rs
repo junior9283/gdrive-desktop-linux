@@ -180,6 +180,7 @@ pub fn create_local_item(
         created_ms: now,
         trashed: false,
         can_edit: true,
+        owned_by_me: true,
         local_state: if is_local_only(name) {
             LocalState::LocalOnly
         } else {

@@ -214,6 +214,16 @@ impl FakeDrive {
         self.shared.origin.join("releases/latest").unwrap()
     }
 
+    /// Passa o item para `email`, como se outra pessoa o tivesse criado.
+    pub fn set_owner(&self, id: &str, email: &str) {
+        let mut state = self.shared.state();
+        let file = state.file_mut(id);
+        for p in file.permissions.iter_mut().filter(|p| p["role"] == "owner") {
+            p["emailAddress"] = email.into();
+        }
+        state.record_change(id);
+    }
+
     /// Grava `appProperties` no item (como o app faria por outra instalação).
     pub fn set_app_properties(&self, id: &str, props: &[(&str, &str)]) {
         let mut state = self.shared.state();

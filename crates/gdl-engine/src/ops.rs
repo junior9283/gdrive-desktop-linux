@@ -39,6 +39,13 @@ pub(crate) fn never_uploaded(item: &Item) -> bool {
     is_local_id(&item.id) || item.local_state == LocalState::LocalOnly
 }
 
+/// Quem passa a ver um item movido: os membros de um Drive compartilhado ou quem tem acesso à
+/// pasta (de outra pessoa) que o recebeu.
+enum Exposure {
+    SharedDrive,
+    Folder(String),
+}
+
 impl Engine {
     pub(crate) fn item(&self, id: &ItemId) -> Result<Item> {
         self.store.get(id)?.ok_or(EngineError::NotFound)
@@ -221,7 +228,8 @@ impl Engine {
 
     /// Renomeia e/ou move para outra pasta do Meu Drive ou de um Drive compartilhado. Uma pasta
     /// não muda de raiz (a API não move assim): recusa com `FolderCrossDrive` e avisa. Um arquivo
-    /// que passa a um Drive compartilhado muda quem o vê: avisa.
+    /// que passa a um Drive compartilhado, ou um item do usuário que vai para uma pasta de outra
+    /// pessoa, muda quem o vê: avisa.
     pub async fn move_item(&self, id: &ItemId, parent: &ItemId, name: &str) -> Result<Item> {
         let item = self.item(id)?;
         let action = if item.parent.as_ref() == Some(parent) {
@@ -231,7 +239,7 @@ impl Engine {
         };
         let old_name = item.local_name.clone();
         // Só consulta as raízes quando a pasta de cima muda.
-        let into_shared = match item.parent.as_ref().filter(|old| *old != parent) {
+        let exposure = match item.parent.as_ref().filter(|old| *old != parent) {
             Some(old) => {
                 let (from, to) = (self.root_of(old)?, self.root_of(parent)?);
                 if from != to && item.kind == ItemKind::Folder {
@@ -240,15 +248,26 @@ impl Engine {
                     });
                     return Err(EngineError::FolderCrossDrive);
                 }
-                from != to && matches!(to, Some(DriveRoot::Shared { .. }))
+                match to {
+                    Some(DriveRoot::Shared { .. }) if from != to => Some(Exposure::SharedDrive),
+                    // Uma pasta do Meu Drive que é de outra pessoa: quem a vê passa a ver o item.
+                    Some(DriveRoot::MyDrive) if item.owned_by_me => self
+                        .item(parent)
+                        .ok()
+                        .filter(|folder| !folder.owned_by_me)
+                        .map(|folder| Exposure::Folder(folder.local_name)),
+                    _ => None,
+                }
             }
-            None => false,
+            None => None,
         };
         let moved = (self.relocate(item, id, parent, name).await)
             .map_err(|e| self.denied(action, &old_name, e))?;
-        if into_shared {
-            let _ = self.events.send(EngineEvent::MovedToSharedDrive {
-                name: moved.local_name.clone(),
+        if let Some(exposure) = exposure {
+            let name = moved.local_name.clone();
+            let _ = self.events.send(match exposure {
+                Exposure::SharedDrive => EngineEvent::MovedToSharedDrive { name },
+                Exposure::Folder(folder) => EngineEvent::MovedToSharedFolder { name, folder },
             });
         }
         Ok(moved)

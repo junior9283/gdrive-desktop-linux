@@ -40,7 +40,7 @@ macro_rules! item_columns {
     () => {
         "id, inode, parent, remote_name, local_name, kind, mime, target_id, size, md5, \
          head_revision, base_revision, base_md5, modified_ms, created_ms, trashed, can_edit, \
-         local_state, pin, remote_size"
+         local_state, pin, remote_size, owned_by_me"
     };
 }
 
@@ -868,7 +868,7 @@ impl Store {
             "SELECT i.id, i.inode, i.parent, i.remote_name, i.local_name, i.kind, i.mime, \
              i.target_id, i.size, i.md5, i.head_revision, i.base_revision, i.base_md5, \
              i.modified_ms, i.created_ms, i.trashed, i.can_edit, i.local_state, i.pin, \
-             i.remote_size \
+             i.remote_size, i.owned_by_me \
              FROM shared_drives d JOIN items i ON i.id = d.id \
              WHERE d.enabled = 1 ORDER BY d.name, d.id",
         )?;
@@ -1099,10 +1099,10 @@ impl Batch<'_> {
         let mut upsert = self.conn.prepare_cached(
             "INSERT INTO items (id, inode, parent, remote_name, local_name, kind, mime, target_id, \
              size, md5, head_revision, base_revision, base_md5, modified_ms, created_ms, trashed, \
-             can_edit, local_state, pin, remote_size) VALUES (:id, :inode, :parent, :remote_name, \
-             :local_name, :kind, :mime, :target_id, :size, :md5, :head_revision, :base_revision, \
-             :base_md5, :modified_ms, :created_ms, :trashed, :can_edit, :local_state, :pin, \
-             :remote_size) \
+             can_edit, local_state, pin, remote_size, owned_by_me) VALUES (:id, :inode, :parent, \
+             :remote_name, :local_name, :kind, :mime, :target_id, :size, :md5, :head_revision, \
+             :base_revision, :base_md5, :modified_ms, :created_ms, :trashed, :can_edit, \
+             :local_state, :pin, :remote_size, :owned_by_me) \
              ON CONFLICT(id) DO UPDATE SET parent = excluded.parent, \
              remote_name = excluded.remote_name, local_name = excluded.local_name, \
              kind = excluded.kind, mime = excluded.mime, target_id = excluded.target_id, \
@@ -1111,7 +1111,7 @@ impl Batch<'_> {
              modified_ms = excluded.modified_ms, created_ms = excluded.created_ms, \
              trashed = excluded.trashed, can_edit = excluded.can_edit, \
              local_state = excluded.local_state, pin = excluded.pin, \
-             remote_size = excluded.remote_size",
+             remote_size = excluded.remote_size, owned_by_me = excluded.owned_by_me",
         )?;
         for item in items {
             let wanted = (item.inode != Inode::UNASSIGNED).then_some(item.inode.0);
@@ -1138,6 +1138,7 @@ impl Batch<'_> {
                 ":local_state": item.local_state,
                 ":pin": item.pin,
                 ":remote_size": item.remote_size,
+                ":owned_by_me": item.owned_by_me,
             })?;
         }
         Ok(())
@@ -1220,6 +1221,7 @@ pub(crate) fn item_from_row(r: &Row) -> Result<Item> {
         local_state: r.get(17)?,
         pin: r.get(18)?,
         remote_size: r.get(19)?,
+        owned_by_me: r.get(20)?,
     })
 }
 
@@ -1270,6 +1272,7 @@ mod tests {
             created_ms: 0,
             trashed: false,
             can_edit: true,
+            owned_by_me: true,
             local_state: LocalState::Clean,
             pin: PinState::None,
         }
@@ -1684,6 +1687,7 @@ mod tests {
             modified_ms: 7,
             created_ms: 3,
             can_edit: false,
+            owned_by_me: true,
             local_state: LocalState::Conflict,
             pin: PinState::Inherited,
             ..item("s", Some("root"))

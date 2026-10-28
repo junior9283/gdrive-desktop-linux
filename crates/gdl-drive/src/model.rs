@@ -8,7 +8,7 @@ pub const SHORTCUT_MIME: &str = "application/vnd.google-apps.shortcut";
 
 /// Campos pedidos à API para cada arquivo (sempre os mesmos, para o banco ficar completo).
 pub const FILE_FIELDS: &str = "id,name,mimeType,parents,size,md5Checksum,headRevisionId,modifiedTime,\
-                               createdTime,trashed,capabilities/canEdit,shortcutDetails,webViewLink,driveId";
+                               createdTime,trashed,capabilities/canEdit,shortcutDetails,webViewLink,driveId,ownedByMe";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(from = "RawFile")]
@@ -25,6 +25,9 @@ pub struct RemoteFile {
     pub created_ms: i64,
     pub trashed: bool,
     pub can_edit: bool,
+    /// De quem é o item: falso no que outra pessoa criou. Nos Drives compartilhados (sem dono),
+    /// verdadeiro.
+    pub owned_by_me: bool,
     /// Atalho: ID e tipo do item apontado.
     pub shortcut_target: Option<(String, String)>,
     pub web_view_link: Option<String>,
@@ -221,6 +224,7 @@ struct RawFile {
     shortcut_details: Option<ShortcutDetails>,
     web_view_link: Option<String>,
     drive_id: Option<String>,
+    owned_by_me: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -277,6 +281,7 @@ impl From<RawFile> for RemoteFile {
             modified_ms: parse_ms(raw.modified_time.as_deref()),
             created_ms: parse_ms(raw.created_time.as_deref()),
             can_edit: raw.capabilities.is_some_and(|c| c.can_edit),
+            owned_by_me: raw.owned_by_me.unwrap_or(true),
             shortcut_target: raw
                 .shortcut_details
                 .map(|s| (s.target_id, s.target_mime_type)),

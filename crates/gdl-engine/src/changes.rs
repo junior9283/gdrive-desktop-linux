@@ -16,6 +16,11 @@ use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, item_from_remote};
 use crate::pins::reconcile;
 use crate::{EngineError, Result};
 
+/// Mais mudanças que isto num Drive compartilhado, numa consulta, é "muita atividade".
+const BUSY_DRIVE_CHANGES: usize = 1000;
+/// O aviso de muita atividade de um drive se repete no máximo uma vez neste intervalo (24 h).
+const BUSY_DRIVE_GAP_MS: i64 = 24 * 60 * 60 * 1000;
+
 pub struct ChangePoller {
     store: Arc<Store>,
     client: Arc<DriveClient>,
@@ -221,6 +226,7 @@ impl ChangePoller {
             .ok_or(EngineError::NotIndexed)?;
         let (changes, next) = self.client.changes(&token).await?;
         self.register_new_drives(&changes).await?;
+        self.warn_busy_drives(&changes, now_ms())?;
         // Os ids só são juntados se alguém ouve (a indexação traz milhares de mudanças).
         let ids: Vec<ItemId> = changes
             .iter()
@@ -284,6 +290,42 @@ impl ChangePoller {
                 .into_iter()
                 .filter(|d| known.iter().all(|k| k.id.0 != *d)),
         );
+        Ok(())
+    }
+
+    /// Avisa dos Drives compartilhados com mais de `BUSY_DRIVE_CHANGES` mudanças nesta consulta,
+    /// cada um no máximo uma vez a cada `BUSY_DRIVE_GAP_MS` (a hora do último aviso fica no
+    /// banco, em `busy_drive.<id>`).
+    pub(crate) fn warn_busy_drives(&self, changes: &[Change], now: i64) -> Result<()> {
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for change in changes {
+            if let Change::Upsert(r) = change
+                && let Some(drive) = &r.drive_id
+            {
+                *counts.entry(drive).or_default() += 1;
+            }
+        }
+        let mut drives = None;
+        for (drive, _) in counts.into_iter().filter(|&(_, n)| n > BUSY_DRIVE_CHANGES) {
+            let key = format!("busy_drive.{drive}");
+            let last: Option<i64> = self.store.kv_get(&key)?.and_then(|v| v.parse().ok());
+            if last.is_some_and(|last| now - last < BUSY_DRIVE_GAP_MS) {
+                continue;
+            }
+            // A lista só é lida quando há aviso a dar.
+            let drives = match &mut drives {
+                Some(drives) => drives,
+                none => none.insert(self.store.shared_drives()?),
+            };
+            let Some(known) = drives.iter().find(|d| d.id.0 == drive) else {
+                continue;
+            };
+            self.store.kv_set(&key, &now.to_string())?;
+            // Sem ninguém ouvindo, o aviso pode se perder.
+            let _ = self.events.send(EngineEvent::BusySharedDrive {
+                name: known.name.clone(),
+            });
+        }
         Ok(())
     }
 
@@ -597,14 +639,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drive_missing_from_the_list_is_searched_once() {
+    async fn busy_shared_drive_warns_once_a_day() {
         let (env, poller) = indexed().await;
+        let ana = env.fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Equipe");
+        env.fake.share_drive(&drive, &env.fake.email());
         initial_index(&env.store, &env.client).await.unwrap();
-        let ghost = Change::Upsert(Box::new(gdl_drive::model::RemoteFile {
-            id: "x".into(),
-            name: "x".into(),
+        let mut events = poller.events.subscribe();
+        let edit = |n: usize| {
+            Change::Upsert(Box::new(gdl_drive::model::RemoteFile {
+                id: format!("f{n}"),
+                drive_id: Some(drive.clone()),
+                ..remote("f")
+            }))
+        };
+        let busy: Vec<Change> = (0..=BUSY_DRIVE_CHANGES).map(edit).collect();
+        let calm = &busy[..BUSY_DRIVE_CHANGES];
+        let warned = |events: &mut broadcast::Receiver<EngineEvent>| {
+            std::iter::from_fn(|| events.try_recv().ok())
+                .filter(|e| matches!(e, EngineEvent::BusySharedDrive { name } if name == "Equipe"))
+                .count()
+        };
+        let now = 1_000_000_000;
+
+        poller.warn_busy_drives(calm, now).unwrap();
+        assert_eq!(warned(&mut events), 0, "até 1 000 mudanças, sem aviso");
+        poller.warn_busy_drives(&busy, now).unwrap();
+        poller
+            .warn_busy_drives(&busy, now + BUSY_DRIVE_GAP_MS - 1)
+            .unwrap();
+        assert_eq!(warned(&mut events), 1, "uma vez por dia");
+        poller
+            .warn_busy_drives(&busy, now + BUSY_DRIVE_GAP_MS)
+            .unwrap();
+        assert_eq!(warned(&mut events), 1, "no dia seguinte, de novo");
+    }
+
+    fn remote(id: &str) -> gdl_drive::model::RemoteFile {
+        gdl_drive::model::RemoteFile {
+            id: id.into(),
+            name: id.into(),
             mime_type: "text/plain".into(),
-            parents: vec!["fantasma".into()],
+            parents: vec![],
             size: Some(0),
             md5: None,
             head_revision: None,
@@ -612,9 +688,21 @@ mod tests {
             created_ms: 0,
             trashed: false,
             can_edit: true,
+            owned_by_me: true,
             shortcut_target: None,
             web_view_link: None,
+            drive_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn drive_missing_from_the_list_is_searched_once() {
+        let (env, poller) = indexed().await;
+        initial_index(&env.store, &env.client).await.unwrap();
+        let ghost = Change::Upsert(Box::new(gdl_drive::model::RemoteFile {
+            parents: vec!["fantasma".into()],
             drive_id: Some("fantasma".into()),
+            ..remote("x")
         }));
         let lists = || env.fake.requests("/drive/v3/drives");
         let before = lists();

@@ -126,6 +126,8 @@ pub struct Item {
     pub created_ms: i64,
     pub trashed: bool,
     pub can_edit: bool,
+    /// Falso no item que outra pessoa criou (no Meu Drive dela ou dentro de uma pasta sua).
+    pub owned_by_me: bool,
     pub local_state: LocalState,
     pub pin: PinState,
 }

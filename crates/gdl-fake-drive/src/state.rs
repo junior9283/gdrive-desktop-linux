@@ -362,12 +362,19 @@ impl State {
             .map_or(&self.root_id, String::as_str)
     }
 
+    /// O e-mail do dono do item, se a permissão de dono tiver um.
+    fn owner_of<'a>(&self, f: &'a FileRec) -> Option<&'a str> {
+        f.permissions
+            .iter()
+            .find(|p| p["role"] == "owner")
+            .and_then(|p| p["emailAddress"].as_str())
+    }
+
     /// O dono de um item novo em `parent`: o do pai (a principal, sem pai).
     fn owner_under(&self, parent: &str) -> String {
         self.files
             .get(parent)
-            .and_then(|f| f.permissions.iter().find(|p| p["role"] == "owner"))
-            .and_then(|p| p["emailAddress"].as_str())
+            .and_then(|f| self.owner_of(f))
             .unwrap_or(&self.email)
             .to_string()
     }
@@ -624,8 +631,10 @@ impl State {
             let link = self.origin.join(&format!("thumb/{}=s220", f.id));
             v["thumbnailLink"] = link.expect("caminho relativo válido").to_string().into();
         }
-        if let Some(drive) = self.drive_of(f) {
-            v["driveId"] = drive.into();
+        match self.drive_of(f) {
+            Some(drive) => v["driveId"] = drive.into(),
+            // Fora dos Drives compartilhados, o item tem dono (vale para a conta principal).
+            None => v["ownedByMe"] = (self.owner_of(f) == Some(self.email.as_str())).into(),
         }
         if let Some((owner, shared_ms)) = &f.shared {
             v["sharedWithMeTime"] = rfc3339(*shared_ms).into();

@@ -124,6 +124,11 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (pair_id, rel_path)
     ) WITHOUT ROWID;
 ",
+    "
+    -- De quem é o item (falso no que outra pessoa criou); os já indexados contam como do usuário
+    -- até a próxima mudança deles.
+    ALTER TABLE items ADD COLUMN owned_by_me INTEGER NOT NULL DEFAULT 1;
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.
@@ -247,5 +252,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(edited, 1);
+    }
+
+    #[test]
+    fn owned_by_me_defaults_to_true() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..9] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 9).unwrap();
+        conn.execute(
+            "INSERT INTO items (id, inode, remote_name, local_name, kind, size, modified_ms, \
+             created_ms, trashed, can_edit, local_state, pin) \
+             VALUES ('a', 2, 'a', 'a', 'file', 7, 0, 0, 0, 1, 0, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let owned: bool = conn
+            .query_row("SELECT owned_by_me FROM items", [], |r| r.get(0))
+            .unwrap();
+        assert!(owned, "os itens já indexados contam como do usuário");
     }
 }

@@ -253,7 +253,7 @@ impl Store {
             ", tree.rel FROM tree JOIN items USING (id)"
         ))?;
         let rows = stmt.query_and_then([&root.0], |r| {
-            let rel: String = r.get(20)?;
+            let rel: String = r.get("rel")?;
             Ok::<_, StoreError>((rel, item_from_row(r)?))
         })?;
         rows.collect()
@@ -398,6 +398,7 @@ mod tests {
             created_ms: 0,
             trashed,
             can_edit: true,
+            owned_by_me: true,
             local_state: LocalState::Clean,
             pin: PinState::None,
         }

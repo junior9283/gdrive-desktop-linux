@@ -287,6 +287,47 @@ async fn moving_a_file_into_a_shared_drive_moves_it_and_warns() {
     assert!(warnings(&mut events).is_empty());
 }
 
+/// Mover um arquivo seu para uma pasta do Meu Drive que é de outra pessoa avisa: quem tem acesso
+/// à pasta passa a ver o arquivo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_into_someone_elses_folder_warns() {
+    let fake = FakeDrive::start().await;
+    let (_, file) = drive_and_my_files(&fake);
+    let theirs = fake.add_folder(&fake.root_id(), "Da Ana");
+    fake.set_owner(&theirs, "ana@example.com");
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+
+    std::fs::rename(
+        m.drive().join("Pasta/a.txt"),
+        m.drive().join("Da Ana/a.txt"),
+    )
+    .unwrap();
+
+    assert_eq!(m.fake.meta(&file)["parents"], serde_json::json!([theirs]));
+    assert_eq!(
+        warnings(&mut events),
+        [EngineEvent::MovedToSharedFolder {
+            name: "a.txt".into(),
+            folder: "Da Ana".into(),
+        }]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_into_own_folder_is_quiet() {
+    let fake = FakeDrive::start().await;
+    let (_, file) = drive_and_my_files(&fake);
+    let mine = fake.add_folder(&fake.root_id(), "Minha");
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+
+    std::fs::rename(m.drive().join("Pasta/a.txt"), m.drive().join("Minha/a.txt")).unwrap();
+
+    assert_eq!(m.fake.meta(&file)["parents"], serde_json::json!([mine]));
+    assert!(warnings(&mut events).is_empty());
+}
+
 /// Renomear, mover ou excluir um arquivo só de leitura: o Drive recusa, a montagem responde
 /// "sem permissão" e o usuário é avisado com o nome.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

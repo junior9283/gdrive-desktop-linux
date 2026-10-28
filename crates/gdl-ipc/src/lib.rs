@@ -158,7 +158,8 @@ pub struct SyncErrorItem {
     pub name: String,
     /// Caminho completo na montagem (a cópia, no caso do Lost and Found).
     pub path: String,
-    /// `quota`, `upload-limit`, `no-permission`, `too-large`, `cloud-missing`, `local-missing`,
+    /// `quota`, `upload-limit`, `download-limit`, `folder-too-deep`, `shared-drive-full`,
+    /// `no-permission`, `too-large`, `cloud-missing`, `local-missing`,
     /// `lost-and-found` ou `unknown`.
     pub category: String,
     /// O erro técnico; vazio no Lost and Found.

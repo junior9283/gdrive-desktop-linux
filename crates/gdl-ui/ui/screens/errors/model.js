@@ -2,7 +2,7 @@
 
 // As categorias do `SyncErrorItem`, na ordem em que a tela mostra os grupos.
 export const CATEGORIES = [
-  'quota', 'upload-limit', 'no-permission', 'too-large', 'cloud-missing', 'local-missing', 'lost-and-found', 'unknown',
+  'quota', 'upload-limit', 'download-limit', 'folder-too-deep', 'shared-drive-full', 'no-permission', 'too-large', 'cloud-missing', 'local-missing', 'lost-and-found', 'unknown',
 ];
 
 // `[{ category, items }]` na ordem de `CATEGORIES`, sem grupos vazios; uma categoria que a tela

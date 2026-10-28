@@ -141,6 +141,12 @@ async fn error_from(resp: reqwest::Response) -> DriveError {
         (403, "storageQuotaExceeded" | "quotaExceeded") => DriveError::QuotaExceeded,
         (403, "uploadLimitExceeded" | "dailyLimitExceeded") => DriveError::DailyUploadLimit,
         (403, "downloadQuotaExceeded") => DriveError::DownloadQuotaExceeded,
+        (403, "myDriveHierarchyDepthLimitExceeded" | "teamDriveHierarchyTooDeep") => {
+            DriveError::FolderTooDeep
+        }
+        (403, "teamDriveFileLimitExceeded" | "numChildrenInNonRootLimitExceeded") => {
+            DriveError::SharedDriveFull
+        }
         (403, "maxFileSizeExceeded") | (413, _) => DriveError::TooLarge,
         (403, "domainPolicy") => DriveError::AccountDisabled,
         (403, _) => DriveError::PermissionDenied,
@@ -2098,6 +2104,24 @@ mod tests {
             client(&fake).about().await,
             Err(DriveError::AccountDisabled)
         ));
+    }
+
+    #[tokio::test]
+    async fn drive_limits_are_their_own_errors() {
+        let fake = FakeDrive::start().await;
+        let drive = client(&fake);
+        for (reason, expected) in [
+            ("myDriveHierarchyDepthLimitExceeded", "FolderTooDeep"),
+            ("teamDriveHierarchyTooDeep", "FolderTooDeep"),
+            ("teamDriveFileLimitExceeded", "SharedDriveFull"),
+            ("numChildrenInNonRootLimitExceeded", "SharedDriveFull"),
+            ("downloadQuotaExceeded", "DownloadQuotaExceeded"),
+        ] {
+            fake.inject(Fault::Reason { reason, times: 1 });
+            let error = drive.about().await.unwrap_err();
+            assert_eq!(format!("{error:?}"), expected, "{reason}");
+            assert!(!error.is_retryable(), "{reason}");
+        }
     }
 
     #[tokio::test]

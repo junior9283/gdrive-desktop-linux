@@ -1587,6 +1587,34 @@ mod tests {
         assert_eq!(s.env.store.queue_stats().unwrap().failed, 1);
     }
 
+    /// Um limite do Drive vira erro da lista com a própria categoria, sem ir para o Lost and Found.
+    async fn limit_is_listed_as(reason: &'static str, category: ErrorCategory) {
+        let s = setup(Env::new().await).await;
+        s.write_new(&s.env.root(), "fundo.txt", b"dados");
+        s.env.fake.inject(Fault::Reason { reason, times: 1 });
+
+        assert_eq!(s.run().await, Some(UploadOutcome::Retrying));
+
+        let errors = errors::list(&s.env.store, s.kept.get(KeptFolder::LostAndFound)).unwrap();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].category, category);
+        assert_eq!(errors[0].name, "fundo.txt");
+    }
+
+    #[tokio::test]
+    async fn deep_folder_upload_has_its_own_error() {
+        limit_is_listed_as(
+            "myDriveHierarchyDepthLimitExceeded",
+            ErrorCategory::FolderTooDeep,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn full_shared_drive_has_its_own_error() {
+        limit_is_listed_as("teamDriveFileLimitExceeded", ErrorCategory::SharedDriveFull).await;
+    }
+
     #[tokio::test]
     async fn retry_runs_the_job_now() {
         let s = setup(Env::new().await).await;

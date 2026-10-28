@@ -24,6 +24,10 @@ pub enum DriveError {
     TooLarge,
     #[error("limite de download deste arquivo atingido; tente mais tarde")]
     DownloadQuotaExceeded,
+    #[error("a pasta passaria do limite de níveis do Google Drive")]
+    FolderTooDeep,
+    #[error("a pasta ou o drive compartilhado chegou ao limite de itens do Google Drive")]
+    SharedDriveFull,
     #[error("o Google pediu para diminuir o ritmo")]
     RateLimited,
     /// 409 na criação com ID reservado: o item já foi criado.

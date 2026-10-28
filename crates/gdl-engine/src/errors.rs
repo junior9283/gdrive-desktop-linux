@@ -15,6 +15,12 @@ pub enum ErrorCategory {
     Quota,
     /// Limite diário de envio.
     UploadLimit,
+    /// Limite de download de um arquivo muito baixado.
+    DownloadLimit,
+    /// Pasta além dos 100 níveis do Drive.
+    FolderTooDeep,
+    /// Pasta ou drive compartilhado no limite de itens.
+    SharedDriveFull,
     NoPermission,
     TooLarge,
     /// A pasta (ou o arquivo) sumiu da nuvem.
@@ -31,6 +37,9 @@ impl ErrorCategory {
         match self {
             ErrorCategory::Quota => "quota",
             ErrorCategory::UploadLimit => "upload-limit",
+            ErrorCategory::DownloadLimit => "download-limit",
+            ErrorCategory::FolderTooDeep => "folder-too-deep",
+            ErrorCategory::SharedDriveFull => "shared-drive-full",
             ErrorCategory::NoPermission => "no-permission",
             ErrorCategory::TooLarge => "too-large",
             ErrorCategory::CloudMissing => "cloud-missing",
@@ -42,16 +51,22 @@ impl ErrorCategory {
 
     /// O contrário de `as_str`; o que não reconhece é `Unknown`.
     pub fn parse(s: &str) -> ErrorCategory {
-        match s {
-            "quota" => ErrorCategory::Quota,
-            "upload-limit" => ErrorCategory::UploadLimit,
-            "no-permission" => ErrorCategory::NoPermission,
-            "too-large" => ErrorCategory::TooLarge,
-            "cloud-missing" => ErrorCategory::CloudMissing,
-            "local-missing" => ErrorCategory::LocalMissing,
-            "lost-and-found" => ErrorCategory::LostAndFound,
-            _ => ErrorCategory::Unknown,
-        }
+        use ErrorCategory::*;
+        [
+            Quota,
+            UploadLimit,
+            DownloadLimit,
+            FolderTooDeep,
+            SharedDriveFull,
+            NoPermission,
+            TooLarge,
+            CloudMissing,
+            LocalMissing,
+            LostAndFound,
+        ]
+        .into_iter()
+        .find(|c| c.as_str() == s)
+        .unwrap_or(Unknown)
     }
 
     /// A categoria de uma falha de envio.
@@ -59,6 +74,9 @@ impl ErrorCategory {
         match e {
             DriveError::QuotaExceeded => ErrorCategory::Quota,
             DriveError::DailyUploadLimit => ErrorCategory::UploadLimit,
+            DriveError::DownloadQuotaExceeded => ErrorCategory::DownloadLimit,
+            DriveError::FolderTooDeep => ErrorCategory::FolderTooDeep,
+            DriveError::SharedDriveFull => ErrorCategory::SharedDriveFull,
             DriveError::PermissionDenied => ErrorCategory::NoPermission,
             DriveError::TooLarge => ErrorCategory::TooLarge,
             DriveError::NotFound => ErrorCategory::CloudMissing,
@@ -142,6 +160,12 @@ mod tests {
             (DriveError::DailyUploadLimit, ErrorCategory::UploadLimit),
             (DriveError::PermissionDenied, ErrorCategory::NoPermission),
             (DriveError::TooLarge, ErrorCategory::TooLarge),
+            (
+                DriveError::DownloadQuotaExceeded,
+                ErrorCategory::DownloadLimit,
+            ),
+            (DriveError::FolderTooDeep, ErrorCategory::FolderTooDeep),
+            (DriveError::SharedDriveFull, ErrorCategory::SharedDriveFull),
             (DriveError::NotFound, ErrorCategory::CloudMissing),
             (
                 DriveError::Io(std::io::ErrorKind::NotFound.into()),
@@ -153,6 +177,9 @@ mod tests {
             assert_eq!(ErrorCategory::parse(category.as_str()), category);
         }
         assert_eq!(ErrorCategory::LostAndFound.as_str(), "lost-and-found");
+        assert_eq!(ErrorCategory::DownloadLimit.as_str(), "download-limit");
+        assert_eq!(ErrorCategory::FolderTooDeep.as_str(), "folder-too-deep");
+        assert_eq!(ErrorCategory::SharedDriveFull.as_str(), "shared-drive-full");
         let missing = EngineError::Io(std::io::ErrorKind::NotFound.into());
         assert_eq!(
             ErrorCategory::of_engine(&missing),

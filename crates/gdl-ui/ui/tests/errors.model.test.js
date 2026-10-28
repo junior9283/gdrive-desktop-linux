@@ -27,3 +27,8 @@ test('categoria que a tela não conhece vai para "unknown"', () => {
 test('sem erros, nenhum grupo', () => {
   assert.deepEqual(groupErrors([]), []);
 });
+
+test('os limites do Drive têm grupo próprio', () => {
+  const errors = ['download-limit', 'folder-too-deep', 'shared-drive-full'].map((category) => ({ category, name: category }));
+  assert.deepEqual(groupErrors(errors).map((g) => g.category), ['download-limit', 'folder-too-deep', 'shared-drive-full']);
+});

@@ -31,6 +31,8 @@ pub enum Fault {
     /// As próximas `times` chamadas à API recebem 403 `domainPolicy` (a organização bloqueou a
     /// conta para o Drive).
     AccountDisabled { times: u32 },
+    /// As próximas `times` chamadas à API recebem 403 com o motivo `reason`.
+    Reason { reason: &'static str, times: u32 },
     /// A conexão cai depois de trafegar mais `n` bytes (uma vez só).
     DropConnectionAfterBytes(u64),
     /// As próximas `times` criações (POST na API) são processadas, mas a resposta se perde (a
@@ -267,24 +269,22 @@ impl FakeDrive {
 
     pub fn inject(&self, fault: Fault) {
         match fault {
-            Fault::RateLimit403 { times } => {
+            Fault::RateLimit403 { times } => self.inject(Fault::Reason {
+                reason: "userRateLimitExceeded",
+                times,
+            }),
+            Fault::QuotaExceeded { times } => self.inject(Fault::Reason {
+                reason: "storageQuotaExceeded",
+                times,
+            }),
+            Fault::AccountDisabled { times } => self.inject(Fault::Reason {
+                reason: "domainPolicy",
+                times,
+            }),
+            Fault::Reason { reason, times } => {
                 self.shared.state().fault = Some(StatusFault {
                     code: 403,
-                    reason: "userRateLimitExceeded",
-                    times,
-                });
-            }
-            Fault::QuotaExceeded { times } => {
-                self.shared.state().fault = Some(StatusFault {
-                    code: 403,
-                    reason: "storageQuotaExceeded",
-                    times,
-                });
-            }
-            Fault::AccountDisabled { times } => {
-                self.shared.state().fault = Some(StatusFault {
-                    code: 403,
-                    reason: "domainPolicy",
+                    reason,
                     times,
                 });
             }

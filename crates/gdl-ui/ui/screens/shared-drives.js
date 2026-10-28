@@ -6,22 +6,28 @@
 
 import { attempt, choice, confirmDialog, el, saveFooter, stylesheet, toast } from '../components.js';
 import { screenArg } from '../router.js';
-import { applied, changed, isOn, parseArg, saveDrives } from './shared-drives/model.js';
+import { currentAccount } from '../state.js';
+import { applied, changed, isOn, parseArg, saveDrives, shownAccount } from './shared-drives/model.js';
 
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta). `drives`
-// é a lista do serviço e `overrides` o que as chaves mudaram dela (id → ligado).
-const screen = { ctx: null, root: null, account: '', drives: [], overrides: {}, ui: {} };
+// é a lista do serviço e `overrides` o que as chaves mudaram dela (id → ligado). `accounts` só é
+// lida quando a tela abriu sem conta (da bandeja); com mais de uma, a tela mostra a escolha.
+const screen = { ctx: null, root: null, account: '', accounts: [], drives: [], overrides: {}, ui: {} };
 
 export async function render(root, ctx) {
-  const { account, create } = parseArg(screenArg(location.search));
-  Object.assign(screen, { ctx, root, account });
-  const [drives] = await Promise.all([
-    ctx.api.call('shared_drives', { account }),
-    stylesheet('screens/shared-drives.css'),
-  ]);
-  screen.drives = drives;
+  const { account: arg, create } = parseArg(screenArg(location.search));
+  const css = stylesheet('screens/shared-drives.css');
+  const status = arg ? null : await ctx.api.call('status', { account: '' });
+  const accounts = status?.accounts ?? [];
+  Object.assign(screen, { ctx, root, accounts });
+  await Promise.all([load(shownAccount(arg, currentAccount(), accounts)), css]);
   draw();
   if (create) newDrive();
+}
+
+async function load(account) {
+  screen.account = account;
+  screen.drives = await screen.ctx.api.call('shared_drives', { account });
 }
 
 function draw() {
@@ -35,12 +41,23 @@ function draw() {
       el('main', {},
         el('h1', {}, t('shared-drives-title')),
         el('p', { class: 'meta' }, t('shared-drives-text')),
+        accountPicker(),
         el('button', { class: 'tonal new-drive', onclick: newDrive }, t('shared-drives-new')),
         ui.list,
         ui.error),
       ui.footer.footer),
   );
   reset();
+}
+
+function accountPicker() {
+  if (screen.accounts.length < 2) return '';
+  const { t } = screen.ctx;
+  const select = el('select', { class: 'drive-account', 'aria-label': t('shared-drives-account') },
+    screen.accounts.map(({ email }) => el('option', { value: email, selected: email === screen.account }, email)));
+  // Outra conta: a lista dela, sem as chaves mexidas na anterior.
+  select.addEventListener('change', () => attempt(load(select.value), reset));
+  return el('label', { class: 'field' }, el('span', {}, t('shared-drives-account')), select);
 }
 
 // Volta as chaves ao estado do serviço (Cancelar, e depois de Salvar, que já o atualizou).

@@ -1031,6 +1031,33 @@ async fn shared_drives_screen_saves_and_creates() {
     );
 }
 
+/// "Gerenciar drives compartilhados" da bandeja abre sem conta: com duas, a tela começa na conta
+/// mostrada na janela e deixa escolher a outra.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn tray_shared_drives_lets_pick_the_account() {
+    let service = service().await;
+    let _cleanup = sign_in_ana(&service).await;
+    let first = service.status("").await.unwrap().account;
+    let session = Session::open("shared-drives").await;
+    session.show_account(ANA).await;
+    session.wait_text(".drive-list", "Equipe").await;
+    let picked = "return document.querySelector('.drive-account')?.value ?? null";
+    let shown = session.eval(picked).await;
+
+    session
+        .eval(&format!(
+            "const s = document.querySelector('.drive-account'); s.value = '{first}'; \
+             s.dispatchEvent(new Event('change')); return null"
+        ))
+        .await;
+    session.wait_text(".drive-list", "Equipe").await;
+    let other = session.eval(picked).await;
+    session.show_account("").await;
+    assert_eq!(shown, json!(ANA), "começa na conta da janela");
+    assert_eq!(other, json!(first));
+}
+
 /// O passo 5 do primeiro uso: as pastas do `user-dirs.dirs` (o `e2e.sh` deixa só Documentos, com
 /// um arquivo), marcadas e sincronizadas ao concluir.
 #[tokio::test(flavor = "multi_thread")]

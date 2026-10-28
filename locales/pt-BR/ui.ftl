@@ -583,6 +583,7 @@ versions-unkept-done = A versão pode ser apagada com o tempo
 
 shared-drives-title = Drives compartilhados
 shared-drives-text = Escolha quais Drives compartilhados aparecem na pasta "Drives compartilhados" deste computador. Os que você desliga somem da pasta e deixam de ser sincronizados.
+shared-drives-account = Conta
 shared-drives-empty = Esta conta não tem Drives compartilhados.
 shared-drives-new = Novo Drive compartilhado
 shared-drives-name = Nome do Drive compartilhado

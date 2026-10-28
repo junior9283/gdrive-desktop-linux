@@ -9,6 +9,13 @@ export function parseArg(arg) {
   return { account: text.slice(0, slash), create: text.slice(slash + 1) === 'new' };
 }
 
+// A conta da tela: a do argumento; sem ela (a bandeja não sabe qual), a mostrada na janela, se
+// ainda está conectada, ou a primeira.
+export function shownAccount(arg, shown, accounts) {
+  if (arg) return arg;
+  return accounts.some((a) => a.email === shown) ? shown : accounts[0]?.email ?? '';
+}
+
 // A chave de um drive: o que o usuário mexeu (`overrides`, id → ligado) ou, sem mexer, o estado do
 // serviço.
 export const isOn = (drive, overrides) => (drive.id in overrides ? overrides[drive.id] : drive.enabled);

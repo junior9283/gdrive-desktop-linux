@@ -99,6 +99,12 @@ impl TrayView {
         } else {
             item(i18n, "tray-pause", Action::Pause)
         };
+        // Com algo para subir, a janela pergunta antes de sair (a bandeja não tem diálogo).
+        let quit = if status.syncing > 0 || status.pending_uploads > 0 {
+            Action::Open("home:quit")
+        } else {
+            Action::Quit
+        };
         let verbose_item = if verbose {
             item(i18n, "tray-verbose-off", Action::SetVerbose(false))
         } else {
@@ -133,7 +139,7 @@ impl TrayView {
                     Action::Open("home:disconnect-all"),
                 ),
                 MenuItem::Separator,
-                item(i18n, "tray-quit", Action::Quit),
+                item(i18n, "tray-quit", quit),
             ],
             click: Action::Open("home"),
         }
@@ -418,6 +424,23 @@ mod tests {
             action_of(&view, "Desconectar todas as contas"),
             Some(Action::Open("home:disconnect-all"))
         );
+    }
+
+    #[test]
+    fn quit_goes_through_the_window() {
+        // Com algo para subir, sair pede confirmação, e quem pergunta é a janela.
+        let i18n = I18n::new("pt_BR");
+        let busy = TrayView::from_status(&status("syncing", 2, 0), false, &i18n);
+        assert_eq!(action_of(&busy, "Sair"), Some(Action::Open("home:quit")));
+        let waiting = Status {
+            pending_uploads: 1,
+            ..status("paused", 0, 0)
+        };
+        let paused = TrayView::from_status(&waiting, false, &i18n);
+        assert_eq!(action_of(&paused, "Sair"), Some(Action::Open("home:quit")));
+        // Sem nada pendente, sai direto.
+        let idle = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
+        assert_eq!(action_of(&idle, "Sair"), Some(Action::Quit));
     }
 
     #[test]

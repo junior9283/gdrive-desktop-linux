@@ -583,6 +583,7 @@ versions-unkept-done = This version may be deleted over time
 
 shared-drives-title = Shared drives
 shared-drives-text = Choose which shared drives appear in the "Shared drives" folder on this computer. The ones you turn off disappear from the folder and stop syncing.
+shared-drives-account = Account
 shared-drives-empty = This account has no shared drives.
 shared-drives-new = New shared drive
 shared-drives-name = Shared drive name

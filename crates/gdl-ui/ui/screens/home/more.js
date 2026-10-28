@@ -38,11 +38,12 @@ export async function moreMenu(anchor, ctx) {
 }
 
 // O que pedem ao abrir a janela (`home:<argumento>`): da bandeja, que não tem diálogo, as ações
-// com confirmação; do primeiro uso e das Preferências, o tour; do aviso de Lost and Found, a
-// escolha da pasta para onde mover tudo.
+// com confirmação (Sair só vem para cá com algo pendente); do primeiro uso e das Preferências, o
+// tour; do aviso de Lost and Found, a escolha da pasta para onde mover tudo.
 const ARG_ACTIONS = {
   'reset-preferences': reset,
   'disconnect-all': disconnectAll,
+  quit,
   tour: ({ t }) => startTour(HOME_TOUR, t),
   'move-lost-found': moveLostAndFound,
 };

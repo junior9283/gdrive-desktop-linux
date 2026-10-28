@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applied, changed, isOn, parseArg, saveDrives } from '../screens/shared-drives/model.js';
+import { applied, changed, isOn, parseArg, saveDrives, shownAccount } from '../screens/shared-drives/model.js';
 
 const equipe = { id: 'd1', name: 'Equipe', enabled: true };
 const obras = { id: 'd2', name: 'Obras', enabled: false };
@@ -59,4 +59,12 @@ test('outros erros ao salvar seguem para quem chamou', async () => {
   const api = { call: async () => Promise.reject(broken) };
 
   await assert.rejects(saveDrives(api, '', [equipe], { d1: false }), broken);
+});
+
+test('shownAccount: o argumento manda; sem ele, a conta da janela, se ainda estiver conectada', () => {
+  const accounts = [{ email: 'eu@x.com' }, { email: 'ana@x.com' }];
+  assert.equal(shownAccount('ana@x.com', 'eu@x.com', accounts), 'ana@x.com');
+  assert.equal(shownAccount('', 'ana@x.com', accounts), 'ana@x.com');
+  assert.equal(shownAccount('', 'saiu@x.com', accounts), 'eu@x.com');
+  assert.equal(shownAccount('', '', []), '');
 });

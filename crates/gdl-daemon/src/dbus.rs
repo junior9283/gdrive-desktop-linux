@@ -427,6 +427,11 @@ impl Service {
         self.daemon.set_verbose_logging(on)
     }
 
+    /// Apaga banco e cache da conta e a reindexa do zero, sem sair dela.
+    async fn reset_local_data(&self, account: &str) -> Result<(), ServiceError> {
+        self.daemon.reset_local_data(account).await
+    }
+
     /// Grava o pacote de diagnóstico (`.tar.gz`) na Área de trabalho e devolve o caminho.
     async fn generate_diagnostics(&self) -> Result<String, ServiceError> {
         self.daemon.generate_diagnostics().await

@@ -54,6 +54,8 @@ export function createApi(tauri, getAccount = () => '') {
     openScreen: (screen, arg = null) => invoke('open_screen', { screen, arg }),
     // Um endereço da tabela fixa do Rust (`drive-web`, `storage`, `privacy`…).
     openLink: (name) => invoke('open_link', { name }),
+    // Uma issue nova do projeto; `true` se o texto foi cortado.
+    openIssue: (title, body) => invoke('open_issue', { title, body }),
     // A pasta do Drive no gerenciador de arquivos.
     openMount: () => invoke('open_mount'),
     // Uma pasta do computador sincronizada (pelo id; o caminho vem do serviço).

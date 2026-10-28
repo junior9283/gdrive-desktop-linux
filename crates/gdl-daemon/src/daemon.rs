@@ -27,6 +27,7 @@ use gdl_engine::events::{EngineEvent, SyncState};
 use gdl_engine::gdocs::{OfficeEditor, web_url};
 use gdl_engine::kept::{Kept, KeptFolder};
 use gdl_fs::{DriveFs, Layout};
+use gdl_store::folders::PairKind;
 use gdl_store::{DrivePath, Inode, Item, ItemId, ItemKind, PinState};
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -2022,13 +2023,7 @@ impl Daemon {
             .await?;
         match mode {
             "" => {
-                let pending = unsynced(&engine).map_err(failed)?;
-                if pending > 0 {
-                    let count = pending.to_string();
-                    return Err(ServiceError::PendingUploads(
-                        self.i18n.tr("logout-pending", &[("count", &count)]),
-                    ));
-                }
+                self.refuse_pending(&engine)?;
                 self.sign_out(&email).await
             }
             "discard" => self.sign_out(&email).await,
@@ -2061,6 +2056,55 @@ impl Daemon {
         }
     }
 
+    /// Recusa com envios pendentes (ou cópias guardadas), que sairiam junto com os dados locais.
+    fn refuse_pending(&self, engine: &Engine) -> Result<(), ServiceError> {
+        match unsynced(engine).map_err(failed)? {
+            0 => Ok(()),
+            pending => Err(ServiceError::PendingUploads(
+                self.i18n
+                    .tr("logout-pending", &[("count", &pending.to_string())]),
+            )),
+        }
+    }
+
+    /// "Redefinir os dados locais": como sair da conta apagando os dados, mas sem sair. Apaga
+    /// banco e cache, sobe a conta de novo com o mesmo login e ela reindexa do zero; as pastas
+    /// do computador e o espelho voltam apontando para as mesmas pastas do Drive, e a primeira
+    /// sincronização as mescla.
+    pub async fn reset_local_data(self: &Arc<Self>, account: &str) -> Result<(), ServiceError> {
+        let (engine, email, access, beside) = self
+            .with_account(account, |a| {
+                (
+                    a.engine.clone(),
+                    a.email.clone(),
+                    a.access.clone(),
+                    a.beside,
+                )
+            })
+            .await?;
+        self.refuse_pending(&engine)?;
+        let pairs = engine.store().pairs().map_err(failed)?;
+        let (engine, _) = self
+            .remove_account(&email)
+            .await
+            .ok_or_else(|| self.not_logged_in())?;
+        self.wipe_local_data(engine).await?;
+        let (mounted, moved) = self.mount_account(&email, access, beside).await?;
+        let engine = mounted.engine.clone();
+        self.register_account(mounted, moved).await;
+        // Os de dispositivo não voltam: a escolha de cada dispositivo fica no banco apagado, e ele
+        // pergunta de novo na próxima vez que for conectado.
+        for pair in pairs.iter().filter(|p| p.kind != PairKind::Device) {
+            engine
+                .store()
+                .add_pair(&pair.local, &pair.remote_id, pair.kind, pair.direction)
+                .map_err(failed)?;
+        }
+        self.start_folders(&self.folder_account(&email).await?);
+        self.emit_local_folders_changed().await;
+        Ok(())
+    }
+
     /// Sai de todas as contas, cada uma como em `logout`. Se alguma recusar (envios pendentes), as
     /// anteriores já saíram e o erro é o da primeira que recusou.
     pub async fn logout_all(self: &Arc<Self>, mode: &str, dir: &str) -> Result<(), ServiceError> {
@@ -2089,16 +2133,24 @@ impl Daemon {
         if let Err(e) = desktop::set_sidebar_place(&places, &mount_point, "", false) {
             tracing::warn!(erro = %e, "não deu para tirar a conta dos Locais do Dolphin");
         }
+        // Os dados locais saem mesmo com o chaveiro fora do ar: a conta já não está na lista, e
+        // nada voltaria para apagá-los.
+        let token = self.config.tokens.delete(email).await;
+        self.wipe_local_data(engine).await?;
+        self.emit_status_changed().await;
+        token.map_err(failed)?;
+        Ok(())
+    }
+
+    /// Apaga banco e cache da conta já desmontada, menos as cópias guardadas (Lost and Found e
+    /// Uploads cancelados), que são a única cópia dessas versões.
+    async fn wipe_local_data(&self, engine: Arc<Engine>) -> Result<(), ServiceError> {
         // Com a montagem já desfeita (nenhum `opendir` semeia PNGs novos) e antes de apagar o
-        // banco, que guarda a memória das miniaturas semeadas. Melhor esforço: uma falha aqui
-        // não impede a saída da conta.
+        // banco, que guarda a memória das miniaturas semeadas. Melhor esforço.
         let thumbs = engine.clone();
         if let Err(e) = tokio::task::spawn_blocking(move || thumbs.purge_thumbnails()).await {
             tracing::warn!(erro = %e, "falha ao limpar as miniaturas");
         }
-        // Os dados locais saem mesmo com o chaveiro fora do ar: a conta já não está na lista, e
-        // nada voltaria para apagá-los.
-        let token = self.config.tokens.delete(email).await;
         let dirs = engine.local_dirs();
         let keep = engine.kept().dirs();
         tokio::task::spawn_blocking(move || {
@@ -2110,10 +2162,7 @@ impl Daemon {
         })
         .await
         .map_err(failed)?
-        .map_err(failed)?;
-        self.emit_status_changed().await;
-        token.map_err(failed)?;
-        Ok(())
+        .map_err(failed)
     }
 
     /// Antes de os programas saírem: desmonta, tira o início automático e o lugar nos Locais e,

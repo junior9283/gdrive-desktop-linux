@@ -39,9 +39,9 @@ pub fn url(name: &str) -> Option<String> {
 /// O tamanho máximo do endereço de uma *issue* nova: acima disso o GitHub recusa.
 pub const MAX_ISSUE_URL: usize = 6000;
 
-/// O endereço que abre uma *issue* nova no projeto com `title` e `body` preenchidos; o fim de
-/// `body` é cortado para caber em `MAX_ISSUE_URL`.
-pub fn new_issue(title: &str, body: &str) -> String {
+/// O endereço que abre uma *issue* nova no projeto com `title` e `body` preenchidos, e se o fim
+/// de `body` foi cortado para caber em `MAX_ISSUE_URL`.
+pub fn new_issue(title: &str, body: &str) -> (String, bool) {
     let build = |body: &str| {
         let mut url = url::Url::parse(&format!("{PROJECT}/issues/new")).expect("endereço fixo");
         url.query_pairs_mut()
@@ -50,12 +50,13 @@ pub fn new_issue(title: &str, body: &str) -> String {
         url.to_string()
     };
     // Cada caractere vira ao menos um byte no endereço: mais que o limite nunca cabe.
-    let mut keep = body.chars().count().min(MAX_ISSUE_URL);
+    let total = body.chars().count();
+    let mut keep = total.min(MAX_ISSUE_URL);
     loop {
         let body: String = body.chars().take(keep).collect();
         let url = build(&body);
         if url.len() <= MAX_ISSUE_URL || keep == 0 {
-            return url;
+            return (url, keep < total);
         }
         keep = (keep * MAX_ISSUE_URL / url.len()).min(keep - 1);
     }
@@ -67,12 +68,14 @@ mod tests {
 
     #[test]
     fn new_issue_fits_the_limit() {
-        let short = new_issue("Falha", "linha 1\nlinha 2");
+        let (short, cut) = new_issue("Falha", "linha 1\nlinha 2");
         assert_eq!(
             short,
             format!("{PROJECT}/issues/new?title=Falha&body=linha+1%0Alinha+2")
         );
-        let long = new_issue("Falha", &"ç@ ".repeat(5000));
+        assert!(!cut);
+        let (long, cut) = new_issue("Falha", &"ç@ ".repeat(5000));
+        assert!(cut);
         assert!(long.len() <= MAX_ISSUE_URL, "{}", long.len());
         assert!(long.len() > MAX_ISSUE_URL - 50, "corta só o que passa");
     }

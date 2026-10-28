@@ -153,6 +153,8 @@ tray-errors = { $count ->
 }
 tray-preferences = Preferences
 tray-about = About
+tray-feedback = Send feedback
+tray-diagnostics = Generate diagnostic info
 tray-quit = Quit
 tray-sign-in = Sign in
 tray-start-service = Start the service
@@ -166,6 +168,7 @@ window-search = Search
 window-errors = Error list
 window-offline = Offline files
 window-about = About
+window-feedback = Send feedback
 window-notification-settings = Notification preferences
 window-uninstall = Uninstall Google Drive
 window-share = Share

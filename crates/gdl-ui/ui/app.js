@@ -8,7 +8,7 @@ import { currentScreen } from './router.js';
 
 // As telas que já existem; as outras mostram o aviso de "em construção".
 const READY = new Set([
-  'about', 'errors', 'home', 'notification-settings', 'offline', 'onboarding', 'preferences', 'search', 'share',
+  'about', 'errors', 'feedback', 'home', 'notification-settings', 'offline', 'onboarding', 'preferences', 'search', 'share',
   'shared-drives', 'shortcut', 'uninstall', 'versions',
 ]);
 

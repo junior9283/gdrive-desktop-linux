@@ -168,6 +168,12 @@ impl App {
             }
             Action::Pause => self.service.pause().await.map_err(Error::from),
             Action::Resume => self.service.resume().await.map_err(Error::from),
+            Action::GenerateDiagnostics => self
+                .service
+                .generate_diagnostics()
+                .await
+                .map(drop)
+                .map_err(Error::from),
             Action::StartService => self.start_service().await,
             // Com o serviço no ar, a saída vem com `Quitting`; sem ele, sai já.
             Action::Quit => return self.service.quit().await.is_ok(),

@@ -20,7 +20,7 @@ const fn screen(name: &'static str, width: f64, height: f64) -> Screen {
     }
 }
 
-pub const SCREENS: [Screen; 13] = [
+pub const SCREENS: [Screen; 14] = [
     screen(HOME, 900.0, 640.0),
     // Com `add` (outra conta) ou `resume:<e-mail>` (a conta que precisa entrar de novo).
     screen("onboarding", 560.0, 640.0),
@@ -32,6 +32,7 @@ pub const SCREENS: [Screen; 13] = [
     screen("errors", 560.0, 600.0),
     screen("offline", 640.0, 560.0),
     screen("about", 480.0, 420.0),
+    screen("feedback", 520.0, 600.0),
     screen("notification-settings", 480.0, 520.0),
     screen("uninstall", 520.0, 480.0),
     // As três abrem com o id do item (`share:<conta>/<id>`).

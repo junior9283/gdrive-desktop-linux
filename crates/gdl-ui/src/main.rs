@@ -100,6 +100,21 @@ fn open_screen(app: AppHandle, screen: String, arg: Option<String>) -> Result<()
     show_named(&app, &screen, arg.as_deref())
 }
 
+/// "Enviar feedback": abre no navegador uma issue nova do projeto com `title` e `body` (mais a
+/// versão e o sistema). O endereço é sempre o da página de issues; `true` se o texto foi cortado
+/// para caber nele.
+#[tauri::command]
+async fn open_issue(title: String, body: String) -> Result<bool, String> {
+    let body = format!(
+        "{body}\n\n---\ngdrive-desktop-linux {} · {}",
+        env!("CARGO_PKG_VERSION"),
+        gdl_common::os_name()
+    );
+    let (url, cut) = links::new_issue(&title, &body);
+    open_outside(url, default_web_browser(&Paths::from_env())).await?;
+    Ok(cut)
+}
+
 /// `xdg-open` (ou o navegador definido) sem travar a janela.
 async fn open_outside(target: String, browser: Option<PathBuf>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || browser::open(&target, browser.as_deref()))
@@ -245,6 +260,7 @@ fn main() -> ExitCode {
             close_window,
             open_screen,
             open_link,
+            open_issue,
             open_mount,
             open_local_folder,
             pick_folder,

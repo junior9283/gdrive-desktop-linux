@@ -37,6 +37,8 @@ pub enum Action {
     OpenWeb,
     Pause,
     Resume,
+    /// Grava o pacote de diagnóstico; o serviço abre a pasta onde ele ficou.
+    GenerateDiagnostics,
     StartService,
     Quit,
 }
@@ -110,6 +112,8 @@ impl TrayView {
                 },
                 item(i18n, "tray-preferences", Action::Open("preferences")),
                 item(i18n, "tray-about", Action::Open("about")),
+                item(i18n, "tray-feedback", Action::Open("feedback")),
+                item(i18n, "tray-diagnostics", Action::GenerateDiagnostics),
                 MenuItem::Separator,
                 item(i18n, "tray-quit", Action::Quit),
             ],
@@ -323,10 +327,20 @@ mod tests {
                 "Lista de erros",
                 "Preferências",
                 "Sobre",
+                "Enviar feedback",
+                "Gerar informações de diagnóstico",
                 "---",
                 "Sair",
             ]
         );
+        assert!(view.items.contains(&MenuItem::Item {
+            label: "Enviar feedback".into(),
+            action: Action::Open("feedback"),
+        }));
+        assert!(view.items.contains(&MenuItem::Item {
+            label: "Gerar informações de diagnóstico".into(),
+            action: Action::GenerateDiagnostics,
+        }));
         assert_eq!(view.click, Action::Open("home"));
         let paused = TrayView::from_status(&status("paused", 0, 0), &i18n);
         assert!(labels(&paused).contains(&"Retomar a sincronização"));

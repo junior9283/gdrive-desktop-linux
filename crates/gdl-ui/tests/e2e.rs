@@ -1081,6 +1081,32 @@ async fn computer_tab_backs_up_a_device() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
+async fn feedback_screen_opens_a_prefilled_issue() {
+    let session = Session::open("feedback").await;
+    session.wait_text("h1", "Enviar feedback").await;
+    let blocked = session
+        .eval("return document.querySelector('.send').disabled")
+        .await;
+
+    session
+        .fill(".feedback-text", "A pasta não abre")
+        .await;
+    session.click(".feedback-kinds input[value=idea]").await;
+    session.click(".send").await;
+    let url = opened("/issues/new?").await;
+
+    assert_eq!(blocked, json!(true), "sem descrição não envia");
+    assert!(
+        url.starts_with("https://github.com/junior9283/gdrive-desktop-linux/issues/new?"),
+        "{url}"
+    );
+    assert!(url.contains("title=Sugest%C3%A3o%3A+A+pasta+n%C3%A3o+abre&"), "{url}");
+    assert!(url.contains("body=A+pasta+n%C3%A3o+abre%0A"), "{url}");
+    assert!(url.contains(env!("CARGO_PKG_VERSION")), "a versão vai junto: {url}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
 async fn shortcut_screen_picks_a_folder() {
     let service = service().await;
     let id = item_id("Planilha.gsheet").await;

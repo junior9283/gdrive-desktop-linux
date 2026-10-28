@@ -3166,3 +3166,69 @@ async fn crash_is_silent_when_reporting_is_off() {
     assert!(crash_notes(&h).await.is_empty());
     assert!(report.exists(), "fica para quando o envio for ligado");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reset_local_data_refuses_with_pending_uploads() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.proxy.pause().await.unwrap();
+    let path = h.drive().join("rascunho.txt");
+    blocking(move || std::fs::write(path, b"ainda nao subiu").unwrap()).await;
+
+    let err = h.proxy.reset_local_data("").await.unwrap_err();
+
+    assert!(err.to_string().contains("PendingUploads"), "{err}");
+    let draft = h.drive().join("rascunho.txt");
+    assert!(blocking(move || draft.exists()).await, "nada foi apagado");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reset_local_data_reindexes() {
+    let h = Harness::new().await;
+    h.fake.add_file(&h.fake.root_id(), "remoto.txt", b"do drive".to_vec());
+    h.logged_in().await;
+    let docs = h.home.join("Documentos");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("a.txt"), b"oi").unwrap();
+    let path = docs.to_str().unwrap();
+    h.proxy.add_local_folder("", path, false).await.unwrap();
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+    let before = h.daemon.engine().await.unwrap();
+
+    h.proxy.reset_local_data("").await.unwrap();
+
+    let after = h.daemon.engine().await.unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&before, &after), "a conta subiu de novo, do zero");
+    assert_eq!(h.proxy.status("").await.unwrap().account, h.fake.email());
+    let remote = h.drive().join("remoto.txt");
+    assert_eq!(
+        blocking(move || std::fs::read(remote).unwrap()).await,
+        b"do drive"
+    );
+    let listed = h.proxy.local_folders().await.unwrap();
+    assert_eq!(
+        listed.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        [path],
+        "a pasta do computador continua"
+    );
+    std::fs::write(docs.join("b.txt"), b"depois").unwrap();
+    wait_until("b.txt no Drive", || h.fake.find_live("b.txt").len() == 1).await;
+    assert_eq!(h.fake.find_live("a.txt").len(), 1, "sem cópia repetida");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reset_preferences_keeps_policies() {
+    let h = Harness::with_policy("BandwidthRxKBPS = 500\n").await;
+    h.proxy
+        .set_preferences(&[("UITheme", "\"dark\"")])
+        .await
+        .unwrap();
+
+    h.proxy.reset_preferences().await.unwrap();
+
+    let prefs = h.proxy.preferences().await.unwrap();
+    let get = |key: &str| prefs.iter().find(|p| p.key == key).unwrap().clone();
+    assert_eq!(get("UITheme").value, "null", "a escolha do usuário sai");
+    let managed = get("BandwidthRxKBPS");
+    assert_eq!((managed.value.as_str(), managed.managed), ("500", true));
+}

@@ -71,17 +71,13 @@ impl Daemon {
         let text = std::fs::read_to_string(&latest).map_err(failed)?;
         let title = text.lines().next().unwrap_or_default();
         let body = format!("```\n{}\n```", scrub(&text));
-        self.open(new_issue(&format!("Falha: {title}"), &body));
+        self.open(new_issue(&format!("Falha: {title}"), &body).0);
         Ok(())
     }
 
     fn system_text(&self) -> String {
         let read = |path: &str| std::fs::read_to_string(path).unwrap_or_default();
-        let pretty = read("/etc/os-release")
-            .lines()
-            .find_map(|l| l.strip_prefix("PRETTY_NAME="))
-            .map(|v| v.trim_matches('"').to_owned())
-            .unwrap_or_default();
+        let pretty = gdl_common::os_name();
         let env = |key: &str| std::env::var(key).unwrap_or_default();
         let fuse = ["/dev/fuse", "/usr/bin/fusermount3"]
             .iter()

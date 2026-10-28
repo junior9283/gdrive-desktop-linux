@@ -104,11 +104,6 @@ impl History {
         }
     }
 
-    /// O aviso que o servidor de notificações mostrou como `desktop_id`.
-    pub fn by_desktop_id(&self, desktop_id: u32) -> Option<u64> {
-        Some(self.shown_as(desktop_id)?.0.id)
-    }
-
     /// O aviso mostrado como `desktop_id` e o lugar dele (`Notification::slot`), se substitui o
     /// anterior da mesma chave.
     pub fn shown_as(&self, desktop_id: u32) -> Option<(NotificationItem, Option<String>)> {
@@ -263,8 +258,8 @@ mod tests {
         let titles: Vec<_> = history.items().into_iter().map(|i| i.title).collect();
         assert_eq!(titles, ["aviso 4", "aviso 3", "aviso 2"]);
         assert_eq!(history.items()[0].id, latest);
-        assert_eq!(history.by_desktop_id(7), Some(first));
-        assert_eq!(history.by_desktop_id(8), None);
+        assert_eq!(history.shown_as(7).map(|(item, _)| item.id), Some(first));
+        assert!(history.shown_as(8).is_none());
     }
 
     /// O aviso de estado de uma conta não toma o lugar do mesmo aviso de outra.

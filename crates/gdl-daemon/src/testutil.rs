@@ -286,12 +286,6 @@ impl Harness {
     pub fn notes(&self) -> Vec<Note> {
         self.notes.lock().unwrap().clone()
     }
-
-    /// Clica no botão `key` do aviso `id`, depois de o serviço saber que o mostrou.
-    pub async fn click(&self, id: u32, key: &str) {
-        wait_until("aviso no histórico", || self.daemon.knows_shown(id)).await;
-        self.daemon.on_desktop_action(id, key).await;
-    }
 }
 
 // O serviço e a conexão se referenciam (como no `main`, quem sai chama `shutdown`).

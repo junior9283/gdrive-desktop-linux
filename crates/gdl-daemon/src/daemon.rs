@@ -322,6 +322,9 @@ pub struct Daemon {
     saving: tokio::sync::Mutex<()>,
     /// Uma reabertura das contas por vez (`restart_accounts`).
     reopening: tokio::sync::Mutex<()>,
+    /// Segura do envio de um aviso ao servidor de notificações até o ID dele estar no
+    /// histórico: um clique que chega nesse meio-tempo espera (`on_desktop_action`).
+    showing: tokio::sync::Mutex<()>,
     exit: watch::Sender<Option<Exit>>,
     i18n: I18n,
     /// Os nomes das pastas da raiz da montagem, no idioma do sistema (como o FUSE mostra).
@@ -420,6 +423,7 @@ impl Daemon {
             prefs: RwLock::new(Arc::new(prefs)),
             saving: tokio::sync::Mutex::default(),
             reopening: tokio::sync::Mutex::default(),
+            showing: tokio::sync::Mutex::default(),
             exit: watch::Sender::new(None),
             config,
             accounts: tokio::sync::Mutex::default(),
@@ -468,8 +472,10 @@ impl Daemon {
                 let Some(daemon) = daemon.upgrade() else {
                     break;
                 };
+                // Cada clique à parte: um que espera um aviso a caminho não segura os outros.
                 if let Ok(args) = signal.args() {
-                    daemon.on_desktop_action(args.id, &args.action_key).await;
+                    let (id, key) = (args.id, args.action_key.to_string());
+                    tokio::spawn(async move { daemon.on_desktop_action(id, &key).await });
                 }
             }
         });
@@ -886,6 +892,7 @@ impl Daemon {
         };
         let extra = notify::extra_actions(note, &self.i18n);
         let named = self.with_account_name(note).await;
+        let _showing = self.showing.lock().await;
         if let Some(desktop_id) = notifier.send(&named, &extra).await {
             self.history.set_desktop_id(id, desktop_id);
         }
@@ -908,15 +915,11 @@ impl Daemon {
         self.reopening.lock().await
     }
 
-    /// Se o aviso mostrado como `desktop_id` já está no histórico (o servidor de notificações
-    /// recebe o aviso antes de o serviço guardar o ID que ele deu).
-    #[cfg(test)]
-    pub(crate) fn knows_shown(&self, desktop_id: u32) -> bool {
-        self.history.shown_as(desktop_id).is_some()
-    }
-
     /// Botão de um aviso clicado no servidor de notificações.
     pub(crate) async fn on_desktop_action(self: &Arc<Self>, desktop_id: u32, key: &str) {
+        // Um aviso ainda a caminho do servidor já pode ter sido clicado: o ID dele só chega ao
+        // histórico quando `notify` termina.
+        drop(self.showing.lock().await);
         let shown = self.history.shown_as(desktop_id);
         let id = shown.as_ref().map(|(note, _)| note.id);
         let device = shown

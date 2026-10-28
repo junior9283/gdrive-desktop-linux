@@ -2758,7 +2758,9 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
     );
     assert!(h.proxy.status("").await.unwrap().paused);
 
-    h.click(note.id, "recognize-activity").await;
+    h.daemon
+        .on_desktop_action(note.id, "recognize-activity")
+        .await;
     assert!(!h.proxy.status("").await.unwrap().paused);
 }
 
@@ -2848,7 +2850,7 @@ async fn mute_action_turns_the_kind_off() {
     let keys: Vec<_> = note.actions.iter().step_by(2).map(String::as_str).collect();
     assert_eq!(keys, ["default", "resume", "mute"]);
 
-    h.click(note.id, "mute").await;
+    h.daemon.on_desktop_action(note.id, "mute").await;
 
     let settings = h.proxy.notification_settings().await.unwrap();
     let resume = settings

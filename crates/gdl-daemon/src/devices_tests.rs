@@ -159,7 +159,7 @@ async fn device_notice_offers_always_and_ignore() {
         ["default", "open-folders", "device-always", "device-ignore"]
     );
 
-    h.click(ask.id, "device-always").await;
+    h.daemon.on_desktop_action(ask.id, "device-always").await;
 
     backed_up(&h, "praia.jpg").await;
     let listed = h.proxy.devices().await.unwrap();
@@ -172,7 +172,7 @@ async fn device_notice_offers_always_and_ignore() {
     h.plug(UUID, LABEL, &mount).await;
     wait_until("pergunta de novo", || notes_titled(&h, ASK).len() == 2).await;
     let again = notes_titled(&h, ASK)[1].clone();
-    h.click(again.id, "device-ignore").await;
+    h.daemon.on_desktop_action(again.id, "device-ignore").await;
     assert_eq!(h.proxy.devices().await.unwrap()[0].choice, "ignored");
 }
 

@@ -2959,6 +2959,13 @@ async fn states_inside_a_pair() {
         h.proxy.folder_roots().await.unwrap(),
         std::slice::from_ref(&root)
     );
+    // O arquivo aparece no Drive antes de o par anotá-lo como sincronizado.
+    for _ in 0..100 {
+        if h.proxy.folder_states(&[&path("a.txt")]).await.unwrap() == ["offline"] {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 
     let states = h
         .proxy

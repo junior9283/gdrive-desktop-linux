@@ -13,7 +13,8 @@ Ele mostra o seu Drive como uma pasta no computador, em que os arquivos ficam na
 abrir, com ícone na bandeja, pesquisa, arquivos disponíveis off-line, sincronização automática,
 até 4 contas ao mesmo tempo, Drives compartilhados, o modo Espelho (o Meu Drive inteiro numa pasta
 do computador), pastas do computador sincronizadas, backup de pendrives, um tour de boas-vindas e, no gerenciador de
-arquivos, emblemas de estado, compartilhamento, versões e atalhos pelo botão direito. Ele também
+arquivos, emblemas de estado (inclusive de erro), compartilhamento, versões e atalhos pelo botão direito. A versão 1.0
+tem paridade com o app oficial para Windows, item a item na [matriz de paridade](paridade.md). Ele também
 pausa os envios diante de arquivos que parecem cifrados por um vírus, recupera as edições se os
 dados locais se danificarem e tem um servidor MCP para assistentes de IA.
 

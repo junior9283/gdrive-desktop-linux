@@ -4,7 +4,7 @@
 
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.11.0-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-1.0.0-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-est%C3%A1vel-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
@@ -27,7 +27,7 @@ pastas.
 
 Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do zero.
 
-## O que já funciona
+## O que o app faz
 
 <p align="center">
   <img src="docs/imagens/janela-principal.png" alt="Janela principal: estado da sincronização e cartões de atenção, off-line, compartilhados, status e Gemini" width="720">
@@ -35,9 +35,9 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 
 | Área | Situação |
 |---|---|
-| **Pasta do Drive** | ✅ Todo o Meu Drive em `~/Google Drive/Meu Drive` e os Drives compartilhados em `~/Google Drive/Drives compartilhados`; os arquivos ficam na nuvem e são baixados só quando você abre (e só os trechos lidos). No modo Espelho, o Meu Drive fica inteiro numa pasta do computador. |
-| **Off-line** | ✅ "Disponível off-line" em arquivos e pastas; as alterações feitas sem internet sobem quando a conexão volta. |
-| **Sincronização** | ✅ Envio e recebimento automáticos, fila que sobrevive a reinícios, conflitos guardados no Lost and Found, lixeira, limites de banda e pausa. |
+| **Pasta do Drive** | ✅ Todo o Meu Drive em `~/Google Drive/Meu Drive` e os Drives compartilhados em `~/Google Drive/Drives compartilhados` (quando a conta tem algum); os arquivos ficam na nuvem e são baixados só quando você abre (e só os trechos lidos). No modo Espelho, o Meu Drive fica inteiro numa pasta do computador. |
+| **Off-line** | ✅ "Disponível off-line" em arquivos e pastas, e "Somente on-line" para liberar o espaço na hora; as alterações feitas sem internet sobem quando a conexão volta. |
+| **Sincronização** | ✅ Envio e recebimento automáticos, fila que sobrevive a reinícios, conflitos guardados no Lost and Found, lixeira (restaurar é arrastar de volta), limites de banda e pausa. |
 | **Documentos Google** | ✅ Docs, Planilhas e Apresentações aparecem na pasta e abrem no navegador com duplo clique. |
 | **Bandeja e janela** | ✅ Ícone na bandeja, janela principal, atividade com progresso, pesquisa rápida, erros (avisando quando são de outra conta), arquivos off-line, Preferências com as abas e a engrenagem como no original, notificações e menu da conta com foto e uso do espaço. |
 | **Primeiro uso** | ✅ Guia do Client ID dentro do app, com botões que abrem cada página do Google Cloud, Resumo do que foi escolhido e tour da janela principal. |
@@ -45,11 +45,11 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 | **Menu do botão direito** | ✅ Abrir no navegador, copiar link (com o aviso de quem pode abrir), adicionar atalho ao Drive, sincronizar uma pasta do computador, off-line / só on-line, novo Documento, Planilha ou Apresentação, atualizar e lixeira, no Dolphin, Nautilus, Nemo, Caja, Thunar e COSMIC Files. |
 | **Compartilhar e versões** | ✅ Pelo menu do botão direito: janela Compartilhar (pessoas, papéis, acesso geral e link), Gerenciar versões (baixar, restaurar, manter para sempre) e arquivos do Office abertos no Docs, Planilhas ou Apresentações. |
 | **Instalação e remoção** | ✅ Pacotes `.deb`, `.rpm`, Arch e `.tar.gz`, e um desinstalador com a opção de apagar também os dados do computador. |
-| **Ícones de status** | ✅ Na nuvem, off-line, sincronizando e em conflito, no Dolphin, também nas pastas do computador sincronizadas. A pasta do Drive fica fora do indexador do KDE (Baloo), que baixaria tudo para ler. |
+| **Ícones de status** | ✅ Na nuvem, off-line, sincronizando, em conflito e com erro, no Dolphin, também nas pastas do computador sincronizadas. A pasta do Drive fica fora do indexador do KDE (Baloo), que baixaria tudo para ler. |
 | **Backup e espelho** | ✅ Pastas do computador sincronizadas com "Computadores" no Drive, o Meu Drive em modo Espelho (cópia completa numa pasta comum, com a troca de volta para o Stream) e backup de pendrives e cartões de memória quando são conectados. |
-| **Contas** | ✅ Até 4 contas Google ao mesmo tempo, cada uma com a própria pasta, trocadas pelo menu da conta. |
+| **Contas** | ✅ Até 4 contas Google ao mesmo tempo, cada uma com a própria pasta (que pode ser mudada), trocadas pelo menu da conta. |
 | **Drives compartilhados** | ✅ Na pasta de cada conta e numa visão própria da janela principal, com a janela "Gerenciar drives compartilhados" para escolher quais aparecem e criar um novo. |
-| **Proteção e recuperação** | ✅ Arquivos regravados com cara de cifrados por um vírus pausam os envios e pedem confirmação; dados locais danificados são refeitos a partir do Drive, com as edições pendentes guardadas no Lost and Found, que pode ser levado inteiro para uma pasta escolhida. |
+| **Proteção e recuperação** | ✅ Arquivos regravados com cara de cifrados por um vírus, ou renomeados em massa para extensões de cifrado, pausam os envios e pedem confirmação; dados locais danificados são refeitos a partir do Drive, com as edições pendentes guardadas no Lost and Found, que pode ser levado inteiro para uma pasta escolhida. |
 | **Avisos** | ✅ Sem permissão, conta bloqueada, armazenamento quase cheio, disco cheio, envios parados há dias, itens recuperados, limites do Drive, login bloqueado pela organização, itens movidos para onde outras pessoas veem, nova versão do app e os demais, cada tipo podendo ser desligado nas preferências de notificação. |
 | **Diagnóstico e feedback** | ✅ Registro detalhado, pacote de informações de diagnóstico sem tokens nem e-mails, Enviar feedback (issue já preenchida) e relatório de falhas, enviado só por você. |
 | **Assistentes de IA** | ✅ Servidor MCP: estado e link de um caminho, pastas acompanhadas, janela Compartilhar com o e-mail já digitado e adicionar pastas à sincronização. |
@@ -273,8 +273,8 @@ Cada etapa sai funcionando antes da próxima.
 | 0.8 | Várias contas e Drives compartilhados |
 | 0.9 | Backup de pastas, pastas conectadas, modo espelho e dispositivos |
 | 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes, ransomware e recuperação do banco |
-| 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria ← **estamos aqui** |
-| 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) |
+| 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria |
+| 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) ← **estamos aqui** |
 
 ## Versionamento
 

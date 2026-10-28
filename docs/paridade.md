@@ -27,7 +27,7 @@ Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packagin
 | 0.9 | Backup de pastas ("Meu computador"), pastas conectadas e "Computadores", modo Espelho com troca entre modos, dispositivos removíveis ✅ (NAS fica como diferença) |
 | 0.10 | Diagnóstico, registro detalhado e feedback; notificações restantes e aviso de nova versão; servidor MCP; políticas restantes; ransomware e recuperação do banco ✅ |
 | 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria ✅ |
-| 1.0 | Matriz toda conferida, "Diferenças inevitáveis" no README |
+| 1.0 | Matriz toda conferida, "Diferenças inevitáveis" no README ✅ |
 
 
 Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: até 4 contas, cada uma com a própria montagem (Meu Drive e Drives compartilhados); modo Stream ou Espelho, pastas do computador em "Computadores" e backup de dispositivos.

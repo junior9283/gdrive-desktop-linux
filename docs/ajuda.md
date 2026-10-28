@@ -5,7 +5,8 @@
 1. Crie o seu Client ID seguindo o [guia do Client ID](guia-client-id.md).
 2. Clique no ícone do Google Drive na bandeja e escolha **Fazer login**.
 3. Depois do login, a pasta `~/Google Drive` aparece com o `Meu Drive` dentro, e também no painel
-   "Locais" do Dolphin. Os Drives compartilhados ficam em `~/Google Drive/Drives compartilhados`.
+   "Locais" do Dolphin. Os Drives compartilhados, se a conta tiver algum, ficam em
+   `~/Google Drive/Drives compartilhados`.
 4. O primeiro uso termina com um **Resumo** do que foi escolhido e oferece o **tour** da janela
    principal, que também fica nas Preferências.
 
@@ -13,7 +14,8 @@
 
 Pelo menu da conta (a foto no alto da janela), **Adicionar outra conta** entra com mais uma conta
 Google, até 4. Cada conta ganha a própria pasta, `~/Google Drive (<e-mail>)`, e todas sincronizam
-ao mesmo tempo. Clicar numa conta da lista troca a conta mostrada na janela. Quando o acesso de uma
+ao mesmo tempo; em **Preferências › Google Drive**, **Alterar** muda a pasta da conta mostrada
+(vale depois de reiniciar o app). Clicar numa conta da lista troca a conta mostrada na janela. Quando o acesso de uma
 conta expira, ela aparece com **Entrar de novo**; as outras continuam sincronizando. Em **Mais
 opções** há **Desconectar todas as contas**.
 
@@ -42,7 +44,15 @@ Em **Preferências › Meu computador**, **Adicionar pasta** sincroniza uma past
 fora do Drive oferece **Sincronizar esta pasta com o Google Drive**. Nada é apagado de vez: o que
 você exclui no computador vai para a lixeira do Drive, e o que sai do Drive vai para a lixeira do
 sistema. Se muitos arquivos somem de uma vez, a pasta para e pergunta antes. Pastas de rede não
-podem ser sincronizadas.
+podem ser sincronizadas. A aba sugere pastas comuns (Documentos, Imagens…) para adicionar com um
+clique.
+
+## Lixeira
+
+Excluir um arquivo da pasta do Drive o manda para a lixeira do Drive, que o guarda por 30 dias. A
+pasta `.Lixeira do Drive` mostra o que está lá, só para ler; para restaurar, arraste o item para
+uma pasta do Drive (se já existir um com o mesmo nome, os dois ficam). A lixeira do Dolphin também
+restaura o que foi mandado por ela.
 
 ## Pendrives e cartões de memória
 
@@ -70,8 +80,11 @@ ignorá-lo ou desligar a pergunta.
 ## Arquivos off-line
 
 Use `gdrive-desktop-linux pin <caminho>` no terminal para deixar um arquivo ou pasta disponível
-off-line, e `gdrive-desktop-linux unpin <caminho>` para voltar a deixá-lo só na nuvem. A tela
-**Arquivos off-line** mostra o que está no computador e o espaço usado.
+off-line, e `gdrive-desktop-linux unpin <caminho>` para voltar a deixá-lo só na nuvem (o mesmo
+que **Somente on-line** no botão direito, que libera o espaço na hora). A tela **Arquivos
+off-line** mostra o que está no computador e o espaço usado. Mudar a pasta do cache nas
+configurações leva os arquivos baixados para o lugar novo sem reiniciar o app, com um aviso que
+mostra a porcentagem.
 
 ## Menu do botão direito
 
@@ -80,7 +93,8 @@ navegador, copiar o link (o aviso diz quem pode abrir), disponível off-line ou 
 **Compartilhar** (pessoas, papéis e acesso geral), **Gerenciar versões** (baixar, restaurar ou
 manter para sempre), **Adicionar atalho ao Drive** (escolhendo a pasta) e, nos arquivos do Office,
 abrir no Documentos, Planilhas ou Apresentações. No
-Dolphin, cada arquivo mostra também um emblema: na nuvem, off-line, sincronizando ou em conflito.
+Dolphin, cada arquivo mostra também um emblema: na nuvem, off-line, sincronizando, em conflito ou
+com erro (o "!" some quando o envio dá certo).
 
 No KDE, o app tira a pasta do Drive do indexador de arquivos (Baloo), que baixaria tudo para ler o
 conteúdo; as outras pastas excluídas continuam como estavam. Desinstalar desfaz a mudança.
@@ -88,7 +102,8 @@ conteúdo; as outras pastas excluídas continuam como estavam. Desinstalar desfa
 ## Atividade suspeita nos arquivos
 
 Se muitos arquivos forem regravados de um jeito que lembra um vírus que cifra arquivos (vinte em um
-minuto), o app pausa os envios da conta e avisa. As versões anteriores continuam no Drive. No
+minuto), ou renomeados para extensões de arquivo cifrado como `.locked`, o app pausa os envios da
+conta e avisa. As versões anteriores continuam no Drive. No
 aviso: **Verificar** abre a janela principal, **Eu reconheço esta atividade** retoma e não avisa de
 novo por uma hora (por exemplo, quando você mesmo está cifrando arquivos) e **Permitir
 sincronização** retoma. Fotos, vídeos, `.zip` e outros formatos já comprimidos não contam.

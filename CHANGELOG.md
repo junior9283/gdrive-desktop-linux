@@ -7,6 +7,45 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.0.0] - 2026-10-28
+
+Primeira versão estável: cada item da [matriz de paridade](docs/paridade.md) com a versão Windows
+está feito, ou registrado em "Diferenças inevitáveis" no README.
+
+### Adicionado
+- Lixeira do Drive: arrastar um item da `.Lixeira do Drive` para uma pasta do Drive o restaura; um
+  nome repetido não substitui nada (os dois ficam, numerados).
+- Emblema de erro no Dolphin: o arquivo que está na lista de erros aparece com "!" e volta ao
+  normal quando o envio dá certo.
+- Preferências › Google Drive: "Alterar" muda a pasta da conta mostrada (vale ao reiniciar).
+- Mudar a pasta do cache não pede mais para reiniciar: o app para as contas, leva o cache com o
+  aviso em porcentagem e as reabre.
+- Atividade suspeita: renomear muitos arquivos para extensões de arquivo cifrado (`.locked`,
+  `.encrypted`…) também pausa os envios.
+- Avisos com "Não mostrar de novo" no próprio aviso e na lista da janela; o aviso de dispositivo
+  traz "Sempre fazer backup" e "Ignorar".
+- Aviso ao mover algo para fora de um Drive compartilhado.
+- Aba "Meu computador": sugestões de pastas para adicionar com um clique.
+- Login: um link para criar uma conta Google no passo de entrar.
+- Gerenciar versões diz quando o arquivo não tem versões e quando a lista não carregou, com
+  "Tentar de novo".
+- "Gerenciar drives compartilhados" escolhe a conta quando há mais de uma.
+
+### Mudado
+- "Somente on-line" libera o espaço na hora (sem tocar no que está aberto ou ainda não subiu).
+- "Drives compartilhados" só aparece na pasta da conta quando ela tem algum.
+- "Retomar" no aviso de gravação com a sincronização pausada retoma o app inteiro.
+- Sair pela bandeja com algo pendente pede confirmação na janela principal.
+- Redefinir dados locais diz qual conta será redefinida; "Terminar de sincronizar" só diz que
+  desconectou depois do último envio.
+- "Mover tudo para…" do Lost and Found segue nas falhas e diz quantos itens foram, e recusa
+  também uma montagem atrás de um link e as pastas do app.
+- O aviso de pasta de outra pessoa só aparece quando alguém passa a ver o item.
+- O menu "Disponível off-line" diz quando só parte dos itens está off-line.
+- D-Bus: `SetMountPoint`; `ContentCachePath` deixa de pedir reinício; todo `LoginFinished` com
+  erro traz um motivo estável; o atributo `user.gdl.state` ganha o valor `error`.
+- O MCP recusa levar para o Drive uma pasta com links ou arquivos especiais.
+
 ## [0.11.0] - 2026-10-28
 
 ### Adicionado
@@ -520,7 +559,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.11.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.11.0...v1.0.0
 [0.11.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.8.0...v0.9.0

@@ -14,6 +14,8 @@ pub enum DriveError {
     NotFound,
     #[error("sem permissão para esta ação no Drive")]
     PermissionDenied,
+    #[error("a organização bloqueou esta conta para o Google Drive")]
+    AccountDisabled,
     #[error("o armazenamento da conta está cheio")]
     QuotaExceeded,
     #[error("limite diário de envio do Google Drive atingido")]

@@ -160,19 +160,37 @@ impl Daemon {
         // muda para um que pede ação, ao usuário pelo aviso; o emblema da raiz muda junto.
         let daemon = Arc::downgrade(self);
         let (mut changes, until) = (sync.state_changes(), stop.clone());
+        let mut trashed = sync.trashed_changes();
+        let mut trashed_seen = *trashed.borrow();
         let (email, root) = (
             account.email.clone(),
             sync.pair().local.display().to_string(),
         );
         tokio::spawn(async move {
             loop {
+                // A comparação mandou itens que saíram do Drive para a lixeira do sistema.
+                let mut sent_to_trash = None;
                 tokio::select! {
                     () = until.cancelled() => break,
                     changed = changes.changed() => if changed.is_err() { break },
+                    changed = trashed.changed() => match changed {
+                        Ok(()) => {
+                            let total = *trashed.borrow_and_update();
+                            sent_to_trash = Some(total - trashed_seen);
+                            trashed_seen = total;
+                        }
+                        Err(_) => break,
+                    },
                 }
                 let Some(daemon) = daemon.upgrade() else {
                     break;
                 };
+                if let Some(count) = sent_to_trash {
+                    let note = notify::items_trashed(count, &daemon.i18n);
+                    let account = email.clone();
+                    daemon.notify(&Notification { account, ..note }).await;
+                    continue;
+                }
                 daemon.emit_local_folders_changed().await;
                 daemon
                     .emit_states_changed(std::slice::from_ref(&root))

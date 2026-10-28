@@ -70,6 +70,7 @@ impl Mounted {
                 uploads_idle: Duration::from_millis(20),
                 maintenance: Duration::from_millis(50),
                 eviction: Duration::from_millis(200),
+                ..Intervals::default()
             });
         engine.ensure_indexed().await.unwrap();
         let engine = Arc::new(engine);

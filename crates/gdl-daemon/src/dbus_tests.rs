@@ -2532,6 +2532,37 @@ async fn added_folder_syncs_to_computers() {
     assert!(!h.drive().join("Computadores").exists());
 }
 
+/// Excluir no Drive um arquivo de uma pasta do computador manda a cópia local para a lixeira do
+/// sistema e avisa quantos itens foram.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn items_trashed_from_drive_warn() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    h.proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+
+    h.fake.trash_remote(&h.fake.find_live("a.txt")[0]);
+
+    wait_until("a.txt na lixeira", || !docs.join("a.txt").exists()).await;
+    wait_until("aviso da lixeira", || {
+        h.notes()
+            .iter()
+            .any(|n| n.summary == "Itens movidos para a lixeira")
+    })
+    .await;
+    let note = h
+        .notes()
+        .into_iter()
+        .find(|n| n.summary == "Itens movidos para a lixeira")
+        .unwrap();
+    assert!(note.body.contains("Um item"), "{note:?}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn other_computers_show_in_the_mount() {
     let h = Harness::new().await;

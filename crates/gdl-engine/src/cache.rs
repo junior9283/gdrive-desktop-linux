@@ -5,7 +5,7 @@ use std::io::SeekFrom;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::{Bytes, BytesMut};
@@ -28,6 +28,8 @@ const MAX_READ_AHEAD: u64 = 64 * 1024 * 1024;
 const MAX_REQUEST: u64 = 16 * 1024 * 1024;
 /// O último acesso de um item é gravado no banco no máximo uma vez neste intervalo.
 const TOUCH_EVERY_MS: i64 = 60_000;
+/// O aviso de disco local cheio sai no máximo uma vez neste intervalo.
+pub(crate) const DISK_FULL_EVERY_MS: i64 = 5 * 60_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CacheError {
@@ -98,6 +100,8 @@ struct Inner {
     free: Arc<dyn FreeSpace>,
     /// Já avisamos que o disco está cheio (o aviso sai só na passagem para cheio).
     disk_low: AtomicBool,
+    /// Hora do último aviso de disco local cheio (`i64::MIN`: nunca).
+    disk_full_at: AtomicI64,
     items: Mutex<HashMap<ItemId, ItemState>>,
 }
 
@@ -211,8 +215,28 @@ impl BlockCache {
             events,
             free,
             disk_low: AtomicBool::new(false),
+            disk_full_at: AtomicI64::new(i64::MIN),
             items: Mutex::default(),
         }))
+    }
+
+    /// Uma gravação no conteúdo local falhou: com o disco cheio (`ENOSPC`), avisa
+    /// (`LocalDiskFull`), no máximo uma vez a cada `DISK_FULL_EVERY_MS`.
+    pub fn note_write_error(&self, e: &std::io::Error, now: i64) {
+        if e.kind() != std::io::ErrorKind::StorageFull {
+            return;
+        }
+        let due = |last: i64| last == i64::MIN || now - last >= DISK_FULL_EVERY_MS;
+        let at = &self.0.disk_full_at;
+        if at
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+                due(last).then_some(now)
+            })
+            .is_ok()
+        {
+            // Sem ninguém ouvindo, o aviso pode se perder.
+            let _ = self.0.events.send(EngineEvent::LocalDiskFull);
+        }
     }
 
     /// Espaço livre no disco do cache, em bytes.
@@ -984,6 +1008,25 @@ mod tests {
 
         assert_eq!(got.as_ref(), &data(MIB)[..10]);
         assert!(!old_path.exists(), "o mais antigo saiu do cache");
+    }
+
+    #[tokio::test]
+    async fn full_disk_on_write_warns_once_in_a_while() {
+        let (mut s, _) = setup(&[], None).await;
+        let full = std::io::Error::from(std::io::ErrorKind::StorageFull);
+
+        s.cache.note_write_error(&full, 0);
+        s.cache.note_write_error(&full, 60_000);
+        s.cache
+            .note_write_error(&std::io::Error::other("outro erro"), 60_000);
+        assert_eq!(s.events.try_recv().unwrap(), EngineEvent::LocalDiskFull);
+        assert!(
+            s.events.try_recv().is_err(),
+            "o mesmo disco cheio, um aviso"
+        );
+
+        s.cache.note_write_error(&full, DISK_FULL_EVERY_MS);
+        assert_eq!(s.events.try_recv().unwrap(), EngineEvent::LocalDiskFull);
     }
 
     #[tokio::test]

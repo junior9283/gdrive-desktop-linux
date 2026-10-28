@@ -131,6 +131,32 @@ pub enum EngineEvent {
     FolderMoveUnsupported {
         name: String,
     },
+    /// O Drive recusou mexer num item da montagem por falta de permissão.
+    NoPermission {
+        action: DeniedAction,
+        name: String,
+    },
+    /// O armazenamento da conta subiu para a faixa de `percent` (90 ou 95).
+    QuotaAlmostFull {
+        percent: u8,
+    },
+    /// Envios na fila há mais de 3 dias que ainda não tinham sido avisados.
+    UploadsStuck {
+        count: usize,
+    },
+    /// Uma gravação na montagem falhou com o disco local cheio.
+    LocalDiskFull,
+    /// A organização bloqueou a conta para o Drive (`403 domainPolicy`).
+    AccountDisabled,
+}
+
+/// O que o Drive recusou fazer (`EngineEvent::NoPermission`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeniedAction {
+    Create,
+    Move,
+    Rename,
+    Delete,
 }
 
 #[cfg(test)]

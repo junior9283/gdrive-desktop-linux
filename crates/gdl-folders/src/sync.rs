@@ -53,6 +53,8 @@ pub struct Report {
     pub applied: usize,
     /// Caminhos que falharam na última passada, com o erro; os outros seguem.
     pub failed: Vec<(String, String)>,
+    /// Itens locais que foram para a lixeira do sistema porque saíram do Drive.
+    pub trashed: usize,
 }
 
 /// O que o Espelho grava além dos arquivos: o ponteiro de cada documento Google (com o e-mail da
@@ -80,6 +82,9 @@ pub struct FolderSync {
     pub(crate) wake: tokio::sync::Notify,
     /// Muda a cada troca do estado do par (para a interface).
     state_changed: tokio::sync::watch::Sender<PairState>,
+    /// Quantos itens as comparações já mandaram para a lixeira do sistema (para o aviso: quem
+    /// ouve avisa a diferença, e duas comparações seguidas não se perdem).
+    trashed: tokio::sync::watch::Sender<usize>,
     /// Os caminhos relativos que ficaram sincronizados desde `take_synced` (para os emblemas;
     /// um caminho que some ou muda de nome o gerenciador de arquivos já redesenha sozinho).
     newly_synced: Mutex<Vec<String>>,
@@ -108,6 +113,7 @@ impl FolderSync {
             deletes_confirmed: AtomicU64::new(0),
             wake: tokio::sync::Notify::new(),
             state_changed: tokio::sync::watch::Sender::new(state),
+            trashed: tokio::sync::watch::Sender::new(0),
             newly_synced: Mutex::default(),
             synced_notify: tokio::sync::Notify::new(),
             links: None,
@@ -148,6 +154,11 @@ impl FolderSync {
     /// Avisa a cada troca de estado do par.
     pub fn state_changes(&self) -> tokio::sync::watch::Receiver<PairState> {
         self.state_changed.subscribe()
+    }
+
+    /// Avisa a cada comparação que mandou itens para a lixeira do sistema, com o total até aqui.
+    pub fn trashed_changes(&self) -> tokio::sync::watch::Receiver<usize> {
+        self.trashed.subscribe()
     }
 
     /// Quantos caminhos do computador ainda não foram para o Drive como estão aqui (novos ou
@@ -214,6 +225,9 @@ impl FolderSync {
                 Err(e) => return Err(e),
             }
         }
+        if report.trashed > 0 {
+            self.trashed.send_modify(|total| *total += report.trashed);
+        }
         Ok(report)
     }
 
@@ -262,6 +276,7 @@ impl FolderSync {
             }
         }
         self.write_links(&v, report);
+        report.trashed += v.trashed;
         Ok(v.again)
     }
 
@@ -307,6 +322,7 @@ impl FolderSync {
             dirs,
             gone: None,
             again: false,
+            trashed: 0,
         })
     }
 
@@ -503,6 +519,7 @@ impl FolderSync {
                 if Local::stat(&path)? == local {
                     self.trash.put(&path)?;
                     self.forget(v, rel)?;
+                    v.trashed += 1;
                 } else {
                     v.again = true;
                 }
@@ -817,6 +834,8 @@ struct View {
     /// vêm em ordem, então o que está abaixo dele vem logo em seguida.
     gone: Option<String>,
     again: bool,
+    /// Quantos itens locais esta passada mandou para a lixeira do sistema.
+    trashed: usize,
 }
 
 impl View {
@@ -1292,12 +1311,23 @@ mod tests {
         w.reconcile().await;
 
         w.fake.trash_remote(&id);
-        w.reconcile().await;
+        w.refresh().await;
+        let sync = w.sync_with(8);
+        let mut trashed = sync.trashed_changes();
+        let report = sync.reconcile().await.unwrap();
 
         assert!(w.local_names().is_empty());
         assert_eq!(
             std::fs::read(w.trash_dir.join("files/a.txt")).unwrap(),
             b"guardado"
+        );
+        assert_eq!(report.trashed, 1);
+        assert!(trashed.has_changed().unwrap());
+        assert_eq!(*trashed.borrow_and_update(), 1, "um aviso por passada");
+        assert_eq!(sync.reconcile().await.unwrap().trashed, 0);
+        assert!(
+            !trashed.has_changed().unwrap(),
+            "passada sem lixeira, sem aviso"
         );
         assert!(w.store.synced_of(w.pair.id).unwrap().is_empty());
     }

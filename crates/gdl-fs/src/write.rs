@@ -250,7 +250,10 @@ impl Inner {
 
     pub(crate) fn write(&self, fh: u64, offset: u64, data: &[u8]) -> Res<u32> {
         let (file, inode) = self.handle_file(fh).ok_or(Errno::EBADF)?;
-        file.write_all_at(data, offset).map_err(Errno::from)?;
+        file.write_all_at(data, offset).map_err(|e| {
+            self.engine.cache().note_write_error(&e, now_ms());
+            Errno::from(e)
+        })?;
         if let Some(inode) = inode {
             self.mark_written(inode);
         }

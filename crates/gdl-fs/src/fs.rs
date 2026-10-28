@@ -17,6 +17,7 @@ use fuser::{
     ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyStatfs,
     ReplyWrite, ReplyXattr, Request, TimeOrNow, WriteFlags,
 };
+use gdl_drive::client::DriveError;
 use gdl_engine::EngineError;
 use gdl_engine::cache::CacheError;
 use gdl_engine::engine::Engine;
@@ -213,6 +214,7 @@ pub(crate) fn errno(e: impl Into<EngineError>) -> Errno {
     match e.into() {
         EngineError::NotFound | EngineError::Cache(CacheError::NotFound) => Errno::ENOENT,
         EngineError::Cache(CacheError::DiskFull) => Errno::ENOSPC,
+        EngineError::Drive(DriveError::PermissionDenied) => Errno::EACCES,
         // `EXDEV` faria o gerenciador de arquivos copiar e apagar a pasta.
         EngineError::FolderCrossDrive => Errno::EPERM,
         _ => Errno::EIO,

@@ -287,6 +287,41 @@ async fn moving_a_file_into_a_shared_drive_moves_it_and_warns() {
     assert!(warnings(&mut events).is_empty());
 }
 
+/// Renomear, mover ou excluir um arquivo só de leitura: o Drive recusa, a montagem responde
+/// "sem permissão" e o usuário é avisado com o nome.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_permission_rename_warns() {
+    let fake = FakeDrive::start().await;
+    let (_, file) = drive_and_my_files(&fake);
+    fake.make_read_only(&file);
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+    let folder = m.drive().join("Pasta");
+
+    let renamed = std::fs::rename(folder.join("a.txt"), folder.join("b.txt"));
+    let moved = std::fs::rename(folder.join("a.txt"), m.drive().join("a.txt"));
+    let removed = std::fs::remove_file(folder.join("a.txt"));
+
+    for result in [renamed, moved, removed] {
+        let e = result.unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+    }
+    assert_eq!(names(&folder), ["a.txt"]);
+    let denied = |action| EngineEvent::NoPermission {
+        action,
+        name: "a.txt".into(),
+    };
+    use gdl_engine::events::DeniedAction;
+    assert_eq!(
+        warnings(&mut events),
+        [
+            denied(DeniedAction::Rename),
+            denied(DeniedAction::Move),
+            denied(DeniedAction::Delete)
+        ]
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mtime_set_by_app_is_kept_after_upload() {
     let m = Mounted::new(FakeDrive::start().await).await;

@@ -396,6 +396,7 @@ fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
             uploads_idle: Duration::from_millis(20),
             maintenance: Duration::from_millis(50),
             eviction: Duration::from_millis(200),
+            ..Intervals::default()
         },
         computer: crate::daemon::Computer {
             id: COMPUTER_ID.into(),

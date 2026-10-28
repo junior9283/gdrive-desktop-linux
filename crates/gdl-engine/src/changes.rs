@@ -22,6 +22,8 @@ pub struct ChangePoller {
     cache: BlockCache,
     events: broadcast::Sender<EngineEvent>,
     offline: AtomicBool,
+    /// A última consulta esbarrou na conta bloqueada pela organização.
+    account_disabled: AtomicBool,
     /// Hora da última consulta bem-sucedida; 0 enquanto não houve nenhuma.
     last_sync_ms: AtomicI64,
     /// Drives das mudanças que a lista de Drives não trouxe: sem procurar de novo a cada
@@ -178,6 +180,7 @@ impl ChangePoller {
             cache,
             events,
             offline: AtomicBool::new(false),
+            account_disabled: AtomicBool::new(false),
             last_sync_ms: AtomicI64::new(0),
             searched_drives: Mutex::default(),
             drives_listed: AtomicBool::new(false),
@@ -302,6 +305,10 @@ impl ChangePoller {
         let result = self.run_once().await;
         let now_offline = matches!(result, Err(EngineError::Drive(DriveError::Offline)));
         self.set_offline(now_offline);
+        let disabled = matches!(result, Err(EngineError::Drive(DriveError::AccountDisabled)));
+        if self.account_disabled.swap(disabled, Ordering::Relaxed) != disabled && disabled {
+            let _ = self.events.send(EngineEvent::AccountDisabled);
+        }
         match result {
             Ok(_) => self.last_sync_ms.store(now_ms(), Ordering::Relaxed),
             Err(_) if now_offline => {}
@@ -345,6 +352,26 @@ mod tests {
         assert!(announced.contains(&ItemId(id)), "{announced:?}");
         poller.run_once().await.unwrap();
         assert!(events.try_recv().is_err(), "nada mudou, nada é anunciado");
+    }
+
+    #[tokio::test]
+    async fn blocked_account_is_announced_once() {
+        let (env, poller) = indexed().await;
+        initial_index(&env.store, &env.client).await.unwrap();
+        let mut events = poller.events.subscribe();
+        env.fake.inject(Fault::AccountDisabled { times: 100 });
+
+        poller.poll().await;
+        poller.poll().await;
+        env.fake.clear_faults();
+        poller.poll().await;
+        env.fake.inject(Fault::AccountDisabled { times: 100 });
+        poller.poll().await;
+
+        let blocked = std::iter::from_fn(|| events.try_recv().ok())
+            .filter(|e| *e == EngineEvent::AccountDisabled)
+            .count();
+        assert_eq!(blocked, 2, "uma vez por bloqueio, de novo depois de voltar");
     }
 
     #[tokio::test]

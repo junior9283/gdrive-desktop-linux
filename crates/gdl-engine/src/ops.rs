@@ -15,7 +15,7 @@ use gdl_store::{DriveRoot, Item, ItemId, ItemKind, LocalState};
 use crate::activity::ActivityState;
 use crate::changes::apply_changes;
 use crate::engine::Engine;
-use crate::events::EngineEvent;
+use crate::events::{DeniedAction, EngineEvent};
 use crate::gdocs::{is_pointer_extension, pointer_doc_id};
 use crate::uploads::{
     UPLOAD_DELAY_MS, commit_local_write_at, create_local_item, enqueue_upload, is_local_id,
@@ -68,7 +68,7 @@ impl Engine {
             match created {
                 Ok(remote) => return self.applied(remote),
                 Err(DriveError::Offline) => {}
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(self.denied(DeniedAction::Create, name, e.into())),
             }
         }
         let item = create_local_item(&self.store, parent, name, ItemKind::Folder)?;
@@ -167,7 +167,9 @@ impl Engine {
             };
         }
         self.note(&item, ActivityState::Trashing);
-        self.applied(self.client.set_trashed(&id.0, true).await?)?;
+        let trashed = (self.client.set_trashed(&id.0, true).await)
+            .map_err(|e| self.denied(DeniedAction::Delete, &item.local_name, e.into()))?;
+        self.applied(trashed)?;
         self.note(&item, ActivityState::Trashed);
         Ok(())
     }
@@ -184,6 +186,15 @@ impl Engine {
         let restored = self.applied(self.client.set_trashed(&id.0, false).await?)?;
         self.note(&restored, ActivityState::Restored);
         Ok(restored)
+    }
+
+    /// Avisa (`NoPermission`) quando o erro é a recusa do Drive por falta de permissão.
+    fn denied(&self, action: DeniedAction, name: &str, e: EngineError) -> EngineError {
+        if let EngineError::Drive(DriveError::PermissionDenied) = e {
+            let name = name.to_owned();
+            let _ = self.events.send(EngineEvent::NoPermission { action, name });
+        }
+        e
     }
 
     fn note(&self, item: &Item, state: ActivityState) {
@@ -216,6 +227,12 @@ impl Engine {
     /// que passa a um Drive compartilhado muda quem o vê: avisa.
     pub async fn move_item(&self, id: &ItemId, parent: &ItemId, name: &str) -> Result<Item> {
         let item = self.item(id)?;
+        let action = if item.parent.as_ref() == Some(parent) {
+            DeniedAction::Rename
+        } else {
+            DeniedAction::Move
+        };
+        let old_name = item.local_name.clone();
         // Só consulta as raízes quando a pasta de cima muda.
         let into_shared = match item.parent.as_ref().filter(|old| *old != parent) {
             Some(old) => {
@@ -230,7 +247,8 @@ impl Engine {
             }
             None => false,
         };
-        let moved = self.relocate(item, id, parent, name).await?;
+        let moved = (self.relocate(item, id, parent, name).await)
+            .map_err(|e| self.denied(action, &old_name, e))?;
         if into_shared {
             let _ = self.events.send(EngineEvent::MovedToSharedDrive {
                 name: moved.local_name.clone(),

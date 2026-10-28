@@ -73,6 +73,32 @@ notify-kind-copied-as-shortcut = Google Docs copied as shortcuts
 notify-kind-mount-moved = Drive folder opened in another place
 notify-kind-resume-syncing = Files saved while syncing is paused
 notify-kind-offline = No internet connection
+notify-no-permission-title = Action refused in Drive
+notify-no-permission-body = You don't have permission to { $action } "{ $name }".
+no-permission-create = create
+no-permission-move = move
+no-permission-rename = rename
+no-permission-delete = delete
+notify-quota-almost-title = Storage almost full
+notify-quota-almost-body = The account is using { $percent }% of its storage. When it's full, new files and edits stop uploading.
+notify-uploads-stuck-title = Uploads stuck
+notify-uploads-stuck-body = { $count ->
+    [1] One file has been waiting to upload for more than 3 days. See Activity for details.
+   *[other] { $count } files have been waiting to upload for more than 3 days. See Activity for details.
+}
+notify-local-disk-full-title = Computer disk full
+notify-local-disk-full-body = There's no room on the disk to save Drive files. Free up space to keep saving.
+notify-account-disabled-title = Account blocked for Drive
+notify-account-disabled-body = Whoever manages this account blocked access to Drive. Nothing syncs until access is back; contact your administrator.
+notify-items-trashed-title = Items moved to the trash
+notify-items-trashed-body = { $count ->
+    [1] One item left Drive and went to the computer's trash.
+   *[other] { $count } items left Drive and went to the computer's trash.
+}
+notify-kind-quota-almost-full = Storage almost full
+notify-kind-uploads-stuck = Uploads stuck for days
+notify-kind-items-trashed = Computer folder items moved to the trash
+notify-kind-no-permission = Actions refused for lack of permission
 
 # Signing in and out
 login-rejected = The account { $email } isn't allowed on this computer.

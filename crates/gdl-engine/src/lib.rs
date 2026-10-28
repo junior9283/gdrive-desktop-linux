@@ -8,6 +8,7 @@ pub mod engine;
 pub mod errors;
 pub mod events;
 pub mod gdocs;
+pub mod health;
 pub mod ids;
 pub mod indexer;
 pub mod kept;

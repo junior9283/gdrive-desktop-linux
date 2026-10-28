@@ -39,6 +39,8 @@ pub struct Intervals {
     /// Download dos itens fixados.
     pub maintenance: Duration,
     pub eviction: Duration,
+    /// Conferência da cota e dos envios parados (`check_health`).
+    pub health: Duration,
 }
 
 impl Default for Intervals {
@@ -48,6 +50,7 @@ impl Default for Intervals {
             uploads_idle: Duration::from_secs(1),
             maintenance: Duration::from_secs(30),
             eviction: Duration::from_secs(60),
+            health: Duration::from_secs(30 * 60),
         }
     }
 }
@@ -435,6 +438,7 @@ impl Engine {
             () = self.upload_loop() => {}
             () = self.every(self.intervals.maintenance, true, || self.maintain()) => {}
             () = self.every(self.intervals.eviction, false, || self.evict()) => {}
+            () = self.every(self.intervals.health, true, || self.health()) => {}
         }
         // Desmontagem: as semeaduras em curso param junto, sem apagar nada.
         self.thumbs.stop();
@@ -545,6 +549,13 @@ impl Engine {
         }
     }
 
+    async fn health(&self) {
+        match self.check_health(now_ms()).await {
+            Ok(()) | Err(crate::EngineError::Drive(gdl_drive::client::DriveError::Offline)) => {}
+            Err(e) => tracing::warn!(erro = %e, "falha ao conferir a cota e os envios parados"),
+        }
+    }
+
     async fn maintain(&self) {
         match self.pins.maintain_once().await {
             Err(crate::EngineError::Cache(e)) if e.is_transient() => {}
@@ -586,6 +597,7 @@ mod tests {
             uploads_idle: Duration::from_millis(10),
             maintenance: Duration::from_millis(20),
             eviction: Duration::from_millis(50),
+            ..Intervals::default()
         }
     }
 

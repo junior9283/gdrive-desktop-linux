@@ -73,6 +73,32 @@ notify-kind-copied-as-shortcut = Documentos Google copiados como atalho
 notify-kind-mount-moved = Pasta do Drive aberta em outro lugar
 notify-kind-resume-syncing = Arquivos gravados com a sincronização pausada
 notify-kind-offline = Sem conexão com a internet
+notify-no-permission-title = Ação recusada no Drive
+notify-no-permission-body = Você não tem permissão para { $action } "{ $name }".
+no-permission-create = criar
+no-permission-move = mover
+no-permission-rename = renomear
+no-permission-delete = excluir
+notify-quota-almost-title = Armazenamento quase cheio
+notify-quota-almost-body = A conta já usa { $percent }% do armazenamento. Quando ele encher, arquivos novos e edições deixam de subir.
+notify-uploads-stuck-title = Envios parados
+notify-uploads-stuck-body = { $count ->
+    [1] Um arquivo espera para subir há mais de 3 dias. Veja os detalhes na Atividade.
+   *[other] { $count } arquivos esperam para subir há mais de 3 dias. Veja os detalhes na Atividade.
+}
+notify-local-disk-full-title = Disco do computador cheio
+notify-local-disk-full-body = Não há espaço no disco para gravar arquivos do Drive. Libere espaço para continuar salvando.
+notify-account-disabled-title = Conta bloqueada para o Drive
+notify-account-disabled-body = Quem administra esta conta bloqueou o acesso ao Drive. Nada sincroniza até o acesso voltar; fale com o administrador.
+notify-items-trashed-title = Itens movidos para a lixeira
+notify-items-trashed-body = { $count ->
+    [1] Um item saiu do Drive e foi para a lixeira do computador.
+   *[other] { $count } itens saíram do Drive e foram para a lixeira do computador.
+}
+notify-kind-quota-almost-full = Armazenamento quase cheio
+notify-kind-uploads-stuck = Envios parados há dias
+notify-kind-items-trashed = Itens das pastas do computador movidos para a lixeira
+notify-kind-no-permission = Ações recusadas por falta de permissão
 
 # Login e saída da conta
 login-rejected = A conta { $email } não é permitida neste computador.

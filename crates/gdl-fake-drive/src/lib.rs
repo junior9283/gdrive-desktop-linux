@@ -28,6 +28,9 @@ pub enum Fault {
     Status { code: u16, times: u32 },
     /// As próximas `times` chamadas à API recebem 403 `storageQuotaExceeded` (armazenamento cheio).
     QuotaExceeded { times: u32 },
+    /// As próximas `times` chamadas à API recebem 403 `domainPolicy` (a organização bloqueou a
+    /// conta para o Drive).
+    AccountDisabled { times: u32 },
     /// A conexão cai depois de trafegar mais `n` bytes (uma vez só).
     DropConnectionAfterBytes(u64),
     /// As próximas `times` criações (POST na API) são processadas, mas a resposta se perde (a
@@ -194,6 +197,11 @@ impl FakeDrive {
         state.record_change(id);
     }
 
+    /// O limite do armazenamento da conta (o uso é a soma do conteúdo dos arquivos).
+    pub fn set_quota_limit(&self, bytes: u64) {
+        self.shared.state().quota_limit = bytes;
+    }
+
     /// Grava `appProperties` no item (como o app faria por outra instalação).
     pub fn set_app_properties(&self, id: &str, props: &[(&str, &str)]) {
         let mut state = self.shared.state();
@@ -260,6 +268,13 @@ impl FakeDrive {
                 self.shared.state().fault = Some(StatusFault {
                     code: 403,
                     reason: "storageQuotaExceeded",
+                    times,
+                });
+            }
+            Fault::AccountDisabled { times } => {
+                self.shared.state().fault = Some(StatusFault {
+                    code: 403,
+                    reason: "domainPolicy",
                     times,
                 });
             }

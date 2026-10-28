@@ -142,6 +142,7 @@ async fn error_from(resp: reqwest::Response) -> DriveError {
         (403, "uploadLimitExceeded" | "dailyLimitExceeded") => DriveError::DailyUploadLimit,
         (403, "downloadQuotaExceeded") => DriveError::DownloadQuotaExceeded,
         (403, "maxFileSizeExceeded") | (413, _) => DriveError::TooLarge,
+        (403, "domainPolicy") => DriveError::AccountDisabled,
         (403, _) => DriveError::PermissionDenied,
         // 410: sessão de upload expirada.
         (404 | 410, _) => DriveError::NotFound,
@@ -2087,6 +2088,16 @@ mod tests {
             Err(DriveError::PermissionDenied)
         ));
         assert_eq!(fake.requests(&format!("/drive/v3/files/{id}")), 1);
+    }
+
+    #[tokio::test]
+    async fn blocked_account_is_its_own_error() {
+        let fake = FakeDrive::start().await;
+        fake.inject(Fault::AccountDisabled { times: 5 });
+        assert!(matches!(
+            client(&fake).about().await,
+            Err(DriveError::AccountDisabled)
+        ));
     }
 
     #[tokio::test]

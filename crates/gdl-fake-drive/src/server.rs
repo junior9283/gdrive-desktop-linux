@@ -212,7 +212,7 @@ async fn about(State(shared): Shr, Extension(me): Extension<Me>) -> Json<Value> 
             "displayName": "Pessoa de Teste",
             "photoLink": shared.origin.join("photo.png").unwrap().to_string(),
         },
-        "storageQuota": { "limit": "16106127360", "usage": usage.to_string() },
+        "storageQuota": { "limit": state.quota_limit.to_string(), "usage": usage.to_string() },
     }))
 }
 
@@ -360,6 +360,14 @@ async fn update(
     let Some(file) = state.files.get_mut(&id) else {
         return not_found(&id);
     };
+    // Como no Drive: sem edição, nem renomear, nem mover, nem mandar para a lixeira.
+    if !file.can_edit {
+        return api_error(
+            403,
+            "insufficientFilePermissions",
+            "The user does not have sufficient permissions for this file.",
+        );
+    }
     let ids = |key: &str| {
         params
             .get(key)

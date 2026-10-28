@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use gdl_common::i18n::I18n;
-use gdl_engine::events::{EngineEvent, LostReason};
+use gdl_engine::events::{DeniedAction, EngineEvent, LostReason};
 use gdl_store::folders::{PairState, StopReason};
 use zbus::Connection;
 use zbus::zvariant::Value;
@@ -30,12 +30,16 @@ pub const SEND_CRASH_REPORT: &str = "send-crash-report";
 
 /// Os avisos que o usuário pode desligar (Preferências > Notificações); os outros avisam de
 /// algo que ele precisa saber e sempre aparecem.
-pub const OPTIONAL_KINDS: [&str; 5] = [
+pub const OPTIONAL_KINDS: [&str; 9] = [
     "copied-as-shortcut",
     "moved-to-shared-drive",
     "mount-moved",
     "resume-syncing",
     "offline",
+    "quota-almost-full",
+    "uploads-stuck",
+    "items-trashed",
+    "no-permission",
 ];
 
 #[zbus::proxy(
@@ -192,6 +196,49 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
             "notify-folder-move-title",
             i18n.tr("notify-folder-move-body", &[("name", name)]),
         ),
+        EngineEvent::NoPermission { action, name } => {
+            let action = match action {
+                DeniedAction::Create => "no-permission-create",
+                DeniedAction::Move => "no-permission-move",
+                DeniedAction::Rename => "no-permission-rename",
+                DeniedAction::Delete => "no-permission-delete",
+            };
+            Notification {
+                // Uma recusa atrás da outra (uma pasta inteira) vira um aviso só, o mais recente.
+                replaces_key: Some("no-permission".into()),
+                ..note(
+                    "no-permission",
+                    "notify-no-permission-title",
+                    i18n.tr(
+                        "notify-no-permission-body",
+                        &[("action", &i18n.tr(action, &[])), ("name", name)],
+                    ),
+                )
+            }
+        }
+        EngineEvent::QuotaAlmostFull { percent } => state(
+            "quota-almost-full",
+            "notify-quota-almost-title",
+            i18n.tr(
+                "notify-quota-almost-body",
+                &[("percent", &percent.to_string())],
+            ),
+        ),
+        EngineEvent::UploadsStuck { count } => note(
+            "uploads-stuck",
+            "notify-uploads-stuck-title",
+            i18n.tr_count("notify-uploads-stuck-body", *count as u64),
+        ),
+        EngineEvent::LocalDiskFull => state(
+            "local-disk-full",
+            "notify-local-disk-full-title",
+            i18n.tr("notify-local-disk-full-body", &[]),
+        ),
+        EngineEvent::AccountDisabled => state(
+            "account-disabled",
+            "notify-account-disabled-title",
+            i18n.tr("notify-account-disabled-body", &[]),
+        ),
         EngineEvent::Offline(false)
         | EngineEvent::NeedsSignIn(false)
         | EngineEvent::SyncStateChanged(_)
@@ -221,6 +268,19 @@ pub fn for_folder(pair: i64, name: &str, state: &PairState, i18n: &I18n) -> Opti
         replaces_key: Some(format!("folder:{pair}")),
         account: String::new(),
     })
+}
+
+/// Uma comparação de pasta do computador mandou `count` itens que saíram do Drive para a
+/// lixeira do sistema (um aviso por comparação).
+pub fn items_trashed(count: usize, i18n: &I18n) -> Notification {
+    Notification {
+        kind_id: "items-trashed",
+        summary: i18n.tr("notify-items-trashed-title", &[]),
+        body: i18n.tr_count("notify-items-trashed-body", count as u64),
+        action: None,
+        replaces_key: None,
+        account: String::new(),
+    }
 }
 
 /// Um programa do app fechou de forma inesperada: oferece enviar o relatório.
@@ -465,6 +525,61 @@ mod tests {
         }
         let mass = note(PairState::ConfirmDeletes(40)).unwrap();
         assert!(mass.body.contains("40"), "{}", mass.body);
+    }
+
+    #[test]
+    fn remaining_notes_name_what_happened() {
+        use gdl_engine::events::DeniedAction;
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            let note = |event| for_event(&event, &i18n).unwrap();
+            for action in [
+                DeniedAction::Create,
+                DeniedAction::Move,
+                DeniedAction::Rename,
+                DeniedAction::Delete,
+            ] {
+                let denied = note(EngineEvent::NoPermission {
+                    action,
+                    name: "a.txt".into(),
+                });
+                assert_eq!(denied.kind_id, "no-permission");
+                assert!(denied.body.contains("a.txt"), "{lang}: {denied:?}");
+                assert!(
+                    !denied.body.contains("no-permission-"),
+                    "{lang}: {denied:?}"
+                );
+                // Uma recusa atrás da outra (uma pasta inteira) vira um aviso só.
+                assert_eq!(denied.replaces_key.as_deref(), Some("no-permission"));
+            }
+            let quota = note(EngineEvent::QuotaAlmostFull { percent: 95 });
+            assert_eq!(quota.kind_id, "quota-almost-full");
+            assert!(quota.body.contains("95"), "{lang}: {quota:?}");
+            let stuck = note(EngineEvent::UploadsStuck { count: 3 });
+            assert_eq!(stuck.kind_id, "uploads-stuck");
+            assert!(stuck.body.contains('3'), "{lang}: {stuck:?}");
+            let trashed = items_trashed(4, &i18n);
+            assert_eq!(trashed.kind_id, "items-trashed");
+            assert!(trashed.body.contains('4'), "{lang}: {trashed:?}");
+            for note in [
+                quota,
+                stuck,
+                trashed,
+                note(EngineEvent::LocalDiskFull),
+                note(EngineEvent::AccountDisabled),
+            ] {
+                assert!(!note.summary.starts_with("notify-"), "{lang}: {note:?}");
+                assert!(!note.body.starts_with("notify-"), "{lang}: {note:?}");
+            }
+        }
+        for kind in [
+            "quota-almost-full",
+            "uploads-stuck",
+            "items-trashed",
+            "no-permission",
+        ] {
+            assert!(OPTIONAL_KINDS.contains(&kind), "{kind} pode ser desligado");
+        }
     }
 
     #[test]

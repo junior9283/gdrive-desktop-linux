@@ -846,12 +846,19 @@ async fn offline_files_over_dbus() {
     assert!(summary.free_bytes > 0);
     assert_eq!(h.proxy.clear_cache("").await.unwrap(), 0, "off-line fica");
 
+    // "Somente on-line" e "Remover arquivos off-line" liberam o espaço na hora.
     h.proxy.unpin_item("", &a).await.unwrap();
     assert!(h.proxy.offline_items("", "").await.unwrap().is_empty());
+    assert_eq!(engine.store().cached_bytes().unwrap(), 0);
     h.proxy.pin(&a_path).await.unwrap();
+    wait_until("a.txt baixado de novo", || {
+        engine.store().cached_bytes().unwrap() == 5
+    })
+    .await;
     h.proxy.clear_offline_files("").await.unwrap();
     assert!(h.proxy.offline_items("", "").await.unwrap().is_empty());
-    assert_eq!(h.proxy.clear_cache("").await.unwrap(), 5);
+    assert_eq!(engine.store().cached_bytes().unwrap(), 0);
+    assert_eq!(h.proxy.clear_cache("").await.unwrap(), 0);
 
     let found = h.proxy.search("", "A.TX").await.unwrap();
     assert_eq!(found.len(), 1, "{found:?}");

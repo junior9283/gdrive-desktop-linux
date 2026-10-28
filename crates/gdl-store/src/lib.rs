@@ -753,13 +753,13 @@ impl Store {
         )?)
     }
 
-    /// Desfixa tudo ("Remover arquivos off-line"); o conteúdo fica como cache comum.
-    pub fn unpin_all(&self) -> Result<()> {
-        self.conn().execute(
-            "UPDATE items SET pin = ?1 WHERE pin != ?1",
-            params![PinState::None],
-        )?;
-        Ok(())
+    /// Desfixa tudo ("Remover arquivos off-line") e devolve os itens que estavam fixados.
+    pub fn unpin_all(&self) -> Result<Vec<ItemId>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare_cached("UPDATE items SET pin = ?1 WHERE pin != ?1 RETURNING id")?;
+        let ids = stmt.query_map(params![PinState::None], |r| Ok(ItemId(r.get(0)?)))?;
+        Ok(ids.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Até `limit` itens fora da lixeira cujo nome contém `query`, sem diferenciar maiúsculas
@@ -1045,6 +1045,23 @@ impl Store {
     pub fn clear_thumbs(&self) -> Result<()> {
         self.conn().execute("DELETE FROM thumbs", [])?;
         Ok(())
+    }
+
+    /// Entre `ids`, os que têm conteúdo em cache e podem ser liberados (o mesmo critério de
+    /// `eviction_candidates`): pastas e arquivos nunca baixados ficam de fora.
+    pub fn evictable_among(&self, ids: &[ItemId]) -> Result<Vec<ItemId>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT 1 FROM items i WHERE i.id = ?1 AND i.pin = ?2 AND i.local_state = ?3 \
+             AND EXISTS (SELECT 1 FROM ranges r WHERE r.item_id = i.id)",
+        )?;
+        let mut out = Vec::new();
+        for id in ids {
+            if stmt.exists(params![id.0, PinState::None, LocalState::Clean])? {
+                out.push(id.clone());
+            }
+        }
+        Ok(out)
     }
 
     /// Itens com conteúdo em cache que podem ser liberados, do acesso mais antigo ao mais recente,
@@ -2354,6 +2371,9 @@ mod tests {
             [(id("e"), 15), (id("a"), 15)]
         );
         assert_eq!(store.eviction_candidates(1).unwrap(), [(id("e"), 15)]);
+        // O mesmo critério para uma lista dada; `d` nunca foi baixado.
+        let all = ["a", "b", "c", "d", "e", "i", "k", "u"].map(id);
+        assert_eq!(store.evictable_among(&all).unwrap(), [id("a"), id("e")]);
     }
 
     #[test]

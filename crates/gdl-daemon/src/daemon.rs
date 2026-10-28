@@ -1666,7 +1666,7 @@ impl Daemon {
         let pins = engine.pins();
         match pinned {
             true => pins.pin(&id),
-            false => pins.unpin(&id),
+            false => pins.unpin(&id).await,
         }
         .map_err(failed)
     }
@@ -1723,6 +1723,7 @@ impl Daemon {
         engine
             .pins()
             .unpin(&ItemId(item_id.into()))
+            .await
             .map_err(|e| engine_error(e, item_id))
     }
 
@@ -1733,7 +1734,7 @@ impl Daemon {
 
     pub async fn clear_offline_files(&self, account: &str) -> Result<(), ServiceError> {
         let engine = self.account_engine(account).await?;
-        engine.pins().unpin_all().map_err(failed)
+        engine.pins().unpin_all().await.map_err(failed)
     }
 
     pub async fn search(
@@ -1990,7 +1991,7 @@ impl Daemon {
                     let pins = engine.pins();
                     match action {
                         Action::Offline => pins.pin(&item.id),
-                        _ => pins.unpin(&item.id),
+                        _ => pins.unpin(&item.id).await,
                     }
                     .map_err(|e| engine_error(e, &item.id.0))?;
                 }

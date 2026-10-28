@@ -17,7 +17,8 @@ pub struct PinManager {
 /// Recalcula a fixação de `id` e de tudo o que está dentro dele a partir da posição na árvore:
 /// quem foi fixado à parte continua fixado; os demais herdam se alguma pasta acima estiver
 /// fixada. Vale para fixar, desfixar e para itens que chegaram ou mudaram de pasta.
-pub(crate) fn reconcile(store: &Store, id: &ItemId) -> Result<()> {
+/// Devolve os itens que perderam a fixação.
+pub(crate) fn reconcile(store: &Store, id: &ItemId) -> Result<Vec<ItemId>> {
     let item = store.get(id)?.ok_or(EngineError::NotFound)?;
     let mut inherited = Vec::new();
     let mut released = Vec::new();
@@ -42,7 +43,7 @@ pub(crate) fn reconcile(store: &Store, id: &ItemId) -> Result<()> {
     }
     store.set_pins(&inherited, PinState::Inherited)?;
     store.set_pins(&released, PinState::None)?;
-    Ok(())
+    Ok(released)
 }
 
 /// Alguma pasta acima de `id` está fixada (por conta própria ou por herança)?
@@ -86,21 +87,26 @@ impl PinManager {
     /// Fixa o item; numa pasta, tudo o que está dentro passa a herdar a fixação. O download
     /// acontece na próxima manutenção.
     pub fn pin(&self, id: &ItemId) -> Result<()> {
-        self.set(id, PinState::Pinned)
+        self.set(id, PinState::Pinned).map(drop)
     }
 
-    /// Desfixa o item. Ele continua herdando de uma pasta acima ainda fixada; o que está dentro
-    /// perde a fixação herdada, salvo o que foi fixado à parte (e o conteúdo dele).
-    pub fn unpin(&self, id: &ItemId) -> Result<()> {
-        self.set(id, PinState::None)
+    /// "Somente on-line": desfixa o item e libera o espaço. Ele continua herdando de uma pasta
+    /// acima ainda fixada; o que está dentro perde a fixação herdada, salvo o que foi fixado à
+    /// parte (e o conteúdo dele).
+    pub async fn unpin(&self, id: &ItemId) -> Result<()> {
+        let mut released = self.set(id, PinState::None)?;
+        released.push(id.clone());
+        Ok(self.cache.release(&released).await?)
     }
 
-    /// "Remover arquivos off-line": desfixa tudo. O conteúdo fica, como cache comum.
-    pub fn unpin_all(&self) -> Result<()> {
-        Ok(self.store.unpin_all()?)
+    /// "Remover arquivos off-line": desfixa tudo e libera o espaço.
+    pub async fn unpin_all(&self) -> Result<()> {
+        let released = self.store.unpin_all()?;
+        Ok(self.cache.release(&released).await?)
     }
 
-    fn set(&self, id: &ItemId, pin: PinState) -> Result<()> {
+    /// Devolve os itens que perderam a fixação.
+    fn set(&self, id: &ItemId, pin: PinState) -> Result<Vec<ItemId>> {
         self.store.get(id)?.ok_or(EngineError::NotFound)?;
         self.store.set_pins(std::slice::from_ref(id), pin)?;
         reconcile(&self.store, id)
@@ -128,7 +134,7 @@ impl PinManager {
 #[cfg(test)]
 mod tests {
     use gdl_fake_drive::Fault;
-    use gdl_store::{ItemId, PinState};
+    use gdl_store::{ItemId, LocalState, PinState};
 
     use super::*;
     use crate::cache::BlockCache;
@@ -285,7 +291,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unpin_frees_space_on_next_eviction_but_keeps_ancestor_pins() {
+    async fn unpin_keeps_ancestor_pins() {
         let env = Env::new().await;
         let folder = env.fake.add_folder(&env.fake.root_id(), "Pasta");
         let a = env.fake.add_file(&folder, "a.bin", vec![1; MIB]);
@@ -295,11 +301,11 @@ mod tests {
         s.pins.pin(&id(&b)).unwrap();
         s.pins.maintain_once().await.unwrap();
 
-        s.pins.unpin(&id(&a)).unwrap();
+        s.pins.unpin(&id(&a)).await.unwrap();
         assert_eq!(s.pin_of(&a), PinState::Inherited, "a pasta continua fixada");
-        assert_eq!(s.cache.evict_if_needed().await.unwrap(), 0);
+        assert!(s.complete(&a), "herdado da pasta, continua baixado");
 
-        s.pins.unpin(&id(&folder)).unwrap();
+        s.pins.unpin(&id(&folder)).await.unwrap();
         assert_eq!(s.pin_of(&folder), PinState::None);
         assert_eq!(s.pin_of(&a), PinState::None);
         assert_eq!(
@@ -307,8 +313,47 @@ mod tests {
             PinState::Pinned,
             "fixado à parte continua fixado"
         );
-        assert_eq!(s.cache.evict_if_needed().await.unwrap(), MIB as u64);
         assert!(!s.complete(&a) && s.complete(&b));
+    }
+
+    // "Somente on-line" libera o espaço na hora, sem esperar o cache passar do limite.
+    #[tokio::test]
+    async fn unpin_frees_the_cached_content() {
+        let env = Env::new().await;
+        let folder = env.fake.add_folder(&env.fake.root_id(), "Pasta");
+        let a = env.fake.add_file(&folder, "a.bin", vec![1; MIB]);
+        let s = setup(env, None).await;
+        s.pins.pin(&id(&folder)).unwrap();
+        s.pins.maintain_once().await.unwrap();
+        assert!(s.complete(&a));
+
+        s.pins.unpin(&id(&folder)).await.unwrap();
+
+        assert!(!s.complete(&a));
+        assert_eq!(s.env.store.cached_bytes().unwrap(), 0);
+    }
+
+    // O que tem edição ainda não enviada continua no cache: só sai o conteúdo limpo.
+    #[tokio::test]
+    async fn unpin_keeps_dirty_and_open_content() {
+        let env = Env::new().await;
+        let root = env.fake.root_id();
+        let clean = env.fake.add_file(&root, "limpo.bin", vec![1; MIB]);
+        let dirty = env.fake.add_file(&root, "editado.bin", vec![2; MIB]);
+        let s = setup(env, None).await;
+        for f in [&clean, &dirty] {
+            s.pins.pin(&id(f)).unwrap();
+        }
+        s.pins.maintain_once().await.unwrap();
+        s.env
+            .store
+            .set_local_state(&id(&dirty), LocalState::Dirty)
+            .unwrap();
+
+        s.pins.unpin_all().await.unwrap();
+
+        assert!(!s.complete(&clean));
+        assert!(s.complete(&dirty), "a edição pendente fica");
     }
 
     #[tokio::test]

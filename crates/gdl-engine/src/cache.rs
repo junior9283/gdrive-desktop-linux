@@ -595,6 +595,15 @@ impl BlockCache {
         Ok(true)
     }
 
+    /// Libera o conteúdo de `ids` que deixou de estar fixado, sem edição local e que ninguém usa
+    /// agora ("Somente on-line"); o resto sai pelo despejo normal depois.
+    pub async fn release(&self, ids: &[ItemId]) -> Result<()> {
+        for id in self.0.store.evictable_among(ids)? {
+            self.try_evict(&id).await?;
+        }
+        Ok(())
+    }
+
     /// Libera os itens de acesso mais antigo até o cache caber no limite. Nunca toca em itens
     /// fixados, com edição local ou sendo baixados agora. Devolve os bytes liberados.
     pub async fn evict_if_needed(&self) -> Result<u64> {

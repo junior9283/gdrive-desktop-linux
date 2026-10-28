@@ -1079,7 +1079,10 @@ impl Daemon {
         expected: &str,
     ) -> Result<String, (String, String)> {
         let tokens = flow.wait(LOGIN_TIMEOUT).await.map_err(|e| {
-            let error = e.reason().map(str::to_owned).unwrap_or_else(|| e.to_string());
+            let error = e
+                .reason()
+                .map(str::to_owned)
+                .unwrap_or_else(|| e.to_string());
             (String::new(), error)
         })?;
         let email = tokens.email.clone();
@@ -2145,7 +2148,9 @@ impl Daemon {
         // A conta só sobe de novo falando com o Drive; sem ele, o banco apagado levaria junto as
         // pastas do computador.
         if engine.about().await.is_err() {
-            return Err(ServiceError::Failed(self.i18n.tr("reset-local-offline", &[])));
+            return Err(ServiceError::Failed(
+                self.i18n.tr("reset-local-offline", &[]),
+            ));
         }
         let pairs = engine.store().pairs().map_err(failed)?;
         let (engine, _) = self

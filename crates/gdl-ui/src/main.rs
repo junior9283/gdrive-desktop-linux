@@ -150,14 +150,19 @@ async fn open_local_folder(
     account: String,
     id: i64,
 ) -> Result<(), String> {
-    let path = bridge.local_folder_path(&account, id).await.map_err(|e| e.message)?;
+    let path = bridge
+        .local_folder_path(&account, id)
+        .await
+        .map_err(|e| e.message)?;
     open_outside(path, None).await
 }
 
 /// As pastas do usuário que o primeiro uso sugere sincronizar.
 #[tauri::command]
 fn suggested_folders() -> Vec<String> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     let config_home = Paths::from_env().config_home;
     gdl_common::paths::suggested_folders(&config_home, &home)
         .iter()

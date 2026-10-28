@@ -285,7 +285,10 @@ async fn move_lost_found_refuses_inside_the_mount() {
     let engine = h.daemon.engine().await.unwrap();
     let src = h.home.join("edicao.txt");
     std::fs::write(&src, b"guardada").unwrap();
-    engine.lost_and_found().preserve(&src, "edicao.txt").unwrap();
+    engine
+        .lost_and_found()
+        .preserve(&src, "edicao.txt")
+        .unwrap();
     let kept = engine.lost_and_found().dir().to_path_buf();
     drop(engine);
     let dest = h.home.join("escolhida");
@@ -302,7 +305,11 @@ async fn move_lost_found_refuses_inside_the_mount() {
         .move_lost_and_found("", kept.to_str().unwrap())
         .await
         .unwrap_err();
-    let relative = h.proxy.move_lost_and_found("", "escolhida").await.unwrap_err();
+    let relative = h
+        .proxy
+        .move_lost_and_found("", "escolhida")
+        .await
+        .unwrap_err();
     let moved = h
         .proxy
         .move_lost_and_found("", dest.to_str().unwrap())
@@ -434,7 +441,9 @@ async fn paused_queue_shows_as_paused() {
 
     // Pausado, o envio aparece como pausado, sem sumir da lista.
     let state = |rows: Vec<gdl_ipc::ActivityItem>| {
-        rows.into_iter().find(|r| r.name == "parado.txt").map(|r| r.state)
+        rows.into_iter()
+            .find(|r| r.name == "parado.txt")
+            .map(|r| r.state)
     };
     let paused = state(h.proxy.activity("").await.unwrap());
     h.proxy.resume().await.unwrap();
@@ -2086,7 +2095,10 @@ async fn status_lists_errors_per_account() {
     let engine = h.daemon.engine().await.unwrap();
     let src = h.home.join("edicao.txt");
     std::fs::write(&src, b"guardada").unwrap();
-    engine.lost_and_found().preserve(&src, "edicao.txt").unwrap();
+    engine
+        .lost_and_found()
+        .preserve(&src, "edicao.txt")
+        .unwrap();
     drop(engine);
 
     let status = h.proxy.status(ANA).await.unwrap();
@@ -2674,12 +2686,18 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
         h.notes().iter().any(|n| n.summary == SUSPICIOUS)
     })
     .await;
-    let note = h.notes().into_iter().find(|n| n.summary == SUSPICIOUS).unwrap();
+    let note = h
+        .notes()
+        .into_iter()
+        .find(|n| n.summary == SUSPICIOUS)
+        .unwrap();
     let keys: Vec<_> = note.actions.iter().step_by(2).map(String::as_str).collect();
     assert_eq!(keys, ["review-activity", "recognize-activity", "resume"]);
     assert!(h.proxy.status("").await.unwrap().paused);
 
-    h.daemon.on_desktop_action(note.id, "recognize-activity").await;
+    h.daemon
+        .on_desktop_action(note.id, "recognize-activity")
+        .await;
     assert!(!h.proxy.status("").await.unwrap().paused);
 }
 
@@ -2839,8 +2857,15 @@ async fn relocating_to_another_folder_merges_and_trashes_nothing() {
         .await
         .unwrap();
 
-    wait_until("a.txt baixado na pasta nova", || wrong.join("a.txt").exists()).await;
-    assert_eq!(h.fake.find_live("a.txt").len(), 1, "nada foi para a lixeira do Drive");
+    wait_until("a.txt baixado na pasta nova", || {
+        wrong.join("a.txt").exists()
+    })
+    .await;
+    assert_eq!(
+        h.fake.find_live("a.txt").len(),
+        1,
+        "nada foi para a lixeira do Drive"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -3222,7 +3247,10 @@ async fn verbose_logging_is_switched_over_dbus() {
     assert!(!h.proxy.verbose_logging().await.unwrap());
     h.proxy.set_verbose_logging(true).await.unwrap();
     assert!(h.proxy.verbose_logging().await.unwrap());
-    assert!(state.join("verbose-until").exists(), "a escolha fica guardada");
+    assert!(
+        state.join("verbose-until").exists(),
+        "a escolha fica guardada"
+    );
     h.proxy.set_verbose_logging(false).await.unwrap();
     assert!(!h.proxy.verbose_logging().await.unwrap());
 }
@@ -3245,10 +3273,16 @@ async fn package_has_the_expected_files_and_no_secrets() {
 
     assert_eq!(path.parent().unwrap(), h.home.join("Desktop"));
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
-    assert!(name.starts_with("gdrive-desktop-linux-diagnostico-"), "{name}");
+    assert!(
+        name.starts_with("gdrive-desktop-linux-diagnostico-"),
+        "{name}"
+    );
     assert!(name.ends_with(".tar.gz"), "{name}");
     wait_until("a pasta aberta", || h.opened().len() == before + 1).await;
-    assert_eq!(h.opened()[before], h.home.join("Desktop").display().to_string());
+    assert_eq!(
+        h.opened()[before],
+        h.home.join("Desktop").display().to_string()
+    );
     let files = crate::testutil::read_package(&path);
     let names: Vec<_> = files.iter().map(|(n, _)| n.as_str()).collect();
     for expected in [
@@ -3261,11 +3295,23 @@ async fn package_has_the_expected_files_and_no_secrets() {
         assert!(names.contains(&expected), "falta {expected}: {names:?}");
     }
     let all: String = files.iter().map(|(_, t)| t.as_str()).collect();
-    for secret in ["ya29.", "1//", "usuario@exemplo.com", "conhecido", "guardado"] {
+    for secret in [
+        "ya29.",
+        "1//",
+        "usuario@exemplo.com",
+        "conhecido",
+        "guardado",
+    ] {
         assert!(!all.contains(secret), "{secret} no pacote");
     }
-    assert!(all.contains("u***@exemplo.com"), "a conta aparece mascarada");
-    assert!(all.contains(env!("CARGO_PKG_VERSION")), "a versão vai no sistema.txt");
+    assert!(
+        all.contains("u***@exemplo.com"),
+        "a conta aparece mascarada"
+    );
+    assert!(
+        all.contains(env!("CARGO_PKG_VERSION")),
+        "a versão vai no sistema.txt"
+    );
 }
 
 /// Um relatório de falha da janela, com segredos que não podem sair dele.
@@ -3343,7 +3389,8 @@ async fn reset_local_data_refuses_with_pending_uploads() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reset_local_data_reindexes() {
     let h = Harness::new().await;
-    h.fake.add_file(&h.fake.root_id(), "remoto.txt", b"do drive".to_vec());
+    h.fake
+        .add_file(&h.fake.root_id(), "remoto.txt", b"do drive".to_vec());
     h.logged_in().await;
     let docs = h.home.join("Documentos");
     std::fs::create_dir_all(&docs).unwrap();
@@ -3356,7 +3403,10 @@ async fn reset_local_data_reindexes() {
     h.proxy.reset_local_data("").await.unwrap();
 
     let after = h.daemon.engine().await.unwrap();
-    assert!(!std::sync::Arc::ptr_eq(&before, &after), "a conta subiu de novo, do zero");
+    assert!(
+        !std::sync::Arc::ptr_eq(&before, &after),
+        "a conta subiu de novo, do zero"
+    );
     assert_eq!(h.proxy.status("").await.unwrap().account, h.fake.email());
     let remote = h.drive().join("remoto.txt");
     assert_eq!(

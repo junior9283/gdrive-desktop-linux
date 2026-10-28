@@ -802,12 +802,16 @@ async fn errors_screen_points_to_the_other_account() {
         .unwrap()
         .unwrap();
     status_until(&service, "erro de cota na primeira", |s| {
-        s.accounts.iter().any(|a| a.email == first.account && a.errors >= 1)
+        s.accounts
+            .iter()
+            .any(|a| a.email == first.account && a.errors >= 1)
     })
     .await;
     let session = Session::open("errors").await;
     session
-        .eval(&format!("localStorage.setItem('account', '{ANA}'); location.reload(); return null"))
+        .eval(&format!(
+            "localStorage.setItem('account', '{ANA}'); location.reload(); return null"
+        ))
         .await;
 
     let banner = session.wait_text(".other-account", &first.account).await;
@@ -956,11 +960,11 @@ async fn onboarding_suggests_folders() {
         session.click(".continue").await;
     }
 
-    let row = session
-        .wait_text(".suggested-folders", "1 arquivo")
-        .await;
+    let row = session.wait_text(".suggested-folders", "1 arquivo").await;
     session
-        .click(&format!(".suggested-folders [data-path='{documents}'] input"))
+        .click(&format!(
+            ".suggested-folders [data-path='{documents}'] input"
+        ))
         .await;
     session.click(".continue").await;
     let added = until("a pasta sugerida sincronizando", async || {
@@ -998,7 +1002,9 @@ async fn drive_tab_switches_to_mirror_and_back() {
     let path = dir.display().to_string();
     let session = Session::open("preferences:drive").await;
 
-    session.click("input[name='drive-mode'][value='mirror']").await;
+    session
+        .click("input[name='drive-mode'][value='mirror']")
+        .await;
     session.wait_text(".dialog .folder-summary", "livres").await;
     session
         .eval(&format!(
@@ -1015,7 +1021,9 @@ async fn drive_tab_switches_to_mirror_and_back() {
     // A volta espera os envios do Espelho (o Drive de teste traz arquivos para baixar).
     let mut back = false;
     for _ in 0..50 {
-        session.click("input[name='drive-mode'][value='stream']").await;
+        session
+            .click("input[name='drive-mode'][value='stream']")
+            .await;
         session.click(".dialog .mirror-remove").await;
         session.click(".dialog .filled").await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -1137,9 +1145,7 @@ async fn feedback_screen_opens_a_prefilled_issue() {
         .eval("return document.querySelector('.send').disabled")
         .await;
 
-    session
-        .fill(".feedback-text", "A pasta não abre")
-        .await;
+    session.fill(".feedback-text", "A pasta não abre").await;
     session.click(".feedback-kinds input[value=idea]").await;
     session.click(".send").await;
     let url = opened("/issues/new?").await;
@@ -1149,9 +1155,15 @@ async fn feedback_screen_opens_a_prefilled_issue() {
         url.starts_with("https://github.com/junior9283/gdrive-desktop-linux/issues/new?"),
         "{url}"
     );
-    assert!(url.contains("title=Sugest%C3%A3o%3A+A+pasta+n%C3%A3o+abre&"), "{url}");
+    assert!(
+        url.contains("title=Sugest%C3%A3o%3A+A+pasta+n%C3%A3o+abre&"),
+        "{url}"
+    );
     assert!(url.contains("body=A+pasta+n%C3%A3o+abre%0A"), "{url}");
-    assert!(url.contains(env!("CARGO_PKG_VERSION")), "a versão vai junto: {url}");
+    assert!(
+        url.contains(env!("CARGO_PKG_VERSION")),
+        "a versão vai junto: {url}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1419,14 +1431,18 @@ async fn activity_share_opens_the_share_window() {
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn preferences_has_two_tabs_and_a_gear() {
     let session = Session::open("preferences:drive").await;
-    session.find("[data-tab='drive'][aria-selected='true']").await;
+    session
+        .find("[data-tab='drive'][aria-selected='true']")
+        .await;
     let tabs = session
         .eval("return [...document.querySelectorAll('[role=tab]')].map(t => t.dataset.tab)")
         .await;
     session.click(".settings-gear").await;
     let settings = session.wait_text(".tab-content", "Iniciar").await;
     session.click(".settings-back").await;
-    session.find("[data-tab='drive'][aria-selected='true']").await;
+    session
+        .find("[data-tab='drive'][aria-selected='true']")
+        .await;
 
     assert_eq!(tabs, json!(["computer", "drive"]));
     assert!(settings.contains("Configurações"), "{settings}");
@@ -1486,9 +1502,13 @@ async fn onboarding_summary_lists_the_choices() {
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn tour_walks_the_home_screen() {
     let session = Session::open("home:tour").await;
-    let first = session.wait_text(".tour", "O estado da sincronização").await;
+    let first = session
+        .wait_text(".tour", "O estado da sincronização")
+        .await;
     let outlined = session
-        .eval("return document.querySelector('.tour-target')?.classList.contains('header') ?? false")
+        .eval(
+            "return document.querySelector('.tour-target')?.classList.contains('header') ?? false",
+        )
         .await;
     let mut seen = 1;
     while session.text(".tour .tour-next").await != "Concluir" {

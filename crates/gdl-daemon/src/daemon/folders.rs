@@ -425,7 +425,11 @@ impl Daemon {
         let pairs = self.all_pairs().await;
         paths
             .iter()
-            .map(|p| pair_state(&pairs, Path::new(p)).map_or("", |(_, s)| s).to_owned())
+            .map(|p| {
+                pair_state(&pairs, Path::new(p))
+                    .map_or("", |(_, s)| s)
+                    .to_owned()
+            })
             .collect()
     }
 

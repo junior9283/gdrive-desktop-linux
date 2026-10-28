@@ -218,7 +218,7 @@ diagnostics-done = Diagnostic package saved. Its folder was opened.
 verbose-on-done = Detailed logging turned on for 24 hours
 verbose-off-done = Detailed logging turned off
 reset-local-title = Reset local data?
-reset-local-body = The app deletes what it stored on this computer about the account and reads Drive again. Offline files will be downloaded again. Your files in Drive and in your computer folders don't change.
+reset-local-body = The app deletes what it stored on this computer about the account { $account } and reads Drive again. Offline files will be downloaded again. Your files in Drive and in your computer folders don't change.
 reset-local-done = Local data reset. Drive is being read again.
 
 quit-title = Quit Google Drive?
@@ -251,6 +251,7 @@ lost-found-moved = { $count ->
 }
 disconnect-pick-folder = Choose the folder for the unsynced files
 disconnect-progress = Disconnecting…
+disconnect-finishing = Finishing syncing. The account will be disconnected after the last upload.
 disconnect-done = Account disconnected
 
 # First run

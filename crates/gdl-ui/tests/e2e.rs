@@ -160,6 +160,19 @@ impl Session {
         self.post("execute/sync", json!({ "script": script, "args": [] }))
             .await
     }
+
+    /// Passa a mostrar a conta `email` (vazio: volta à primeira) e recarrega a tela.
+    async fn show_account(&self, email: &str) {
+        let script = match email {
+            "" => "localStorage.removeItem('account'); return null".to_string(),
+            email => {
+                format!(
+                    "localStorage.setItem('account', '{email}'); location.reload(); return null"
+                )
+            }
+        };
+        self.eval(&script).await;
+    }
 }
 
 /// Fecha a sessão mesmo se o teste falhou no meio, e espera a janela soltar o nome no barramento
@@ -290,6 +303,29 @@ async fn account_button_shows_photo_without_click() {
 
 /// A conta que o `e2e-daemon` deixa para o segundo login.
 const ANA: &str = "ana@example.com";
+
+/// Entra na segunda conta pelo D-Bus; ela sai quando o guarda é solto.
+async fn sign_in_ana(service: &ServiceProxy<'_>) -> SecondAccount {
+    let guard = SecondAccount;
+    let url = service
+        .begin_login("id-de-teste", "segredo", ANA)
+        .await
+        .unwrap();
+    reqwest::get(url).await.unwrap();
+    status_until(service, "a segunda conta", |s| s.accounts.len() == 2).await;
+    guard
+}
+
+/// Grava `name` no Meu Drive da conta `account` (vazio: a primeira), pela montagem.
+async fn write_in_my_drive(service: &ServiceProxy<'_>, account: &str, name: &str) {
+    let mount = service.status(account).await.unwrap().mount_point;
+    let file = std::path::Path::new(&mount).join("Meu Drive").join(name);
+    let body = name.as_bytes().to_vec();
+    tokio::task::spawn_blocking(move || std::fs::write(file, body))
+        .await
+        .unwrap()
+        .unwrap();
+}
 
 /// Desconecta a segunda conta ao sair, mesmo se o teste falhou no meio: os outros testes contam
 /// com uma conta só.
@@ -781,26 +817,79 @@ async fn errors_list_groups_and_retries() {
     assert!(!empty.contains("sem-espaco.txt"), "{empty}");
 }
 
+/// "Redefinir os dados locais" age na conta mostrada pela janela: com um envio parado na primeira
+/// (que recusaria) e a segunda aberta, a segunda é redefinida.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn reset_local_data_uses_the_shown_account() {
+    let service = service().await;
+    let _cleanup = sign_in_ana(&service).await;
+    let _quota = QuotaFull::start().await;
+    write_in_my_drive(&service, "", "parado.txt").await;
+    status_until(&service, "o envio parado na primeira", |s| {
+        s.pending_uploads >= 1
+    })
+    .await;
+    let session = Session::open("home").await;
+    session.show_account(ANA).await;
+    session.wait_text(".header-title", "").await;
+
+    session.click(".more-button").await;
+    session.click("[data-action='reset-local']").await;
+    let question = session.wait_text("dialog[open] .dialog-body", ANA).await;
+    session.click("dialog[open] .actions .filled").await;
+    let toast = session.wait_text(".toast", "").await;
+    session.show_account("").await;
+
+    assert!(question.contains(ANA), "{question}");
+    assert!(toast.contains("redefinidos"), "{toast}");
+}
+
+/// "Terminar de sincronizar e depois desconectar" não diz "Conta desconectada" enquanto o envio
+/// está parado: diz que está terminando, e só avisa a desconexão quando a conta sai.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn disconnect_after_sync_reports_when_done() {
+    let service = service().await;
+    let _cleanup = sign_in_ana(&service).await;
+    let quota = QuotaFull::start().await;
+    write_in_my_drive(&service, ANA, "parado.txt").await;
+    until("o envio parado na segunda", async || {
+        (service.status(ANA).await.ok()?.pending_uploads >= 1).then_some(())
+    })
+    .await;
+    let session = Session::open("home").await;
+    session.show_account(ANA).await;
+    session.wait_text(".header-title", "").await;
+
+    session.click(".more-button").await;
+    session.click("[data-action='disconnect']").await;
+    session.find("dialog[open] input[value='finish']").await;
+    session.click("dialog[open] .actions .filled").await;
+    let finishing = session.wait_text("body", "Terminando").await;
+    let still_there = service.status("").await.unwrap().accounts.len();
+    drop(quota);
+    for error in service.errors(ANA).await.unwrap_or_default() {
+        let _ = service.retry(ANA, &error.item_id).await;
+    }
+    let done = session.wait_text("body", "Conta desconectada").await;
+    session.show_account("").await;
+
+    assert!(!finishing.contains("Conta desconectada"), "cedo demais");
+    assert_eq!(still_there, 2, "a conta fica até o envio terminar");
+    assert!(done.contains("desconectada"), "{done}");
+}
+
 /// Mostrando outra conta, a lista de erros aponta os erros da primeira numa faixa, e "Trocar de
 /// conta" passa a mostrá-los.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn errors_screen_points_to_the_other_account() {
     let service = service().await;
-    let _cleanup = SecondAccount;
-    let url = service
-        .begin_login("id-de-teste", "segredo", ANA)
-        .await
-        .unwrap();
-    reqwest::get(url).await.unwrap();
-    status_until(&service, "a segunda conta", |s| s.accounts.len() == 2).await;
+    let _cleanup = sign_in_ana(&service).await;
     let _quota = QuotaFull::start().await;
     let first = service.status("").await.unwrap();
-    let file = std::path::Path::new(&first.mount_point).join("Meu Drive/sem-espaco.txt");
-    tokio::task::spawn_blocking(move || std::fs::write(file, b"cheio"))
-        .await
-        .unwrap()
-        .unwrap();
+    write_in_my_drive(&service, "", "sem-espaco.txt").await;
     status_until(&service, "erro de cota na primeira", |s| {
         s.accounts
             .iter()
@@ -808,11 +897,7 @@ async fn errors_screen_points_to_the_other_account() {
     })
     .await;
     let session = Session::open("errors").await;
-    session
-        .eval(&format!(
-            "localStorage.setItem('account', '{ANA}'); location.reload(); return null"
-        ))
-        .await;
+    session.show_account(ANA).await;
 
     let banner = session.wait_text(".other-account", &first.account).await;
     session.click(".other-account .switch-account").await;
@@ -822,9 +907,7 @@ async fn errors_screen_points_to_the_other_account() {
     let banners = session
         .eval("return document.querySelectorAll('.other-account').length")
         .await;
-    session
-        .eval("localStorage.removeItem('account'); return null")
-        .await;
+    session.show_account("").await;
 
     assert!(banner.contains("Trocar de conta"), "{banner}");
     assert!(group.contains("Armazenamento"), "{group}");

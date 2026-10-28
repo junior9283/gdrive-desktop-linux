@@ -68,7 +68,24 @@ export async function disconnect(ctx) {
   if (!choice) return;
   toast(t('disconnect-progress'));
   // A conta que o diálogo citou, mesmo que outra janela mude a lista enquanto ele está aberto.
-  attempt(api.call('logout', { ...choice, account: status.account }), () => toast(t('disconnect-done')));
+  // "Terminar de sincronizar" com pendências: o serviço desconecta depois do último envio.
+  const out = signedOut(api, (accounts) => !accounts.some((a) => a.email === status.account));
+  attempt(api.call('logout', { ...choice, account: status.account }), async () => {
+    if (choice.mode === 'finish' && status.pending_uploads > 0) toast(t('disconnect-finishing'));
+    await out;
+    toast(t('disconnect-done'));
+  });
+}
+
+// Resolve quando `done(contas)` vale para as contas do `Status`: com "terminar os envios", a conta
+// só sai quando eles acabam, e o serviço avisa a cada mudança.
+export function signedOut(api, done) {
+  return new Promise((resolve) => {
+    const check = async () => {
+      if (done((await api.call('status', { account: '' })).accounts)) resolve();
+    };
+    api.on('status-changed', () => check().catch(() => {})).then(check).catch(() => {});
+  });
 }
 
 export async function disconnectAll(ctx) {

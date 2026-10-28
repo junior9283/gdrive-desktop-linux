@@ -218,7 +218,7 @@ diagnostics-done = Pacote de diagnóstico gravado. A pasta onde ele está foi ab
 verbose-on-done = Registro detalhado ativado por 24 horas
 verbose-off-done = Registro detalhado desativado
 reset-local-title = Redefinir os dados locais?
-reset-local-body = O app apaga o que guardou neste computador sobre a conta e lê o Drive de novo. Os arquivos off-line serão baixados outra vez. Seus arquivos no Drive e nas pastas do computador não mudam.
+reset-local-body = O app apaga o que guardou neste computador sobre a conta { $account } e lê o Drive de novo. Os arquivos off-line serão baixados outra vez. Seus arquivos no Drive e nas pastas do computador não mudam.
 reset-local-done = Dados locais redefinidos. O Drive está sendo lido de novo.
 
 quit-title = Sair do Google Drive?
@@ -251,6 +251,7 @@ lost-found-moved = { $count ->
 }
 disconnect-pick-folder = Escolha a pasta para os arquivos não sincronizados
 disconnect-progress = Desconectando…
+disconnect-finishing = Terminando de sincronizar. A conta será desconectada depois do último envio.
 disconnect-done = Conta desconectada
 
 # Primeiro uso

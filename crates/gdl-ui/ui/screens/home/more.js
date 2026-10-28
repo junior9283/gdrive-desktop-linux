@@ -72,14 +72,15 @@ async function reset({ api, t }) {
 // Apaga banco e cache da conta e a reindexa; com envios pendentes o serviço recusa e o erro diz
 // quantos.
 async function resetLocal({ api, t }) {
+  const { account } = await api.call('status');
   const ok = await confirmDialog({
     title: t('reset-local-title'),
-    body: t('reset-local-body'),
+    body: t('reset-local-body', { account }),
     confirm: t('reset-confirm'),
     cancel: t('action-cancel'),
     danger: true,
   });
-  if (ok) attempt(api.call('reset_local_data'), () => toast(t('reset-local-done')));
+  if (ok) attempt(api.call('reset_local_data', { account }), () => toast(t('reset-local-done')));
 }
 
 // Com itens sincronizando, pergunta antes de encerrar o serviço.

@@ -420,14 +420,14 @@ impl Inner {
             // Restaurar da lixeira do Dolphin.
             (Node::KioFiles, Node::Item(_)) => {
                 let item = self.kio_item(name)?.ok_or(Errno::ENOENT)?;
-                let dir = self.writable_folder(to)?;
-                let restored = self.block(self.engine.untrash(&item.id))?;
-                let (new_name, parent) = (name_str(new_name)?, Some(&dir.id));
-                if restored.parent.as_ref() != parent || restored.local_name != new_name {
-                    self.block(self.engine.move_item(&item.id, &dir.id, new_name))?;
-                }
+                self.restore(&item, to, new_name)?;
                 self.kio.forget(name);
                 Ok(())
+            }
+            // Restaurar da `.Lixeira do Drive`.
+            (Node::Trash, Node::Item(_)) => {
+                let item = self.trash_item(name)?.ok_or(Errno::ENOENT)?;
+                self.restore(&item, to, new_name)
             }
             (Node::KioFiles, Node::KioFiles) => {
                 let item = self.kio_item(name)?.ok_or(Errno::ENOENT)?;
@@ -451,6 +451,18 @@ impl Inner {
             }
             _ => Err(Errno::EXDEV),
         }
+    }
+
+    /// Tira da lixeira do Drive e põe em `to` com `new_name`. Nome repetido não substitui nada:
+    /// o Drive aceita os dois, e a listagem da pasta os numera.
+    fn restore(&self, item: &Item, to: &Node, new_name: &OsStr) -> Res<()> {
+        let dir = self.writable_folder(to)?;
+        let restored = self.block(self.engine.untrash(&item.id))?;
+        let (new_name, parent) = (name_str(new_name)?, Some(&dir.id));
+        if restored.parent.as_ref() != parent || restored.local_name != new_name {
+            self.block(self.engine.move_item(&item.id, &dir.id, new_name))?;
+        }
+        Ok(())
     }
 
     fn rename_in_drive(

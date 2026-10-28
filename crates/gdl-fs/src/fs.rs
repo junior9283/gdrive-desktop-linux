@@ -308,11 +308,12 @@ impl Inner {
     }
 
     /// Pastas virtuais são somente leitura, salvo a raiz (para `rename` para fora do Meu Drive
-    /// dar `EXDEV`, não `EACCES`; criar nela é recusado pelo app) e a lixeira do KIO, que o KIO
-    /// exige `0o700`.
+    /// dar `EXDEV`, não `EACCES`), a `.Lixeira do Drive` (para o kernel deixar tirar um item de lá
+    /// ao restaurar) e a lixeira do KIO, que o KIO exige `0o700`. Nas duas primeiras, quem recusa
+    /// criar e apagar é o app: `writable_folder` só aceita pastas do Drive.
     fn virtual_dir(&self, node: &Node) -> FileAttr {
         let perm = match node {
-            Node::MountRoot => 0o755,
+            Node::MountRoot | Node::Trash => 0o755,
             Node::KioTrash | Node::KioFiles | Node::KioInfo => 0o700,
             _ => 0o555,
         };
@@ -384,6 +385,11 @@ impl Inner {
         if !self.kio.has_info(name) {
             return Ok(None);
         }
+        self.trash_item(name)
+    }
+
+    /// Item da `.Lixeira do Drive` com este nome.
+    pub(crate) fn trash_item(&self, name: &OsStr) -> Res<Option<Item>> {
         let name = name.to_str().ok_or(Errno::ENOENT)?;
         self.engine.store().lookup_trashed(name).map_err(errno)
     }
@@ -455,9 +461,7 @@ impl Inner {
                 Layout::shared_drive_root(store, name.to_str().ok_or(Errno::ENOENT)?)
                     .map_err(errno)?
             }
-            Node::Trash => store
-                .lookup_trashed(name.to_str().ok_or(Errno::ENOENT)?)
-                .map_err(errno)?,
+            Node::Trash => self.trash_item(name)?,
             Node::TargetDir(id) => self
                 .item_by_id(id)?
                 .filter(|t| OsStr::new(&t.local_name) == name),

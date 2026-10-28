@@ -705,3 +705,76 @@ async fn cancel_waits_for_the_file_to_close() {
     );
     assert!(!file.exists());
 }
+
+/// Montagem com `lixo.txt` ("velho") na `.Lixeira do Drive`; `prepare` cria o resto antes de
+/// montar. Devolve também o ID do item na lixeira.
+async fn mount_with_trashed(prepare: impl FnOnce(&FakeDrive)) -> (Mounted, String) {
+    let fake = FakeDrive::start().await;
+    let id = fake.add_file(&fake.root_id(), "lixo.txt", b"velho".to_vec());
+    prepare(&fake);
+    let m = Mounted::new(fake).await;
+    m.fake.trash_remote(&id);
+    m.poll_changes().await;
+    (m, id)
+}
+
+/// Arrastar da `.Lixeira do Drive` para uma pasta do Drive tira o item da lixeira e o põe ali.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restore_from_drive_trash_moves_it_back() {
+    let mut folder = String::new();
+    let (m, id) = mount_with_trashed(|f| folder = f.add_folder(&f.root_id(), "Destino")).await;
+    let trash = m.mnt.join(".Lixeira do Drive");
+
+    std::fs::rename(trash.join("lixo.txt"), m.drive().join("Destino/lixo.txt")).unwrap();
+
+    assert_eq!(m.fake.meta(&id)["trashed"], false);
+    assert_eq!(m.fake.meta(&id)["parents"][0], folder.as_str());
+    assert!(names(&trash).is_empty());
+    assert_eq!(names(&m.drive().join("Destino")), ["lixo.txt"]);
+    assert_eq!(
+        std::fs::read(m.drive().join("Destino/lixo.txt")).unwrap(),
+        b"velho"
+    );
+}
+
+/// Restaurar para um nome que já existe não substitui nada: os dois ficam, numerados como o resto
+/// da montagem.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restore_from_drive_trash_numbers_clashes() {
+    let mut new = String::new();
+    let (m, old) =
+        mount_with_trashed(|f| new = f.add_file(&f.root_id(), "lixo.txt", b"novo".to_vec())).await;
+
+    std::fs::rename(
+        m.mnt.join(".Lixeira do Drive/lixo.txt"),
+        m.drive().join("lixo.txt"),
+    )
+    .unwrap();
+
+    assert_eq!(m.fake.meta(&old)["trashed"], false);
+    assert_eq!(m.fake.meta(&new)["trashed"], false);
+    assert_eq!(names(&m.drive()), ["lixo (1).txt", "lixo.txt"]);
+}
+
+/// Fora restaurar, a `.Lixeira do Drive` continua só leitura: criar, editar, apagar e renomear
+/// lá dentro são recusados.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn drive_trash_stays_read_only() {
+    let (m, id) = mount_with_trashed(|f| {
+        f.add_file(&f.root_id(), "vivo.txt", b"vivo".to_vec());
+    })
+    .await;
+    let trash = m.mnt.join(".Lixeira do Drive");
+
+    assert!(std::fs::File::create(trash.join("novo.txt")).is_err());
+    assert!(std::fs::create_dir(trash.join("Nova")).is_err());
+    assert!(std::fs::write(trash.join("lixo.txt"), b"editado").is_err());
+    assert!(std::fs::remove_file(trash.join("lixo.txt")).is_err());
+    assert!(std::fs::rename(trash.join("lixo.txt"), trash.join("outro.txt")).is_err());
+    assert!(std::fs::rename(m.drive().join("vivo.txt"), trash.join("vivo.txt")).is_err());
+
+    assert_eq!(names(&trash), ["lixo.txt"]);
+    assert_eq!(m.fake.meta(&id)["trashed"], true);
+    assert_eq!(std::fs::read(trash.join("lixo.txt")).unwrap(), b"velho");
+    assert_eq!(names(&m.drive()), ["vivo.txt"]);
+}

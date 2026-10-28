@@ -254,7 +254,7 @@ async fn trash_folder_lists_trashed_items_read_only() {
     let trash = m.mnt.join(".Lixeira do Drive");
     assert_eq!(names(&trash), ["lixo.txt"]);
     assert!(!names(&m.drive()).contains(&"lixo.txt".to_string()));
-    assert_eq!(mode(&trash), 0o555);
+    assert_eq!(mode(&trash), 0o755);
     assert_eq!(mode(&trash.join("lixo.txt")), 0o444);
     assert!(std::fs::File::create(trash.join("novo.txt")).is_err());
 }

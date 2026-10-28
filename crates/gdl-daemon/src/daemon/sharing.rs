@@ -1,7 +1,7 @@
 //! As janelas "Compartilhar" e "Gerenciar versões": o serviço só repassa ao motor, conferindo
 //! os argumentos e montando as respostas.
 
-use gdl_common::names::{create_unique, split_ext};
+use gdl_common::names::{create_numbered, split_ext};
 use gdl_common::paths::user_dir;
 use gdl_common::time::local_stamp;
 use gdl_drive::model::{Grantee, Permission};
@@ -240,10 +240,7 @@ impl Daemon {
         let saved = tokio::task::spawn_blocking(move || -> std::io::Result<String> {
             let dir = user_dir(&config_home, &home, "DOWNLOAD", "Downloads");
             std::fs::create_dir_all(&dir)?;
-            let (path, mut file) = create_unique(&dir, &stem, |n| match n {
-                0 => ext.clone(),
-                n => format!(" ({n}){ext}"),
-            })?;
+            let (path, mut file) = create_numbered(&dir, &stem, &ext)?;
             std::io::Write::write_all(&mut file, &content)?;
             Ok(path.to_string_lossy().into_owned())
         });

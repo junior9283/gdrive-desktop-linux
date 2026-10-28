@@ -625,6 +625,8 @@ pub trait Service {
     fn verbose_logging(&self) -> Result<bool, ServiceError>;
     /// Liga (por um dia) ou desliga o registro detalhado.
     fn set_verbose_logging(&self, on: bool) -> Result<(), ServiceError>;
+    /// Grava o pacote de diagnóstico (`.tar.gz`) na Área de trabalho e devolve o caminho.
+    fn generate_diagnostics(&self) -> Result<String, ServiceError>;
     /// Reinicia o serviço (para as preferências que pedem isso).
     fn restart(&self) -> Result<(), ServiceError>;
     /// Encerra o serviço; a bandeja sai junto ao ver `Quitting`.

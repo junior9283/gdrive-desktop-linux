@@ -20,6 +20,11 @@ pub fn exe_dir() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
 }
 
+/// Os relatórios de falha dos programas (`<state_dir>/crashes`).
+pub fn crashes_dir(state_dir: &Path) -> PathBuf {
+    state_dir.join("crashes")
+}
+
 /// Uma pasta do usuário do `user-dirs.dirs` (`kind` como `DOWNLOAD` ou `DESKTOP`), já com o
 /// `$HOME` trocado; sem a linha, `<home>/<default>`.
 pub fn user_dir(config_home: &Path, home: &Path, kind: &str, default: &str) -> PathBuf {

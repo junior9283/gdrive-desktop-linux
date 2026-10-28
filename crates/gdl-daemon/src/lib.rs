@@ -5,6 +5,7 @@ pub mod daemon;
 pub mod dbus;
 pub mod desktop;
 pub mod devices;
+pub mod diagnostics;
 #[cfg(any(test, feature = "testing"))]
 pub mod fake_udisks;
 pub mod history;

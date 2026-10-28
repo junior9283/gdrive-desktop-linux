@@ -97,6 +97,14 @@ pub fn fit(stem: &str, suffix: &str) -> String {
     format!("{}{suffix}", &stem[..cut])
 }
 
+/// Cria em `dir` o arquivo `stem + ext`, ou `stem (1) + ext`, `stem (2) + ext`… se já existir.
+pub fn create_numbered(dir: &Path, stem: &str, ext: &str) -> std::io::Result<(PathBuf, File)> {
+    create_unique(dir, stem, |n| match n {
+        0 => ext.to_string(),
+        n => format!(" ({n}){ext}"),
+    })
+}
+
 /// Cria em `dir` o arquivo `stem + suffix(n)` com o primeiro `n` (0, 1, 2…) cujo nome está
 /// livre, sem sobrescrever nada. O nome é cortado com `fit` para caber no limite do Linux.
 pub fn create_unique(

@@ -14,7 +14,7 @@ use gdl_common::config::{
 };
 use gdl_common::i18n::I18n;
 use gdl_common::links::DRIVE_TRASH;
-use gdl_common::names::{create_unique, split_ext};
+use gdl_common::names::{create_numbered, split_ext};
 use gdl_common::paths::Paths;
 use gdl_drive::Network;
 use gdl_drive::client::{Backoff, Bandwidth, DriveClient, DriveError, FOLDER_MIME, SHORTCUT_MIME};
@@ -132,6 +132,7 @@ struct Account {
 }
 
 mod devices;
+mod diagnostics;
 mod folders;
 mod mirror;
 mod sharing;
@@ -2296,10 +2297,7 @@ fn copy_pending(engine: &Engine, dir: &Path) -> std::io::Result<()> {
 /// Copia `src` para `dir/name`, numerando o nome se já existir.
 fn copy_unique(src: &mut std::fs::File, dir: &Path, name: &str) -> std::io::Result<()> {
     let (stem, ext) = split_ext(name);
-    let (_, mut dst) = create_unique(dir, stem, |n| match n {
-        0 => ext.to_string(),
-        n => format!(" ({n}){ext}"),
-    })?;
+    let (_, mut dst) = create_numbered(dir, stem, ext)?;
     std::io::copy(src, &mut dst)?;
     Ok(())
 }

@@ -427,6 +427,11 @@ impl Service {
         self.daemon.set_verbose_logging(on)
     }
 
+    /// Grava o pacote de diagnóstico (`.tar.gz`) na Área de trabalho e devolve o caminho.
+    async fn generate_diagnostics(&self) -> Result<String, ServiceError> {
+        self.daemon.generate_diagnostics().await
+    }
+
     /// Reinicia o serviço (para as preferências que pedem isso).
     fn restart(&self) {
         self.daemon.restart();

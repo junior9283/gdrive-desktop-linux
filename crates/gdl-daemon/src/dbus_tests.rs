@@ -3068,3 +3068,44 @@ async fn verbose_logging_is_switched_over_dbus() {
     h.proxy.set_verbose_logging(false).await.unwrap();
     assert!(!h.proxy.verbose_logging().await.unwrap());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn package_has_the_expected_files_and_no_secrets() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let logs = crate::logging::logs_dir(&h.paths().state_dir);
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(
+        logs.join("gdrive-desktop-linuxd.log"),
+        "Authorization: Bearer ya29.conhecido\nrefresh 1//0guardado\nconta usuario@exemplo.com\n",
+    )
+    .unwrap();
+    std::fs::create_dir(h.home.join("Desktop")).unwrap();
+    let before = h.opened().len();
+
+    let path = PathBuf::from(h.proxy.generate_diagnostics().await.unwrap());
+
+    assert_eq!(path.parent().unwrap(), h.home.join("Desktop"));
+    let name = path.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(name.starts_with("gdrive-desktop-linux-diagnostico-"), "{name}");
+    assert!(name.ends_with(".tar.gz"), "{name}");
+    wait_until("a pasta aberta", || h.opened().len() == before + 1).await;
+    assert_eq!(h.opened()[before], h.home.join("Desktop").display().to_string());
+    let files = crate::testutil::read_package(&path);
+    let names: Vec<_> = files.iter().map(|(n, _)| n.as_str()).collect();
+    for expected in [
+        "sistema.txt",
+        "preferencias.txt",
+        "contas.txt",
+        "pastas.txt",
+        "logs/gdrive-desktop-linuxd.log",
+    ] {
+        assert!(names.contains(&expected), "falta {expected}: {names:?}");
+    }
+    let all: String = files.iter().map(|(_, t)| t.as_str()).collect();
+    for secret in ["ya29.", "1//", "usuario@exemplo.com", "conhecido", "guardado"] {
+        assert!(!all.contains(secret), "{secret} no pacote");
+    }
+    assert!(all.contains("u***@exemplo.com"), "a conta aparece mascarada");
+    assert!(all.contains(env!("CARGO_PKG_VERSION")), "a versão vai no sistema.txt");
+}

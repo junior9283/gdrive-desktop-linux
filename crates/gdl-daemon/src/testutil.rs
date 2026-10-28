@@ -440,3 +440,20 @@ async fn serve(
     let proxy = ServiceProxy::new(&client).await.unwrap();
     (daemon, proxy, client, server)
 }
+
+/// Nome e texto de cada arquivo de um `.tar.gz`.
+pub fn read_package(path: &Path) -> Vec<(String, String)> {
+    use std::io::Read;
+    let gz = flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap());
+    let mut tar = tar::Archive::new(gz);
+    tar.entries()
+        .unwrap()
+        .map(|e| {
+            let mut e = e.unwrap();
+            let name = e.path().unwrap().display().to_string();
+            let mut text = String::new();
+            e.read_to_string(&mut text).unwrap();
+            (name, text)
+        })
+        .collect()
+}

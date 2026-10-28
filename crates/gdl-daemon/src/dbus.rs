@@ -417,6 +417,16 @@ impl Service {
         self.daemon.reset_preferences().await
     }
 
+    /// O registro detalhado está ligado.
+    fn verbose_logging(&self) -> bool {
+        self.daemon.verbose_logging()
+    }
+
+    /// Liga (por um dia) ou desliga o registro detalhado.
+    fn set_verbose_logging(&self, on: bool) -> Result<(), ServiceError> {
+        self.daemon.set_verbose_logging(on)
+    }
+
     /// Reinicia o serviço (para as preferências que pedem isso).
     fn restart(&self) {
         self.daemon.restart();

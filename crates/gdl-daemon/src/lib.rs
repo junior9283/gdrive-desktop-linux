@@ -8,6 +8,7 @@ pub mod devices;
 #[cfg(any(test, feature = "testing"))]
 pub mod fake_udisks;
 pub mod history;
+pub mod logging;
 pub mod menu;
 pub mod metered;
 pub mod mount;

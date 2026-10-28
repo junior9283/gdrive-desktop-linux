@@ -3053,3 +3053,18 @@ async fn disable_mirrored_my_drive_refuses() {
     );
     assert!(h.drive().exists());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn verbose_logging_is_switched_over_dbus() {
+    let h = Harness::new().await;
+    let state = h.paths().state_dir;
+    let (_subscriber, log) = crate::logging::subscriber(&state, gdl_common::time::now_ms());
+    h.daemon.set_log(log);
+
+    assert!(!h.proxy.verbose_logging().await.unwrap());
+    h.proxy.set_verbose_logging(true).await.unwrap();
+    assert!(h.proxy.verbose_logging().await.unwrap());
+    assert!(state.join("verbose-until").exists(), "a escolha fica guardada");
+    h.proxy.set_verbose_logging(false).await.unwrap();
+    assert!(!h.proxy.verbose_logging().await.unwrap());
+}

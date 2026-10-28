@@ -6,7 +6,7 @@ use std::sync::Arc;
 use gdl_common::i18n;
 use gdl_common::paths::Paths;
 use gdl_daemon::daemon::Exit;
-use gdl_daemon::{Api, Config, Daemon, Service};
+use gdl_daemon::{Api, Config, Daemon, Service, logging};
 use gdl_drive::client::Backoff;
 use gdl_drive::oauth::OAuthEndpoints;
 use gdl_drive::token_store::SecretServiceStore;
@@ -48,12 +48,14 @@ fn main() -> ExitCode {
 
 #[tokio::main]
 async fn serve() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .init();
+    let state_dir = Paths::from_env().state_dir;
+    let (subscriber, log) = logging::subscriber(&state_dir, gdl_common::time::now_ms());
+    if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+        eprintln!("gdrive-desktop-linuxd: log indisponível: {e}");
+    }
     // `Restart` sobe o serviço de novo aqui mesmo, sem depender do systemd.
     loop {
-        match run().await {
+        match run(&log).await {
             Ok(Exit::Restart) => tracing::info!("reiniciando o serviço"),
             Ok(Exit::Quit) => return ExitCode::SUCCESS,
             Err(e) => {
@@ -64,7 +66,7 @@ async fn serve() -> ExitCode {
     }
 }
 
-async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
+async fn run(log: &logging::LogHandle) -> Result<Exit, Box<dyn std::error::Error>> {
     let home = std::env::var_os("HOME").ok_or("HOME não definido")?;
     let config = Config {
         paths: Paths::from_env(),
@@ -81,6 +83,7 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         folder_timing: Default::default(),
     };
     let daemon = Daemon::new(config)?;
+    daemon.set_log(log.clone());
     let conn = zbus::connection::Builder::session()?
         .serve_at(OBJECT_PATH, Service::new(daemon.clone()))?
         .build()

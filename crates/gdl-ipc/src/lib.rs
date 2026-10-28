@@ -621,6 +621,10 @@ pub trait Service {
     fn set_preferences(&self, values: &[(&str, &str)]) -> Result<bool, ServiceError>;
     /// Volta ao padrão tudo o que o usuário mudou (a política continua valendo).
     fn reset_preferences(&self) -> Result<(), ServiceError>;
+    /// O registro detalhado está ligado.
+    fn verbose_logging(&self) -> Result<bool, ServiceError>;
+    /// Liga (por um dia) ou desliga o registro detalhado.
+    fn set_verbose_logging(&self, on: bool) -> Result<(), ServiceError>;
     /// Reinicia o serviço (para as preferências que pedem isso).
     fn restart(&self) -> Result<(), ServiceError>;
     /// Encerra o serviço; a bandeja sai junto ao ver `Quitting`.

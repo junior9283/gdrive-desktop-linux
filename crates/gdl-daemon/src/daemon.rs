@@ -330,6 +330,8 @@ pub struct Daemon {
     /// Há contas guardadas e elas ainda não terminaram de reconectar: sem nenhuma de pé, o
     /// estado é "conectando", não "sem conta" (que levaria a bandeja ao primeiro uso).
     resuming: AtomicBool,
+    /// O controle do registro detalhado (sem ele, nos testes e exemplos, o registro não muda).
+    log: OnceLock<crate::logging::LogHandle>,
 }
 
 /// Uma linha do arquivo `accounts`.
@@ -375,7 +377,31 @@ impl Daemon {
             conn: OnceLock::new(),
             notifier: OnceLock::new(),
             login: Mutex::default(),
+            log: OnceLock::new(),
         }))
+    }
+
+    /// Entrega o controle do registro detalhado.
+    pub fn set_log(&self, log: crate::logging::LogHandle) {
+        self.log.set(log).ok();
+    }
+
+    pub fn verbose_logging(&self) -> bool {
+        let now = gdl_common::time::now_ms();
+        self.log
+            .get()
+            .is_some_and(|log| log.verbose_until(now).is_some())
+    }
+
+    pub fn set_verbose_logging(&self, on: bool) -> Result<(), ServiceError> {
+        let log = self
+            .log
+            .get()
+            .ok_or_else(|| ServiceError::Failed("sem registro".into()))?;
+        log.set_verbose(on, gdl_common::time::now_ms())
+            .map_err(failed)?;
+        tracing::info!(ligado = on, "registro detalhado");
+        Ok(())
     }
 
     /// Liga o serviço à conexão D-Bus onde ele foi publicado: sinais saem por ela e as

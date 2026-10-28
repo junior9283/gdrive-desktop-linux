@@ -202,6 +202,16 @@ impl FakeDrive {
         self.shared.state().quota_limit = bytes;
     }
 
+    /// A *tag* da última release do projeto em `releases/latest`; `None` responde 404.
+    pub fn set_latest_release(&self, tag: Option<&str>) {
+        self.shared.state().latest_release = tag.map(String::from);
+    }
+
+    /// Endereço da última release (no lugar da API do GitHub).
+    pub fn releases_url(&self) -> Url {
+        self.shared.origin.join("releases/latest").unwrap()
+    }
+
     /// Grava `appProperties` no item (como o app faria por outra instalação).
     pub fn set_app_properties(&self, id: &str, props: &[(&str, &str)]) {
         let mut state = self.shared.state();

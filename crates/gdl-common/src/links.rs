@@ -36,6 +36,15 @@ pub fn url(name: &str) -> Option<String> {
     })
 }
 
+/// A última release do projeto na API do GitHub (o aviso de nova versão).
+pub const LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/junior9283/gdrive-desktop-linux/releases/latest";
+
+/// A página da release `version` (`X.Y.Z`), com as novidades.
+pub fn release_notes(version: &str) -> String {
+    format!("{PROJECT}/releases/tag/v{version}")
+}
+
 /// O tamanho máximo do endereço de uma *issue* nova: acima disso o GitHub recusa.
 pub const MAX_ISSUE_URL: usize = 6000;
 

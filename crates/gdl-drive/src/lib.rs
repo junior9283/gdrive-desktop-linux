@@ -78,6 +78,25 @@ pub(crate) fn http_builder() -> reqwest::ClientBuilder {
     with_tls(builder, &http.tls)
 }
 
+/// Erro de um pedido HTTP fora da Drive API (`fetch_json`).
+pub use reqwest::Error as HttpError;
+
+/// GET de um JSON fora do Drive (a última release do projeto), com a rede e o TLS do app e um
+/// prazo de 30 s.
+pub async fn fetch_json<T: serde::de::DeserializeOwned>(url: &url::Url) -> Result<T, HttpError> {
+    http_builder()
+        .user_agent(concat!("gdrive-desktop-linux/", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?
+        .get(url.clone())
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+}
+
 fn with_tls(builder: reqwest::ClientBuilder, tls: &Tls) -> reqwest::ClientBuilder {
     let roots = tls.extra_roots.iter().cloned();
     let builder = match (tls.system_roots, tls.extra_roots.is_empty()) {

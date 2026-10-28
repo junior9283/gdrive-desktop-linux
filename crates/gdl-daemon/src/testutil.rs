@@ -406,6 +406,12 @@ fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
             quiet: Duration::from_millis(100),
             ..Default::default()
         },
+        // Os testes consultam com `check_release`; o laço não roda.
+        updates: crate::updates::UpdateCheck {
+            url: fake.releases_url(),
+            first: Duration::from_secs(3600),
+            every: Duration::from_secs(3600),
+        },
     }
 }
 

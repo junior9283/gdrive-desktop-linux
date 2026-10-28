@@ -51,8 +51,8 @@ use crate::menu::{self, Action};
 use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
-    self, Notification, Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPTIONAL_KINDS,
-    RESUME, SEND_CRASH_REPORT, SIGN_IN,
+    self, Notification, Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE,
+    OPTIONAL_KINDS, RESUME, SEND_CRASH_REPORT, SIGN_IN,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -114,6 +114,7 @@ pub struct Config {
     /// Este computador no Drive ("Computadores/<nome>").
     pub computer: Computer,
     pub folder_timing: gdl_folders::watch::Timing,
+    pub updates: crate::updates::UpdateCheck,
 }
 
 /// A conta conectada. Ao sair, desmonta e depois para o motor (os campos caem nessa ordem).
@@ -136,6 +137,7 @@ mod devices;
 mod diagnostics;
 mod folders;
 mod mirror;
+mod releases;
 mod sharing;
 
 pub use folders::Computer;
@@ -856,6 +858,7 @@ impl Daemon {
                 return Ok(());
             }
             SEND_CRASH_REPORT => return self.send_crash_report(),
+            OPEN_RELEASE => return self.open_release(),
             OPEN_LOST_FOUND => KeptFolder::LostAndFound,
             OPEN_CANCELED => KeptFolder::CanceledUploads,
             _ => return Err(ServiceError::InvalidArgs(key.into())),

@@ -99,6 +99,9 @@ notify-kind-quota-almost-full = Armazenamento quase cheio
 notify-kind-uploads-stuck = Envios parados há dias
 notify-kind-items-trashed = Itens das pastas do computador movidos para a lixeira
 notify-kind-no-permission = Ações recusadas por falta de permissão
+notify-new-version-title = Nova versão disponível
+notify-new-version-body = A versão { $version } do app foi publicada.
+notify-new-version-action = Ver novidades
 
 # Login e saída da conta
 login-rejected = A conta { $email } não é permitida neste computador.

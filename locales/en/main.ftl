@@ -99,6 +99,9 @@ notify-kind-quota-almost-full = Storage almost full
 notify-kind-uploads-stuck = Uploads stuck for days
 notify-kind-items-trashed = Computer folder items moved to the trash
 notify-kind-no-permission = Actions refused for lack of permission
+notify-new-version-title = New version available
+notify-new-version-body = Version { $version } of the app has been released.
+notify-new-version-action = See what's new
 
 # Signing in and out
 login-rejected = The account { $email } isn't allowed on this computer.

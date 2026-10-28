@@ -25,6 +25,8 @@ pub const RESUME: &str = "resume";
 pub const OPEN_FOLDERS: &str = "open-folders";
 /// Ação do aviso de conta sem login que abre a janela no login dela.
 pub const SIGN_IN: &str = "sign-in";
+/// Ação do aviso de nova versão que abre a página da release.
+pub const OPEN_RELEASE: &str = "open-release";
 /// Ação do aviso de falha que abre a *issue* com o relatório; fechar é "Não enviar".
 pub const SEND_CRASH_REPORT: &str = "send-crash-report";
 
@@ -279,6 +281,18 @@ pub fn items_trashed(count: usize, i18n: &I18n) -> Notification {
         body: i18n.tr_count("notify-items-trashed-body", count as u64),
         action: None,
         replaces_key: None,
+        account: String::new(),
+    }
+}
+
+/// Saiu a versão `version` (`X.Y.Z`): "Ver novidades" abre a página da release.
+pub fn new_version(version: &str, i18n: &I18n) -> Notification {
+    Notification {
+        kind_id: "new-version",
+        summary: i18n.tr("notify-new-version-title", &[]),
+        body: i18n.tr("notify-new-version-body", &[("version", version)]),
+        action: Some((OPEN_RELEASE, i18n.tr("notify-new-version-action", &[]))),
+        replaces_key: Some("new-version".into()),
         account: String::new(),
     }
 }
@@ -579,6 +593,18 @@ mod tests {
             "no-permission",
         ] {
             assert!(OPTIONAL_KINDS.contains(&kind), "{kind} pode ser desligado");
+        }
+    }
+
+    #[test]
+    fn new_version_note_opens_the_release() {
+        for lang in ["pt_BR", "en"] {
+            let note = new_version("1.2.3", &I18n::new(lang));
+            assert!(note.body.contains("1.2.3"), "{lang}: {note:?}");
+            assert!(!note.summary.starts_with("notify-"), "{lang}: {note:?}");
+            let (key, label) = note.action.unwrap();
+            assert_eq!(key, OPEN_RELEASE);
+            assert!(!label.starts_with("notify-"), "{lang}");
         }
     }
 

@@ -50,6 +50,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
         ))
         .route("/token", post(token))
         .route("/photo.png", get(photo))
+        .route("/releases/latest", get(latest_release))
         .route("/o/oauth2/auth", get(authorize))
         .layer(middleware::from_fn_with_state(shared.clone(), log_request))
         .with_state(shared)
@@ -196,6 +197,14 @@ pub(crate) fn json_body(body: &[u8]) -> Option<Value> {
 
 pub(crate) fn bad_json() -> Response {
     api_error(400, "parseError", "JSON inválido")
+}
+
+/// A última release do projeto, como a API do GitHub responde (`tag_name`); sem release, 404.
+async fn latest_release(State(shared): Shr) -> Response {
+    match shared.state().latest_release.clone() {
+        Some(tag) => Json(json!({ "tag_name": tag, "draft": false })).into_response(),
+        None => api_error(404, "notFound", "Not Found"),
+    }
 }
 
 async fn about(State(shared): Shr, Extension(me): Extension<Me>) -> Json<Value> {

@@ -14,6 +14,7 @@ pub mod menu;
 pub mod metered;
 pub mod mount;
 pub mod notify;
+pub mod updates;
 
 pub use daemon::{Api, Config, Daemon};
 

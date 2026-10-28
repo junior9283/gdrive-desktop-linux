@@ -82,6 +82,7 @@ async fn run(log: &logging::LogHandle) -> Result<Exit, Box<dyn std::error::Error
         intervals: Intervals::default(),
         computer: gdl_daemon::daemon::Computer::detect().await,
         folder_timing: Default::default(),
+        updates: gdl_daemon::updates::UpdateCheck::github(),
     };
     let daemon = Daemon::new(config)?;
     daemon.set_log(log.clone());
@@ -98,6 +99,7 @@ async fn run(log: &logging::LogHandle) -> Result<Exit, Box<dyn std::error::Error
     }
     daemon.attach(conn.clone()).await?;
     daemon.offer_crash_reports().await;
+    daemon.watch_releases();
     // A conexão limitada (NetworkManager) e os dispositivos (UDisks2) vêm do barramento do
     // sistema.
     match zbus::Connection::system().await {

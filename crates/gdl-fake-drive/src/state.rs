@@ -193,6 +193,8 @@ pub(crate) struct State {
     pub(crate) thumb_cut: bool,
     /// Limite do armazenamento da conta em `about` (`FakeDrive::set_quota_limit`).
     pub(crate) quota_limit: u64,
+    /// A *tag* da última release do projeto (`FakeDrive::set_latest_release`).
+    pub(crate) latest_release: Option<String>,
     pub(crate) files: BTreeMap<String, FileRec>,
     pub(crate) drives: Vec<DriveRec>,
     /// A conta principal (a dos auxiliares do `FakeDrive` e do `TEST_ACCESS_TOKEN`).
@@ -251,6 +253,7 @@ impl State {
             drives_list_fault: None,
             thumb_cut: false,
             quota_limit: 16_106_127_360,
+            latest_release: None,
             files: BTreeMap::new(),
             drives: vec![],
             root_id: String::new(),

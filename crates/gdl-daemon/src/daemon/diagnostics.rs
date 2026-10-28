@@ -3,14 +3,17 @@
 
 use std::fmt::Write as _;
 
+use gdl_common::crash;
+use gdl_common::links::new_issue;
 use gdl_common::names::create_numbered;
 use gdl_common::paths::{crashes_dir, user_dir};
 use gdl_common::time::{local_stamp, now_ms};
 use gdl_ipc::ServiceError;
 
 use super::{Daemon, failed};
-use crate::diagnostics::Package;
+use crate::diagnostics::{Package, scrub};
 use crate::logging::logs_dir;
+use crate::notify;
 
 impl Daemon {
     /// Grava o pacote na Área de trabalho (sem ela, na pasta pessoal), abre a pasta e devolve o
@@ -45,6 +48,31 @@ impl Daemon {
         .map_err(failed)?;
         self.open_local(&dir);
         Ok(path.display().to_string())
+    }
+
+    /// Na partida, com `AutomaticErrorReporting`: um aviso para as falhas ainda não vistas, que
+    /// passam a vistas (cada uma é oferecida uma vez só). Desligado, elas esperam.
+    pub async fn offer_crash_reports(&self) {
+        if !self.prefs().automatic_error_reporting {
+            return;
+        }
+        if crash::take_unseen(&crashes_dir(&self.config.paths.state_dir)) > 0 {
+            self.notify(&notify::crash(&self.i18n)).await;
+        }
+    }
+
+    /// "Enviar relatório": abre a *issue* com a falha mais recente, já filtrada, para o usuário
+    /// revisar e enviar.
+    pub(super) fn send_crash_report(&self) -> Result<(), ServiceError> {
+        let dir = crashes_dir(&self.config.paths.state_dir);
+        let latest = crash::reports(&dir)
+            .pop()
+            .ok_or_else(|| ServiceError::NotFound("relatório de falha".into()))?;
+        let text = std::fs::read_to_string(&latest).map_err(failed)?;
+        let title = text.lines().next().unwrap_or_default();
+        let body = format!("```\n{}\n```", scrub(&text));
+        self.open(new_issue(&format!("Falha: {title}"), &body));
+        Ok(())
     }
 
     fn system_text(&self) -> String {

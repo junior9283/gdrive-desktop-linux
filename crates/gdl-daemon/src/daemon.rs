@@ -51,7 +51,7 @@ use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
     self, Notification, Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPTIONAL_KINDS,
-    RESUME, SIGN_IN,
+    RESUME, SEND_CRASH_REPORT, SIGN_IN,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -821,6 +821,7 @@ impl Daemon {
                 self.open_screen("preferences:computer".into());
                 return Ok(());
             }
+            SEND_CRASH_REPORT => return self.send_crash_report(),
             OPEN_LOST_FOUND => KeptFolder::LostAndFound,
             OPEN_CANCELED => KeptFolder::CanceledUploads,
             _ => return Err(ServiceError::InvalidArgs(key.into())),

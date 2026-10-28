@@ -2,6 +2,7 @@
 
 pub mod browser;
 pub mod config;
+pub mod crash;
 pub mod fs;
 pub mod gdocs;
 pub mod i18n;

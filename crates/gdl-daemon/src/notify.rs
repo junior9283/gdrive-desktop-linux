@@ -25,6 +25,8 @@ pub const RESUME: &str = "resume";
 pub const OPEN_FOLDERS: &str = "open-folders";
 /// Ação do aviso de conta sem login que abre a janela no login dela.
 pub const SIGN_IN: &str = "sign-in";
+/// Ação do aviso de falha que abre a *issue* com o relatório; fechar é "Não enviar".
+pub const SEND_CRASH_REPORT: &str = "send-crash-report";
 
 /// Os avisos que o usuário pode desligar (Preferências > Notificações); os outros avisam de
 /// algo que ele precisa saber e sempre aparecem.
@@ -219,6 +221,18 @@ pub fn for_folder(pair: i64, name: &str, state: &PairState, i18n: &I18n) -> Opti
         replaces_key: Some(format!("folder:{pair}")),
         account: String::new(),
     })
+}
+
+/// Um programa do app fechou de forma inesperada: oferece enviar o relatório.
+pub fn crash(i18n: &I18n) -> Notification {
+    Notification {
+        kind_id: "crash",
+        summary: i18n.tr("notify-crash-title", &[]),
+        body: i18n.tr("notify-crash-body", &[]),
+        action: Some((SEND_CRASH_REPORT, i18n.tr("notify-crash-action", &[]))),
+        replaces_key: Some("crash".into()),
+        account: String::new(),
+    }
 }
 
 /// A pergunta de um dispositivo que entrou: "Fazer backup" abre Preferências > Meu computador,

@@ -208,6 +208,7 @@ async fn start(request: &str) -> zbus::Result<Option<(Bridge, Requests)>> {
 }
 
 fn main() -> ExitCode {
+    gdl_common::crash::install("gdrive-desktop-linux-ui");
     // Antes do GTK: vira a classe das janelas (o app_id no Wayland), pela qual a barra de tarefas
     // e a barra de título acham o `.desktop` e o ícone.
     gtk::glib::set_prgname(Some(gdl_common::APP_ID));

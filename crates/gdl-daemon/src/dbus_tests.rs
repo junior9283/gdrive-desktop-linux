@@ -3109,3 +3109,60 @@ async fn package_has_the_expected_files_and_no_secrets() {
     assert!(all.contains("u***@exemplo.com"), "a conta aparece mascarada");
     assert!(all.contains(env!("CARGO_PKG_VERSION")), "a versão vai no sistema.txt");
 }
+
+/// Um relatório de falha da janela, com segredos que não podem sair dele.
+fn seeded_crash(h: &Harness) -> PathBuf {
+    let dir = gdl_common::paths::crashes_dir(&h.paths().state_dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let report = dir.join("gdrive-desktop-linux-ui-2026-10-27-120000.txt");
+    std::fs::write(
+        &report,
+        "gdrive-desktop-linux-ui 0.9.0\n\npanicked at src/x.rs:1:1:\nfalhou para ana@exemplo.com com Bearer ya29.segredo\n",
+    )
+    .unwrap();
+    report
+}
+
+async fn crash_notes(h: &Harness) -> Vec<gdl_ipc::NotificationItem> {
+    let all = h.proxy.notifications().await.unwrap();
+    all.into_iter().filter(|n| n.kind == "crash").collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn crash_is_offered_once_when_reporting_is_on() {
+    let h = Harness::new().await;
+    let report = seeded_crash(&h);
+    h.proxy
+        .set_preferences(&[("AutomaticErrorReporting", "true")])
+        .await
+        .unwrap();
+
+    h.daemon.offer_crash_reports().await;
+    h.daemon.offer_crash_reports().await;
+
+    let crashes = crash_notes(&h).await;
+    assert_eq!(crashes.len(), 1, "um aviso, uma vez só");
+    assert!(!report.exists(), "o relatório fica marcado como visto");
+    let before = h.opened().len();
+    h.proxy
+        .invoke_notification_action(crashes[0].id, crate::notify::SEND_CRASH_REPORT)
+        .await
+        .unwrap();
+    wait_until("a issue aberta", || h.opened().len() == before + 1).await;
+    let url = &h.opened()[before];
+    let issues = "https://github.com/junior9283/gdrive-desktop-linux/issues/new?";
+    assert!(url.starts_with(issues), "{url}");
+    assert!(url.contains("falhou"), "o relatório vai no texto: {url}");
+    assert!(!url.contains("ya29") && !url.contains("ana%40"), "{url}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn crash_is_silent_when_reporting_is_off() {
+    let h = Harness::new().await;
+    let report = seeded_crash(&h);
+
+    h.daemon.offer_crash_reports().await;
+
+    assert!(crash_notes(&h).await.is_empty());
+    assert!(report.exists(), "fica para quando o envio for ligado");
+}

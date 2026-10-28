@@ -325,6 +325,7 @@ async fn run() -> Result<(), Error> {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    gdl_common::crash::install("gdrive-desktop-linux-tray");
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();

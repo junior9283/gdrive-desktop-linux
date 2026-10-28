@@ -109,6 +109,7 @@ fn failed(e: impl std::fmt::Display) -> ServiceError {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    gdl_common::crash::install("gdrive-desktop-linux");
     let cli = Cli::parse();
     let i18n = I18n::from_env();
     let result = match cli.command {

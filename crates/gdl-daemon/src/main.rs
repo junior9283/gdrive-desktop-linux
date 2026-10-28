@@ -28,6 +28,7 @@ Opções:
 ";
 
 fn main() -> ExitCode {
+    gdl_common::crash::install("gdrive-desktop-linuxd");
     // Antes de tudo: as opções só respondem, sem tocar no barramento nem na conta.
     match std::env::args().nth(1).as_deref() {
         None => serve(),
@@ -96,6 +97,7 @@ async fn run(log: &logging::LogHandle) -> Result<Exit, Box<dyn std::error::Error
         return Ok(Exit::Quit);
     }
     daemon.attach(conn.clone()).await?;
+    daemon.offer_crash_reports().await;
     // A conexão limitada (NetworkManager) e os dispositivos (UDisks2) vêm do barramento do
     // sistema.
     match zbus::Connection::system().await {

@@ -7,6 +7,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Corrigido
+- Uma pasta nova com vários arquivos, criada na pasta do Google Drive, subia os arquivos um de cada
+  vez quando a criação da pasta demorava (rede lenta); agora sobem quatro juntos, como os demais.
+
 ## [0.9.0] - 2026-10-27
 
 ### Adicionado

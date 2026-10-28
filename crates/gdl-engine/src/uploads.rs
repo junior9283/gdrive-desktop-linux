@@ -32,7 +32,7 @@ pub const LOCAL_ID_PREFIX: &str = "local:";
 const OFFLINE_WAIT_MS: i64 = 30_000;
 /// Pasta-mãe ainda não criada no Drive: espera por ela (olhar de novo é só uma consulta ao banco,
 /// e a pasta costuma estar subindo ao lado, em outro envio).
-const PARENT_WAIT_MS: i64 = 1_000;
+pub(crate) const PARENT_WAIT_MS: i64 = 1_000;
 /// Janela dos envios que entram na estimativa de tempo restante.
 const RATE_WINDOW_MS: i64 = 30_000;
 

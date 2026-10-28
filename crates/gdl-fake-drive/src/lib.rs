@@ -42,6 +42,9 @@ pub enum Fault {
     DelayThumbs(std::time::Duration),
     /// Os envios de conteúdo (`/upload/…`) demoram este tempo para responder, até `clear_faults`.
     DelayUploads(std::time::Duration),
+    /// As criações na API (POST fora de `/upload/…`, como a de uma pasta) demoram este tempo para
+    /// responder, até `clear_faults`.
+    DelayCreates(std::time::Duration),
     /// As miniaturas (`/thumb`) respondem o erro `code` da API, até `clear_faults`.
     ThumbStatus(u16),
     /// As miniaturas (`/thumb`) mandam o começo da imagem e a conexão cai no meio do corpo,
@@ -280,6 +283,7 @@ impl FakeDrive {
             Fault::Offline => self.shared.offline.store(true, Ordering::SeqCst),
             Fault::DelayThumbs(delay) => self.shared.state().thumb_delay = Some(delay),
             Fault::DelayUploads(delay) => self.shared.state().upload_delay = Some(delay),
+            Fault::DelayCreates(delay) => self.shared.state().create_delay = Some(delay),
             Fault::ThumbStatus(code) => self.shared.state().thumb_status = Some(code),
             Fault::CutThumbBody => self.shared.state().thumb_cut = true,
             Fault::DrivesListStatus(code) => self.shared.state().drives_list_fault = Some(code),
@@ -296,6 +300,7 @@ impl FakeDrive {
             state.lose_responses = 0;
             state.thumb_delay = None;
             state.upload_delay = None;
+            state.create_delay = None;
             state.thumb_status = None;
             state.drive_listing_fault = None;
             state.drives_list_fault = None;

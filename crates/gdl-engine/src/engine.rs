@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use gdl_common::config::Preferences;
@@ -15,7 +15,7 @@ use gdl_common::time::now_ms;
 use gdl_drive::client::DriveClient;
 use gdl_drive::model::About;
 use gdl_store::Store;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{Notify, broadcast, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::Result;
@@ -494,11 +494,12 @@ impl Engine {
         loop {
             match self.uploads.has_ready() {
                 Ok(true) if self.may_upload() => {
+                    let crew = Crew::default();
                     tokio::join!(
-                        self.upload_burst(),
-                        self.upload_burst(),
-                        self.upload_burst(),
-                        self.upload_burst()
+                        self.upload_burst(&crew),
+                        self.upload_burst(&crew),
+                        self.upload_burst(&crew),
+                        self.upload_burst(&crew)
                     );
                 }
                 Ok(_) => {}
@@ -514,14 +515,31 @@ impl Engine {
         !self.is_paused() && !self.poller.is_offline() && !self.needs_sign_in()
     }
 
-    /// Envia um atrás do outro enquanto houver envio pronto que nenhum outro esteja fazendo.
-    async fn upload_burst(&self) {
+    /// Envia um atrás do outro enquanto houver envio pronto que nenhum outro esteja fazendo. Sem
+    /// nenhum livre, espera enquanto outro da equipe ainda envia: o que ele termina pode liberar
+    /// mais (uma pasta criada libera os arquivos dela), e um só não sobe o resto sozinho.
+    async fn upload_burst(&self, crew: &Crew) {
         while self.may_upload() {
-            match self.uploads.run_once().await {
+            crew.busy.fetch_add(1, Ordering::SeqCst);
+            let outcome = self.uploads.run_once().await;
+            crew.busy.fetch_sub(1, Ordering::SeqCst);
+            crew.done.notify_waiters();
+            match outcome {
                 // O envio é o primeiro a ver a rede cair; a consulta de mudanças vê a volta.
                 Ok(Some(UploadOutcome::Offline)) => return self.poller.report_offline(),
                 Ok(Some(_)) => {}
-                Ok(None) => return,
+                Ok(None) => {
+                    // Inscrito antes de olhar o contador: um aviso entre os dois não se perde.
+                    let mut done = std::pin::pin!(crew.done.notified());
+                    done.as_mut().enable();
+                    if crew.busy.load(Ordering::SeqCst) == 0 {
+                        return;
+                    }
+                    tokio::select! {
+                        () = done => {}
+                        () = self.sleep(self.intervals.uploads_idle) => {}
+                    }
+                }
                 Err(e) => return tracing::warn!(erro = %e, "falha na fila de envio"),
             }
         }
@@ -540,6 +558,13 @@ impl Engine {
             tracing::warn!(erro = %e, "falha ao liberar espaço do cache");
         }
     }
+}
+
+/// Os envios que rodam juntos: quantos estão enviando agora e o aviso de cada um que termina.
+#[derive(Default)]
+struct Crew {
+    busy: AtomicUsize,
+    done: Notify,
 }
 
 #[cfg(test)]
@@ -699,6 +724,18 @@ mod tests {
     /// Uma pasta nova com vários arquivos sobe com envios em paralelo, a pasta antes deles.
     #[tokio::test]
     async fn many_new_files_upload_in_parallel_after_their_folder() {
+        new_folder_with_files_uploads_in_parallel(None).await;
+    }
+
+    /// Bug (teste instável "1 envios juntos"): com a pasta demorando mais para ser criada que a
+    /// espera dos arquivos por ela, os outros envios já tinham desistido e um só subia os 8.
+    #[tokio::test]
+    async fn slow_folder_creation_still_uploads_its_files_in_parallel() {
+        let slow = Duration::from_millis(crate::uploads::PARENT_WAIT_MS as u64 + 500);
+        new_folder_with_files_uploads_in_parallel(Some(slow)).await;
+    }
+
+    async fn new_folder_with_files_uploads_in_parallel(create_delay: Option<Duration>) {
         let fake = gdl_fake_drive::FakeDrive::start().await;
         let (engine, _tmp) = crate::testutil::indexed_engine(&fake).await;
         let engine = Arc::new(engine.with_intervals(fast()));
@@ -717,6 +754,9 @@ mod tests {
         fake.inject(gdl_fake_drive::Fault::DelayUploads(Duration::from_millis(
             100,
         )));
+        if let Some(delay) = create_delay {
+            fake.inject(gdl_fake_drive::Fault::DelayCreates(delay));
+        }
 
         let shutdown = CancellationToken::new();
         let task = tokio::spawn({

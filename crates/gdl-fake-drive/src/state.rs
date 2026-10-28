@@ -178,6 +178,8 @@ pub(crate) struct State {
     pub(crate) thumb_delay: Option<std::time::Duration>,
     /// Atraso antes de responder cada envio de conteúdo (`Fault::DelayUploads`).
     pub(crate) upload_delay: Option<std::time::Duration>,
+    /// Atraso antes de responder cada criação na API (`Fault::DelayCreates`).
+    pub(crate) create_delay: Option<std::time::Duration>,
     /// Envios de conteúdo em andamento agora e o máximo já visto.
     pub(crate) uploads_in_flight: u32,
     pub(crate) max_uploads_in_flight: u32,
@@ -239,6 +241,7 @@ impl State {
             thumb_redirect: None,
             thumb_delay: None,
             upload_delay: None,
+            create_delay: None,
             uploads_in_flight: 0,
             max_uploads_in_flight: 0,
             thumb_status: None,

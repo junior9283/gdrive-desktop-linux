@@ -112,6 +112,10 @@ async fn injected_status(State(shared): Shr, req: Request, next: Next) -> Respon
         return resp;
     }
     let create = req.method() == axum::http::Method::POST;
+    let delay = shared.state().create_delay;
+    if let Some(delay) = delay.filter(|_| create && !req.uri().path().starts_with("/upload")) {
+        tokio::time::sleep(delay).await;
+    }
     let resp = next.run(req).await;
     if create {
         let mut state = shared.state();

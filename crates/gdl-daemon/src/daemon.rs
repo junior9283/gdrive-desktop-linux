@@ -52,8 +52,8 @@ use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
     self, DEVICE_ALWAYS, DEVICE_IGNORE, MOVE_LOST_FOUND, MUTE, Notification, Notifier,
-    OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE, OPTIONAL_KINDS, RECOGNIZE_ACTIVITY,
-    RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT, SIGN_IN,
+    OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE, OPEN_WINDOW, OPTIONAL_KINDS,
+    RECOGNIZE_ACTIVITY, RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT, SIGN_IN,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -930,7 +930,7 @@ impl Daemon {
     }
 
     /// A ação `key` de um aviso, na conta `account` dele.
-    async fn run_action(&self, account: &str, key: &str) -> Result<(), ServiceError> {
+    pub(crate) async fn run_action(&self, account: &str, key: &str) -> Result<(), ServiceError> {
         let folder = match key {
             // A pausa do usuário é do app inteiro, como "Retomar" no menu; sem ela, o aviso de
             // atividade suspeita libera só a conta dele.
@@ -957,7 +957,7 @@ impl Daemon {
             }
             SEND_CRASH_REPORT => return self.send_crash_report(),
             OPEN_RELEASE => return self.open_release(),
-            REVIEW_ACTIVITY => {
+            REVIEW_ACTIVITY | OPEN_WINDOW => {
                 self.open_screen("home".into());
                 return Ok(());
             }

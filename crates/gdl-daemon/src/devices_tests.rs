@@ -154,7 +154,10 @@ async fn device_notice_offers_always_and_ignore() {
     wait_until("pergunta", || notes_titled(&h, ASK).len() == 1).await;
     let ask = notes_titled(&h, ASK)[0].clone();
     let keys: Vec<_> = ask.actions.iter().step_by(2).map(String::as_str).collect();
-    assert_eq!(keys, ["open-folders", "device-always", "device-ignore"]);
+    assert_eq!(
+        keys,
+        ["default", "open-folders", "device-always", "device-ignore"]
+    );
 
     h.daemon.on_desktop_action(ask.id, "device-always").await;
 

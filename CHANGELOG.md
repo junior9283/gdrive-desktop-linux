@@ -45,6 +45,7 @@ está feito, ou registrado em "Diferenças inevitáveis" no README.
 - D-Bus: `SetMountPoint`; `ContentCachePath` deixa de pedir reinício; todo `LoginFinished` com
   erro traz um motivo estável; o atributo `user.gdl.state` ganha o valor `error`.
 - O MCP recusa levar para o Drive uma pasta com links ou arquivos especiais.
+- Clicar no corpo de um aviso abre a janela (antes dava erro no log).
 
 ## [0.11.0] - 2026-10-28
 

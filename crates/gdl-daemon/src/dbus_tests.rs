@@ -2767,7 +2767,10 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
         .find(|n| n.summary == SUSPICIOUS)
         .unwrap();
     let keys: Vec<_> = note.actions.iter().step_by(2).map(String::as_str).collect();
-    assert_eq!(keys, ["review-activity", "recognize-activity", "resume"]);
+    assert_eq!(
+        keys,
+        ["default", "review-activity", "recognize-activity", "resume"]
+    );
     assert!(h.proxy.status("").await.unwrap().paused);
 
     h.daemon
@@ -2796,7 +2799,7 @@ async fn mute_action_turns_the_kind_off() {
         .find(|n| n.actions.iter().any(|a| a == "resume"))
         .unwrap();
     let keys: Vec<_> = note.actions.iter().step_by(2).map(String::as_str).collect();
-    assert_eq!(keys, ["resume", "mute"]);
+    assert_eq!(keys, ["default", "resume", "mute"]);
 
     h.daemon.on_desktop_action(note.id, "mute").await;
 
@@ -2807,6 +2810,24 @@ async fn mute_action_turns_the_kind_off() {
         .unwrap();
     assert!(!resume.enabled);
     assert!(h.proxy.status("").await.unwrap().paused, "não retoma");
+}
+
+/// Clicar no corpo do aviso (a ação `default` do servidor de notificações) abre a janela, como
+/// no Windows, em vez de dar erro.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn clicking_the_notification_opens_the_window() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.daemon.run_action("", "default").await.unwrap();
+    h.proxy.pause().await.unwrap();
+    let path = h.drive().join("a.txt");
+    blocking(move || std::fs::write(path, b"pausado").unwrap()).await;
+    wait_until("aviso", || !h.notes().is_empty()).await;
+    assert!(
+        h.notes()
+            .iter()
+            .all(|n| n.actions.first().map(String::as_str) == Some("default"))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

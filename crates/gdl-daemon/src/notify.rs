@@ -36,6 +36,8 @@ pub const SIGN_IN: &str = "sign-in";
 pub const REVIEW_ACTIVITY: &str = "review-activity";
 /// "Eu reconheço esta atividade": retoma e não avisa de novo por 1 h.
 pub const RECOGNIZE_ACTIVITY: &str = "recognize-activity";
+/// Clique no corpo do aviso (nome fixo da especificação de notificações): abre a janela.
+pub const OPEN_WINDOW: &str = "default";
 /// Ação do aviso de nova versão que abre a página da release.
 pub const OPEN_RELEASE: &str = "open-release";
 /// Ação do aviso de falha que abre a *issue* com o relatório; fechar é "Não enviar".
@@ -491,8 +493,12 @@ impl Notifier {
             .as_ref()
             .and_then(|slot| self.shown().get(slot).copied())
             .unwrap_or(0);
-        let actions: Vec<&str> = (note.action.iter().chain(extra))
-            .flat_map(|(key, label)| [*key, label.as_str()])
+        // O clique no corpo só chega se declarado (o servidor não mostra o rótulo dele).
+        let actions: Vec<&str> = [OPEN_WINDOW, ""]
+            .into_iter()
+            .chain(
+                (note.action.iter().chain(extra)).flat_map(|(key, label)| [*key, label.as_str()]),
+            )
             .collect();
         let markup = self
             .markup

@@ -1244,6 +1244,7 @@ async fn screenshots_for_the_readme() {
         ("preferences", "p.path", "Google Drive", "preferencias"),
         ("about", ".about-version", "0.", "sobre"),
         ("uninstall", ".uninstall", "", "desinstalar"),
+        ("feedback", ".feedback", "", "feedback"),
         (
             "shared-drives",
             ".drive-list",

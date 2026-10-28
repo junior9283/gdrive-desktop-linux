@@ -13,10 +13,13 @@ Ele mostra o seu Drive como uma pasta no computador, em que os arquivos ficam na
 abrir, com ícone na bandeja, pesquisa, arquivos disponíveis off-line, sincronização automática,
 até 4 contas ao mesmo tempo, Drives compartilhados, o modo Espelho (o Meu Drive inteiro numa pasta
 do computador), pastas do computador sincronizadas, backup de pendrives e, no gerenciador de
-arquivos, emblemas de estado, compartilhamento, versões e atalhos pelo botão direito.
+arquivos, emblemas de estado, compartilhamento, versões e atalhos pelo botão direito. Ele também
+pausa os envios diante de arquivos que parecem cifrados por um vírus, recupera as edições se os
+dados locais se danificarem e tem um servidor MCP para assistentes de IA.
 
-O app roda inteiro no seu computador e conversa só com as APIs do Google, usando um Client ID que
-você mesmo cria no seu projeto do Google Cloud. O projeto não tem servidores e não recebe nenhum
+O app roda inteiro no seu computador e conversa com as APIs do Google, usando um Client ID que
+você mesmo cria no seu projeto do Google Cloud (e, uma vez por dia, pergunta ao GitHub qual é a
+última versão do app). O projeto não tem servidores e não recebe nenhum
 dado seu. Ele não tem ligação com o Google nem é aprovado por ele.
 
 - [Código-fonte e instalação](https://github.com/junior9283/gdrive-desktop-linux)
@@ -26,7 +29,8 @@ dado seu. Ele não tem ligação com o Google nem é aprovado por ele.
 - [Ajuda](ajuda.md) · [Perguntas frequentes](perguntas-frequentes.md)
 
 > **English:** gdrive-desktop-linux is an unofficial, open-source (GPL-3.0) Google Drive desktop
-> client for Linux. It runs entirely on your computer and talks only to Google's APIs, with an OAuth
-> client you create in your own Google Cloud project. The project has no servers and receives none
+> client for Linux. It runs entirely on your computer and talks to Google's APIs, with an OAuth
+> client you create in your own Google Cloud project (and, once a day, asks GitHub for the latest
+> app version). The project has no servers and receives none
 > of your data. See the [Privacy Policy](politica-de-privacidade.md) and the
 > [Terms of use](termos-de-uso.md).

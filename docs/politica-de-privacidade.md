@@ -14,9 +14,13 @@ não tem ligação com o Google nem é aprovado por ele.
 
 ## Com quem o app conversa
 
-Só com as APIs do Google Drive e do login do Google, usando o Client ID que **você** criou no seu
-projeto do Google Cloud (veja o [guia do Client ID](guia-client-id.md)). O projeto não tem
-servidores próprios e não recebe nenhum dado seu.
+- Com as APIs do Google Drive e do login do Google, usando o Client ID que **você** criou no seu
+  projeto do Google Cloud (veja o [guia do Client ID](guia-client-id.md)).
+- Uma vez por dia, com a API pública do GitHub, só para saber qual é a última versão do app
+  (`api.github.com/repos/junior9283/gdrive-desktop-linux/releases/latest`). O pedido leva apenas a
+  versão instalada, no cabeçalho de identificação; nenhum dado seu nem dos seus arquivos.
+
+O projeto não tem servidores próprios e não recebe nenhum dado seu.
 
 ## Para que o app usa os dados do Google
 
@@ -32,7 +36,14 @@ incluindo os requisitos de uso limitado.
 ## O que o app não faz
 
 - Não envia estatísticas de uso nem telemetria.
-- O relatório automático de erros fica **desligado**; nada é enviado sem você ligar.
+- Nada é enviado sozinho. "Enviar feedback" e, com o relatório de erros ligado (vem
+  **desligado**), "Enviar relatório" depois de uma falha só abrem no navegador a página de issues
+  do projeto com o texto já preenchido: quem envia é você, pela sua conta do GitHub. Antes, o
+  texto passa por um filtro que tira tokens, senhas e e-mails inteiros.
+- O pacote de "Gerar informações de diagnóstico" fica no seu computador (passado pelo mesmo
+  filtro); só sai dele se você anexá-lo.
+- O servidor MCP (`gdrive-desktop-linux-mcp`) só atende o programa que o abriu no seu computador
+  e não compartilha nada sem você confirmar na janela Compartilhar.
 - A interface e o ícone na bandeja não acessam a internet: tudo passa pelo serviço local.
 
 ## Como apagar os dados

@@ -49,6 +49,10 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 | **Backup e espelho** | ✅ Pastas do computador sincronizadas com "Computadores" no Drive, o Meu Drive em modo Espelho (cópia completa numa pasta comum, com a troca de volta para o Stream) e backup de pendrives e cartões de memória quando são conectados. |
 | **Contas** | ✅ Até 4 contas Google ao mesmo tempo, cada uma com a própria pasta, trocadas pelo menu da conta. |
 | **Drives compartilhados** | ✅ Na pasta de cada conta, com a janela "Gerenciar drives compartilhados" para escolher quais aparecem e criar um novo. |
+| **Proteção e recuperação** | ✅ Arquivos regravados com cara de cifrados por um vírus pausam os envios e pedem confirmação; dados locais danificados são refeitos a partir do Drive, com as edições pendentes guardadas no Lost and Found. |
+| **Avisos** | ✅ Sem permissão, conta bloqueada, armazenamento quase cheio, disco cheio, envios parados há dias, itens recuperados, nova versão do app e os demais, cada tipo podendo ser desligado nas preferências de notificação. |
+| **Diagnóstico e feedback** | ✅ Registro detalhado, pacote de informações de diagnóstico sem tokens nem e-mails, Enviar feedback (issue já preenchida) e relatório de falhas, enviado só por você. |
+| **Assistentes de IA** | ✅ Servidor MCP: estado e link de um caminho, pastas acompanhadas, janela Compartilhar com o e-mail já digitado e adicionar pastas à sincronização. |
 
 A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 
@@ -69,6 +73,8 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 | ![Lista de Drives compartilhados com uma chave para cada um](docs/imagens/drives-compartilhados.png) | ![Escolha da pasta do atalho: o Meu Drive e os Drives compartilhados](docs/imagens/adicionar-atalho.png) |
 | **Meu computador** | **Espelhar o Meu Drive** |
 | ![Pastas do computador e dispositivos USB nas preferências](docs/imagens/meu-computador.png) | ![Escolha da pasta do Espelho, com o tamanho a baixar e o espaço livre](docs/imagens/espelhar.png) |
+| **Enviar feedback** | |
+| ![Enviar feedback: o tipo, a descrição e o pacote de diagnóstico opcional](docs/imagens/feedback.png) | |
 
 ## Como funciona
 
@@ -105,6 +111,10 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
   Meu Drive inteiro (não de pastas escolhidas).
 - **Dispositivos:** o aviso de um pendrive novo abre as preferências, onde fica a opção de fazer
   backup sempre; os avisos do sistema não têm caixa de seleção.
+- **Atalho global:** usa só o portal XDG GlobalShortcuts, que o Plasma 6 e o GNOME 48 já
+  implementam; sem o portal, o atalho fica desligado e as Preferências dizem isso.
+- **"Perguntar ao Gemini" no menu do Dolphin:** não há endereço público para abrir um arquivo no
+  Gemini; o cartão da janela principal leva à página do Gemini.
 - **Sem o limite de 4 GB por arquivo** da unidade virtual do Windows: aqui o limite é o da nuvem.
 - **Ficam fora:** presença em tempo real do Office, plugins do Outlook/Meet e backup para o Google
   Fotos (descontinuado pelo próprio Google).
@@ -251,8 +261,9 @@ Cada etapa sai funcionando antes da próxima.
 | 0.6 | Desempenho: CPU parada, pastas grandes, download e envios em paralelo |
 | 0.7 | Dolphin completo: ícones de status, janelas de compartilhar e de versões |
 | 0.8 | Várias contas e Drives compartilhados |
-| 0.9 | Backup de pastas, pastas conectadas, modo espelho e dispositivos ← **estamos aqui** |
-| 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes |
+| 0.9 | Backup de pastas, pastas conectadas, modo espelho e dispositivos |
+| 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes, ransomware e recuperação do banco ← **estamos aqui** |
+| 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria |
 | 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) |
 
 ## Versionamento

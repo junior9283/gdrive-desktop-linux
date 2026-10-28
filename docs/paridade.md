@@ -1,16 +1,16 @@
 # Matriz de paridade
 
 Situação de cada item do catálogo da [especificação](superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md)
-(seção 6) no código, conferida na versão 0.9.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
+(seção 6) no código, conferida na versão 0.10.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
 **FEITO** ou registrados em "Diferenças conhecidas" no README como risco aceito.
 
 Legenda: **FEITO**, **PARCIAL** (existe, mas incompleto), **FALTA**.
 
 | Seções | FEITO | PARCIAL | FALTA |
 |---|---|---|---|
-| 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 60 | 7 | 4 |
+| 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 62 | 7 | 2 |
 | 6.7–6.11 (janela principal, bandeja, pesquisa, Preferências, primeiro uso) | 67 | 1 | 11 |
-| 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 48 | 5 | 21 |
+| 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 71 | 1 | 2 |
 
 Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packaging/nfpm.yaml`,
 `.github/workflows/release.yml`).
@@ -22,7 +22,8 @@ Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packagin
 | 0.7 | Dolphin completo: ícones de status, submenu completo (abrir no Docs/Planilhas/Apresentações, copiar link dizendo o tipo de acesso), janelas "Compartilhar" e "Gerenciar versões", exclusão do Baloo ✅ |
 | 0.8 | Várias contas (até 4), uma montagem por conta, `DisableAddAccount`; Drives compartilhados na montagem, "Gerenciar drives compartilhados" e criar drive; "Adicionar atalho" no menu, escolhendo o local ✅ |
 | 0.9 | Backup de pastas ("Meu computador"), pastas conectadas e "Computadores", modo Espelho com troca entre modos, dispositivos removíveis ✅ (NAS fica como diferença) |
-| 0.10 | Diagnóstico, registro detalhado e feedback; notificações restantes e aviso de nova versão; servidor MCP; políticas restantes; ransomware e recuperação do banco |
+| 0.10 | Diagnóstico, registro detalhado e feedback; notificações restantes e aviso de nova versão; servidor MCP; políticas restantes; ransomware e recuperação do banco ✅ |
+| 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria |
 | 1.0 | Matriz toda conferida, "Diferenças conhecidas" no README |
 
 
@@ -92,8 +93,8 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 | Excluído na nuvem com edição pendente: não recria, Lost and Found | FEITO | teste `remote_delete_during_pending_edit_goes_to_lost_and_found_and_is_not_recreated` |
 | Espelho: duas versões lado a lado com sufixo de conflito | FEITO | `gdl-folders/src/decide.rs` (` (conflito AAAA-MM-DD HHhMM)`), teste `both_edited_keeps_both_versions_everywhere` |
 | Recuperar arquivos não sincronizados | FEITO | `uploads.rs:234 recover_on_start`; Lost and Found e pendentes copiáveis no logout `--move` |
-| Recuperação automática após falha do banco local | FALTA | Sem detecção de corrupção/reconstrução a partir da nuvem em `gdl-store`/`engine.rs` |
-| Detecção de ransomware (entropia, pausa, aviso com 3 opções) | FALTA | Nenhuma ocorrência de entropia/ransomware no código |
+| Recuperação automática após falha do banco local | FEITO | `gdl-store/src/salvage.rs` (`quick_check` na abertura), `gdl-engine/src/recovery.rs`; teste `corrupt_database_keeps_pending_content` |
+| Detecção de ransomware (entropia, pausa, aviso com 3 opções) | FEITO | `gdl-engine/src/ransomware.rs` (entropia > 7,6, 20 em 60 s, formatos comprimidos fora), pausa própria e aviso com as 3 opções; testes `twenty_encrypted_files_pause`, `compressed_formats_do_not_count` |
 | Limites do Drive em mensagens claras | PARCIAL | Cota cheia, limite diário de upload e sem permissão têm categoria e texto (`errors.rs`, `client.rs:120-123`). `DownloadQuotaExceeded` é mapeado mas sem mensagem própria. Faltam 100 níveis de pasta e 500 mil itens em Drive compartilhado |
 | Lista de erros: categorias, paginação, ações por item | FEITO | `ui/screens/errors.js` + `errors/model.js` (10 por página, Abrir pasta, Tentar de novo) |
 | Lista de erros: aviso de erros em outra conta + trocar de conta | PARCIAL | Avisos levam a conta (`Notification.account`) e o e-mail no corpo com mais de uma conta; a lista de erros ainda não avisa erros de outra conta |
@@ -269,7 +270,7 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Janela "Compartilhar": adicionar pessoas com papel e mensagem | FEITO | `ui/screens/share.js`, D-Bus `share_add`/`share_set_role`, `gdl-drive/src/client/sharing.rs`. |
 | Janela "Compartilhar": acesso geral (restrito/domínio/link) | FEITO | `share_set_general` → `Engine::set_general_access` (troca tira os de outro tipo). |
 | Janela "Compartilhar": copiar link | FEITO | Pelo menu (`CopyLink`) e pelo botão da janela. |
-| Abrir a janela pela MCP (corrigir permissão de um e-mail) | FALTA | Não há servidor MCP. |
+| Abrir a janela pela MCP (corrigir permissão de um e-mail) | FEITO | `open_acl_dialog` → D-Bus `OpenShare` abre a janela Compartilhar com o e-mail digitado; teste `acl_dialog_only_opens`. |
 | Gerenciar versões (baixar, restaurar, manter para sempre; mensagens) | FEITO | `ui/screens/versions.js`, D-Bus `version_download/restore/keep`, `gdl-engine/src/sharing.rs` (restaurar vira edição local que sobe como versão nova). |
 | Lixeira: pasta somente leitura + Restaurar | FEITO (variante) | Lixeira KIO `.Trash-<uid>` na montagem (`gdl-fs/src/trash.rs`); restaurar = `engine.untrash` (`gdl-fs/src/write.rs:417-421`); 30 dias fica por conta do Drive. Não é uma pasta virtual própria com ação "Restaurar" do app. |
 | Criar Docs/Planilhas/Apresentações na pasta e abrir no navegador | FEITO | `menu.rs:67-77` + `MenuAction`; `menu_action` em `gdl-cli/src/menu_action.rs`. |
@@ -279,25 +280,25 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
 | Notificações do sistema com ações + lista na janela | FEITO | `gdl-daemon/src/notify.rs` (`Notifier`, `org.freedesktop.Notifications`), D-Bus `Notifications/InvokeNotificationAction` (`dbus.rs:62-74`), tela em `ui/screens/home/notifications.js`. |
-| Erros fatais e de conta | PARCIAL | Existem `Offline`, `UploadFailed` e o login expirado ou revogado (`NeedsSignIn`, com "Entrar"); falta conta desativada ou bloqueada pela organização. |
-| Armazenamento e cota | PARCIAL | `QuotaFull`, `DiskLow` (`notify.rs:108,116`); faltam "quase cheio" da cota e "disco local cheio" separado. |
-| Sincronização e pastas | PARCIAL | `LostAndFound`, `SavedWhilePaused`, `UploadCanceled`, `CopiedAsShortcut`, pasta conectada sumiu/movida/sem permissão, exclusão em massa; faltam itens recuperados, uploads parados há N dias, itens movidos para a lixeira. |
-| Permissões e movimentações | FALTA | Nenhum evento (não pode criar/mover/excluir/renomear; avisos de compartilhamento). |
+| Erros fatais e de conta | FEITO | `Offline`, `UploadFailed`, login expirado (`NeedsSignIn`, com "Entrar") e conta bloqueada pela organização (`AccountDisabled`, 403 `domainPolicy`). |
+| Armazenamento e cota | FEITO | `QuotaFull`, `DiskLow`, `QuotaAlmostFull` (90 % e 95 %, `gdl-engine/src/health.rs`) e `LocalDiskFull` (`ENOSPC` ao gravar). |
+| Sincronização e pastas | FEITO | `LostAndFound`, `SavedWhilePaused`, `UploadCanceled`, `CopiedAsShortcut`, pastas conectadas, exclusão em massa, `ItemsRecovered`, `UploadsStuck` (3 dias) e itens movidos para a lixeira (`notify::items_trashed`). |
+| Permissões e movimentações | PARCIAL | `NoPermission` (criar, mover, renomear, excluir; a montagem responde `EACCES`). Faltam os avisos de Drive compartilhado com muita atividade e de mover para pasta compartilhada por outra pessoa (0.11). |
 | Dispositivos (backup?, seguro remover, backup concluído/erro) | FEITO | `notify::device_ask`/`device_done` (um aviso por dispositivo). |
-| "Nova versão do app" (releases do GitHub) | FALTA | Nenhuma consulta às releases no código. |
+| "Nova versão do app" (releases do GitHub) | FEITO | `gdl-daemon/src/updates.rs`, `daemon/releases.rs` (1 min depois da partida e a cada 24 h; cada versão avisa uma vez). |
 | "Não mostrar de novo" + tela Preferências de notificação | FEITO | `dbus.rs:78-88`, `ui/screens/notification-settings.js`. |
 
 ### 6.15 Diagnóstico, feedback e Sobre
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Registro detalhado liga/desliga | FALTA | Só `tracing_subscriber::fmt()` fixo (`gdl-daemon/src/main.rs:50`); sem chave nem botão. |
-| Gerar informações de diagnóstico (pacote de logs) | FALTA | Nenhum código. |
-| Enviar feedback (issue pré-preenchida no GitHub + anexo) | FALTA | Nenhum código. |
-| Relatório de falhas local, enviado com consentimento | FALTA | Existe só a caixa `AutomaticErrorReporting` (`ui/screens/preferences.js:176`) e a chave; nada coleta ou envia. |
+| Registro detalhado liga/desliga | FEITO | `gdl-daemon/src/logging.rs` (arquivo girando 5 × 10 MB; detalhado por 24 h), D-Bus `SetVerboseLogging`, Mais opções. |
+| Gerar informações de diagnóstico (pacote de logs) | FEITO | `gdl-daemon/src/diagnostics.rs` (`scrub`, `.tar.gz` 0600), D-Bus `GenerateDiagnostics`, Mais opções e bandeja. |
+| Enviar feedback (issue pré-preenchida no GitHub + anexo) | FEITO | `ui/screens/feedback.js` (Problema ou Sugestão, diagnóstico opcional, issue pré-preenchida). |
+| Relatório de falhas local, enviado com consentimento | FEITO | `gdl-common/src/crash.rs` (20 mais novos, 0700/0600); com `AutomaticErrorReporting`, aviso "Enviar relatório" que abre a issue filtrada. |
 | Sobre (versão, GPL-3.0, terceiros, não oficial, links) | FEITO | `ui/screens/about.js`, `gdl-ui/src/third_party.rs`, `locales/pt-BR/ui.ftl:9-12`. |
 | Redefinir preferências com confirmação | FEITO | `dbus.rs:196` (`reset_preferences`), `ui.ftl:142-150`. |
-| Redefinir dados locais com confirmação | PARCIAL | Só via "Desconectar conta" com apagar dados e "Desinstalar --purge" (`dbus.rs:176-181`); sem ação própria "redefinir dados locais". |
+| Redefinir dados locais com confirmação | FEITO | D-Bus `ResetLocalData` (recusa com envios pendentes), Mais opções. |
 
 ### 6.16 Políticas e configuração
 
@@ -314,20 +315,20 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | DefaultWebBrowser | FEITO | `gdl-common/src/browser.rs`, `config.rs:204`. |
 | DisableAddAccount | FEITO | `begin_login` e `can_add_account` |
 | DisableExternalMediaSync | FEITO | `daemon/devices.rs` (`devices_refused`). |
-| DisableLocalizedVirtualFolders | FALTA | Sem consumidor. |
+| DisableLocalizedVirtualFolders | FEITO | `Layout` com os nomes em inglês (`gdl-fs/src/layout.rs`). |
 | DisableMirroredMyDrive | FEITO | `daemon/mirror.rs` (`mirror_refused`). |
 | DisableMirroredFolders | FEITO | `daemon/folders.rs` (`folders_refused`). |
 | DisableOnboardingDialog | FEITO | `gdl-tray/src/main.rs:148`. |
 | MinFreeDiskSpaceKBytes | FEITO | `engine.rs:169`. |
 | OpenOfficeFilesInDocs | FEITO | Esconde os itens "Abrir no Docs/Planilhas/Apresentações" do menu quando desligada. |
 | DirectConnection | FEITO | `daemon.rs:262-264`. |
-| TrustedRootCertsFile | FALTA | Sem consumidor (nenhum `add_root_certificate`). |
-| TrustSystemRootCerts | FALTA | Sem consumidor. |
-| DisableCRLCheck | FALTA | Sem consumidor. |
-| DisableSSLValidation | FALTA | Sem consumidor. |
+| TrustedRootCertsFile | FEITO | `gdl-drive/src/lib.rs` (`set_http`, raízes do PEM somadas às do sistema). |
+| TrustSystemRootCerts | FEITO | Desligada, valem só as raízes do `TrustedRootCertsFile`. |
+| DisableCRLCheck | FEITO | Aceita e sem efeito: o TLS do app não consulta listas de revogação (registrado no CHANGELOG). |
+| DisableSSLValidation | FEITO | Só vale vindo do `policies.toml` (`config.rs`, teste `ssl_validation_only_from_policies`); aviso no log a cada partida. |
 | SearchHotKey | FEITO | `gdl-tray/src/main.rs:193`, `hotkey.rs`. |
 | PauseSyncingOnMeteredConnection | FEITO | `daemon.rs:398,454`, `metered.rs`. |
-| AutomaticErrorReporting | PARCIAL | Chave e caixa na UI, sem funcionalidade de relatório (ver 6.15). |
+| AutomaticErrorReporting | FEITO | Ligada, oferece o relatório depois de uma falha (ver 6.15). |
 | UITheme | FEITO | `ui/app.js`, `ui/screens/preferences.js`. |
 | ShowMountPointInSidebar | FEITO | `daemon.rs:477-483`, `desktop.rs`. |
 | PromptToBackupDevices | FEITO | `daemon/devices.rs` (`devices_found`). |
@@ -336,11 +337,11 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Binário `gdrive-desktop-linux-mcp` (stdio JSON-RPC, D-Bus) | FALTA | Nenhum crate/ocorrência de "mcp" em `crates/`, `Cargo.toml` (workspace `crates/*`) ou `packaging/`. |
-| get_sync_status(path) | FALTA | Sem MCP (o D-Bus `Status` existe, mas não por caminho). |
-| add_folder_to_sync(path, sync_mode, account_id?, my_drive_path?) | FALTA | Sem MCP nem backup/sincronização de pastas. |
-| get_drive_url(path) | FALTA | Sem MCP (existe `web_link(item_id)` no D-Bus, `dbus.rs:152`). |
-| list_tracked_folders() | FALTA | Sem MCP nem pastas conectadas. |
-| open_acl_dialog(email, item_id, account_id?) | FALTA | Sem MCP nem janela Compartilhar. |
-| Regra: agente nunca altera permissões em silêncio | FALTA | Não aplicável ainda (sem MCP). |
+| Binário `gdrive-desktop-linux-mcp` (stdio JSON-RPC, D-Bus) | FEITO | `crates/gdl-mcp` (JSON-RPC 2.0, MCP 2025-06-18, stdio), instalado com os outros programas. |
+| get_sync_status(path) | FEITO | D-Bus `PathStatus`; teste `status_of_a_synced_path`. |
+| add_folder_to_sync(path, sync_mode, account_id?, my_drive_path?) | FEITO | `backup` → `AddLocalFolder`; `stream` → `MoveToDrive` (copia, confere, link no lugar, original na lixeira, desfaz ao falhar); só pastas visíveis da pasta pessoal; testes `stream_move_leaves_a_link`, `stream_move_undoes_on_failure`, `agent_cannot_add_hidden_or_outside_folders`. |
+| get_drive_url(path) | FEITO | D-Bus `WebLinkOfPath`; teste `drive_url_of_a_path`. |
+| list_tracked_folders() | FEITO | Montagens, Espelho e pastas do computador de cada conta; teste `tracked_folders_lists_pairs_and_mounts`. |
+| open_acl_dialog(email, item_id, account_id?) | FEITO | D-Bus `OpenShare` (e-mail já digitado na janela Compartilhar); teste `acl_dialog_only_opens`. |
+| Regra: agente nunca altera permissões em silêncio | FEITO | Nenhuma ferramenta compartilha: `open_acl_dialog` só abre a janela e quem confirma é a pessoa. |
 

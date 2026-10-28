@@ -77,7 +77,43 @@ Dolphin, cada arquivo mostra também um emblema: na nuvem, off-line, sincronizan
 No KDE, o app tira a pasta do Drive do indexador de arquivos (Baloo), que baixaria tudo para ler o
 conteúdo; as outras pastas excluídas continuam como estavam. Desinstalar desfaz a mudança.
 
+## Atividade suspeita nos arquivos
+
+Se muitos arquivos forem regravados de um jeito que lembra um vírus que cifra arquivos (vinte em um
+minuto), o app pausa os envios da conta e avisa. As versões anteriores continuam no Drive. No
+aviso: **Verificar** abre a janela principal, **Eu reconheço esta atividade** retoma e não avisa de
+novo por uma hora (por exemplo, quando você mesmo está cifrando arquivos) e **Permitir
+sincronização** retoma. Fotos, vídeos, `.zip` e outros formatos já comprimidos não contam.
+
+## Itens recuperados
+
+Se os dados do app de uma conta se danificarem (queda de energia, disco com defeito), o app os
+guarda numa pasta `recuperacao` e lê a conta de novo do Drive. As edições que ainda não tinham
+subido vão para o Lost and Found, na pasta "Recuperados <data>"; o aviso "Itens recuperados" leva
+até elas. Nada é reenviado sozinho: mova de volta para a pasta do Drive o que quiser manter.
+
+## Assistentes de IA (MCP)
+
+O programa `gdrive-desktop-linux-mcp` deixa um assistente compatível com o Model Context Protocol
+consultar o estado e o link de um caminho, ver as pastas acompanhadas, abrir a janela Compartilhar
+com um e-mail já digitado e adicionar uma pasta à sincronização. Ele só aceita pastas visíveis
+dentro da sua pasta pessoal e nunca compartilha nada sem você confirmar. O README mostra como
+registrar o servidor no seu cliente.
+
 ## Algo deu errado
 
-Veja as [perguntas frequentes](perguntas-frequentes.md). Se o problema continuar, abra um relato em
+Em **Mais opções**:
+
+- **Enviar feedback** abre no navegador uma issue do projeto já preenchida com a versão e o
+  sistema; marque "Incluir informações de diagnóstico" para gerar o pacote e anexá-lo.
+- **Gerar informações de diagnóstico** grava na Área de trabalho um `.tar.gz` com os registros, o
+  sistema e as preferências, sem tokens, senhas nem e-mails inteiros.
+- **Ativar o registro detalhado** grava mais detalhes nos registros por um dia (ou até desativar).
+- **Redefinir os dados locais** apaga os dados do app da conta neste computador e a lê de novo do
+  Drive, com o mesmo login (só sem envios pendentes).
+
+Com "Enviar relatórios de erro automaticamente" ligado nas Preferências, depois de uma falha o app oferece abrir a
+issue com o relatório; quem envia é você.
+
+Veja também as [perguntas frequentes](perguntas-frequentes.md) e as issues em
 <https://github.com/junior9283/gdrive-desktop-linux/issues>.

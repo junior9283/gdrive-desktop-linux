@@ -7,9 +7,64 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.10.0] - 2026-10-27
+
+### Adicionado
+- Registro detalhado: liga e desliga em Mais opções sem reiniciar e volta ao normal depois de um
+  dia. O serviço grava o log também em arquivo (`~/.local/state/gdrive-desktop-linux/logs`, 5
+  arquivos de 10 MB).
+- Gerar informações de diagnóstico (Mais opções e bandeja): um `.tar.gz` só do usuário na Área de
+  trabalho com logs, relatórios de falha, sistema, preferências e contas, sem tokens, senhas nem
+  e-mails inteiros.
+- Enviar feedback (Mais opções e bandeja): Problema ou Sugestão, com a opção de juntar o pacote de
+  diagnóstico; abre uma issue do projeto já preenchida no navegador.
+- Relatórios de falha: cada programa guarda um relatório ao fechar de forma inesperada; com
+  `AutomaticErrorReporting` ligado, o serviço oferece uma vez "Enviar relatório", que abre a issue
+  já preenchida.
+- Redefinir os dados locais (Mais opções): apaga o banco e o cache da conta e a lê de novo do
+  Drive, com o mesmo login; recusa com envios pendentes.
+- Avisos novos: sem permissão para criar, mover, renomear ou excluir; conta bloqueada pela
+  organização; armazenamento quase cheio (90 % e 95 %); envios parados há mais de 3 dias; disco do
+  computador cheio; itens das pastas do computador movidos para a lixeira; itens recuperados; e
+  nova versão disponível (consulta diária às releases do GitHub, com "Ver novidades").
+- Proteção contra ransomware: vinte arquivos regravados com cara de cifrados em um minuto pausam os
+  envios da conta e avisam "Atividade suspeita nos arquivos", com "Verificar", "Eu reconheço esta
+  atividade" e "Permitir sincronização". Formatos já comprimidos (fotos, vídeos, `.zip`…) não
+  contam.
+- Recuperação do banco: se os dados locais de uma conta estiverem danificados, o banco é guardado
+  em `recuperacao/<data>`, as edições que não tinham subido vão para o Lost and Found
+  ("Recuperados <data>") e a conta se lê de novo do Drive. Nada é reenviado sozinho.
+- Servidor MCP `gdrive-desktop-linux-mcp` (stdio): estado de sincronização de um caminho, link da
+  web, pastas acompanhadas, abrir a janela Compartilhar com um e-mail já digitado e adicionar uma
+  pasta à sincronização em `backup` ou `stream` (a pasta vai para o Meu Drive e um link fica no
+  lugar; a original vai para a lixeira do sistema).
+- Políticas `TrustedRootCertsFile`, `TrustSystemRootCerts`, `DisableSSLValidation` (só no
+  `policies.toml`) e `DisableLocalizedVirtualFolders` (nomes das pastas da montagem em inglês).
+  `DisableCRLCheck` é aceita e não muda nada: o TLS do app não consulta listas de revogação.
+
+### Mudado
+- D-Bus: `VerboseLogging`, `SetVerboseLogging`, `GenerateDiagnostics`, `ResetLocalData`,
+  `PathStatus`, `WebLinkOfPath`, `OpenShare` e `MoveToDrive`.
+- A consulta de versão é o único acesso do app fora do Google (a política de privacidade diz o
+  que vai nele).
+
+### Segurança
+- O pacote de diagnóstico, os relatórios de falha e o feedback passam por um filtro que tira
+  tokens (`ya29.`, `1//`, `Bearer`, `access_token`…), `client_secret`, códigos de login, usuário e
+  senha de endereços de proxy e mascara e-mails. Os relatórios ficam em pasta `0700`.
+
 ### Corrigido
 - Uma pasta nova com vários arquivos, criada na pasta do Google Drive, subia os arquivos um de cada
   vez quando a criação da pasta demorava (rede lenta); agora sobem quatro juntos, como os demais.
+- Avisos emitidos na partida da conta (login recusado) podiam se perder antes de o serviço começar
+  a ouvir.
+- Com o banco da conta estragado, o conteúdo das edições que não subiram não é mais apagado
+  quando nem todo o banco dá para ler: o cache fica guardado ao lado.
+- A pausa por atividade suspeita continua depois de reiniciar, e "Eu reconheço esta atividade" não
+  desfaz mais uma pausa feita por você.
+- "Redefinir os dados locais" sem conexão é recusado antes de apagar qualquer coisa.
+- Pelo MCP, duas mudanças da mesma pasta ao mesmo tempo não desfazem mais a cópia uma da outra; as
+  ferramentas dizem aos clientes quais só leem e qual move pastas.
 
 ## [0.9.0] - 2026-10-27
 
@@ -434,7 +489,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.9.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.6.0...v0.7.0

@@ -1,15 +1,15 @@
 # Matriz de paridade
 
 Situação de cada item do catálogo da [especificação](superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md)
-(seção 6) no código, conferida na versão 0.10.0 (27/10/2026). A 1.0 sai quando todos os itens estiverem
+(seção 6) no código, conferida depois da versão 0.10.0 (28/10/2026). A 1.0 sai quando todos os itens estiverem
 **FEITO** ou registrados em "Diferenças conhecidas" no README como risco aceito.
 
 Legenda: **FEITO**, **PARCIAL** (existe, mas incompleto), **FALTA**.
 
 | Seções | FEITO | PARCIAL | FALTA |
 |---|---|---|---|
-| 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 62 | 7 | 2 |
-| 6.7–6.11 (janela principal, bandeja, pesquisa, Preferências, primeiro uso) | 67 | 1 | 11 |
+| 6.1–6.6 (contas, pasta, cache, sincronização, backup, Drives compartilhados) | 63 | 6 | 2 |
+| 6.7–6.11 (janela principal, bandeja, pesquisa, Preferências, primeiro uso) | 71 | 1 | 8 |
 | 6.12–6.17 (Dolphin, compartilhar e versões, notificações, diagnóstico, políticas, MCP) | 71 | 1 | 2 |
 
 Os pacotes `.deb` e `.rpm` exigidos pela 1.0 já saem em cada release (`packaging/nfpm.yaml`,
@@ -52,7 +52,7 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 | Stream: montagem FUSE por conta | FEITO | `gdl-fs/src/fs.rs`, uma montagem por conta (`engine_at` acha a conta pelo caminho) |
 | Local padrão e `DefaultMountPoint`, aviso/alternativo se ocupado | FEITO | `daemon/mount.rs`, `daemon.rs:834` (`mount-moved`), teste `busy_mount_point_falls_back_to_numbered_folder`. O padrão por e-mail depende de multi-conta |
 | Conteúdo da montagem | FEITO | `gdl-fs/src/layout.rs`: Meu Drive (fora dela no Espelho), Drives compartilhados, Computadores, lixeira, Lost and Found, Uploads cancelados, `.shortcut-targets-by-id` |
-| Nomes pelo idioma / `DisableLocalizedVirtualFolders` | PARCIAL | Nomes via i18n (`Layout::new`); a política está em `config.rs:116` mas não é lida (nunca força inglês) |
+| Nomes pelo idioma / `DisableLocalizedVirtualFolders` | FEITO | Nomes via i18n (`Layout::new`); com a política, `daemon.rs` usa os nomes em inglês |
 | "Locais" do Dolphin (`ShowMountPointInSidebar`) | FEITO | `gdl-daemon/src/desktop.rs`, `daemon.rs:477` |
 | Modo Espelho (pasta real, inotify + changes.list) | FEITO | `gdl-folders` (comparação em três vias, `watch.rs` com inotify e `ItemsChanged`), `daemon/mirror.rs`; documentos Google como ponteiros e atalhos como links |
 | Drives compartilhados sempre em Stream | FEITO | Os drives ficam na montagem (`Node::SharedDrives`); não há modo Espelho para eles |
@@ -160,9 +160,9 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Links rápidos (Drive web, FAQ, ajuda off-line) | FEITO | `home/links.js` |
 | Mais opções: Arquivos off-line, Lista de erros (contagem), Preferências, Sobre | FEITO | `home/more.js` `moreMenu` |
 | Mais opções: Gerenciar drives compartilhados | FALTA | Ausente |
-| Mais opções: Enviar feedback | FALTA | Ausente |
-| Mais opções: registro detalhado liga/desliga | FALTA | Ausente |
-| Mais opções: gerar informações de diagnóstico | FALTA | Ausente (grep sem resultado) |
+| Mais opções: Enviar feedback | FEITO | `more.js` → tela `feedback` |
+| Mais opções: registro detalhado liga/desliga | FEITO | `more.js` `verbose` (`set_verbose_logging`) |
+| Mais opções: gerar informações de diagnóstico | FEITO | `more.js` `diagnostics` (`generate_diagnostics`) |
 | Mais opções: Redefinir preferências | FEITO | `more.js` `reset` -> `reset_preferences` |
 | Mais opções: Desconectar todas as contas | FEITO | `more.js` `disconnect-all` → `logout_all`, com o fluxo de desconexão |
 | Mais opções: Sair com confirmação se sincronizando | FEITO | `more.js` `quit` |
@@ -180,7 +180,8 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Clique esquerdo abre a janela principal | FEITO | `model.rs` `click: Action::Open("home")` (sem login: onboarding) |
 | Menu direito: Abrir pasta, Abrir no navegador, Pesquisar, Pausar/Retomar | FEITO | `model.rs` `items` |
 | Menu direito: Arquivos off-line, Lista de erros (contagem), Preferências, Sobre, Sair | FEITO | `model.rs` `items` |
-| Menu direito: Gerenciar drives compartilhados, Enviar feedback, registro detalhado, diagnóstico, Redefinir preferências, Desconectar todas | FALTA | Não há `Action` nem item para eles (`Action` = Open/OpenFolder/OpenWeb/Pause/Resume/StartService/Quit) |
+| Menu direito: Enviar feedback, diagnóstico | FEITO | `model.rs` `tray-feedback`, `Action::GenerateDiagnostics` |
+| Menu direito: Gerenciar drives compartilhados, registro detalhado, Redefinir preferências, Desconectar todas | FALTA | Sem item na bandeja (0.11) |
 
 ### 6.9 Pesquisa rápida
 

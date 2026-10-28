@@ -314,6 +314,36 @@ mod tests {
         );
     }
 
+    /// O "Retomar" de um aviso desfaz a pausa do usuário e a da conexão limitada, não a de
+    /// atividade suspeita; o "Retomar" do menu desfaz todas.
+    #[tokio::test]
+    async fn resume_keeps_the_suspicious_pause() {
+        use gdl_common::time::now_ms;
+
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let (engine, tmp) = crate::testutil::indexed_engine(&fake).await;
+        let file = tmp.path().join("cifrado");
+        std::fs::write(&file, random_bytes(8192, 7)).unwrap();
+        let now = now_ms();
+        for n in 0..THRESHOLD as i64 {
+            engine.screen_write(&format!("doc{n}.txt"), &file, now + n);
+        }
+        engine.pause();
+        engine.set_metered_pause(true);
+
+        engine.resume_keeping_suspicious();
+        assert!(engine.is_paused(), "a suspeita continua");
+        engine.clear_suspicious_pause();
+        assert!(!engine.is_paused());
+
+        for n in 0..THRESHOLD as i64 {
+            engine.screen_write(&format!("de-novo{n}.txt"), &file, now + 100 + n);
+        }
+        assert!(engine.is_paused());
+        engine.resume();
+        assert!(!engine.is_paused(), "\"Retomar\" no menu desfaz tudo");
+    }
+
     #[test]
     fn recognized_activity_is_quiet_for_an_hour() {
         let mut detector = Detector::default();

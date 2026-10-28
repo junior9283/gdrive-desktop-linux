@@ -7,7 +7,7 @@ use std::time::Duration;
 use gdl_ipc::ServiceError;
 use gdl_store::PinState;
 
-use crate::testutil::{Harness, blocking, status_until, wait_until};
+use crate::testutil::{Harness, blocking, poll_until, status_until, wait_until};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn login_over_dbus_emits_login_finished() {
@@ -2740,22 +2740,7 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
     const SUSPICIOUS: &str = "Atividade suspeita nos arquivos";
     let h = Harness::new().await;
     h.logged_in().await;
-    let drive = h.drive();
-    blocking(move || {
-        for n in 0..20u64 {
-            let mut x = n * 2 + 1;
-            let bytes: Vec<u8> = (0..8192)
-                .map(|_| {
-                    x ^= x << 13;
-                    x ^= x >> 7;
-                    x ^= x << 17;
-                    (x >> 24) as u8
-                })
-                .collect();
-            std::fs::write(drive.join(format!("doc{n}.txt")), bytes).unwrap();
-        }
-    })
-    .await;
+    write_encrypted_burst(h.drive()).await;
 
     wait_until("aviso de atividade suspeita", || {
         h.notes().iter().any(|n| n.summary == SUSPICIOUS)
@@ -2775,6 +2760,53 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
 
     h.click(note.id, "recognize-activity").await;
     assert!(!h.proxy.status("").await.unwrap().paused);
+}
+
+/// Vinte arquivos com cara de cifrados (bytes pseudoaleatórios) em `dir`.
+async fn write_encrypted_burst(dir: PathBuf) {
+    blocking(move || {
+        for n in 0..20u64 {
+            let mut x = n * 2 + 1;
+            let bytes: Vec<u8> = (0..8192)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    (x >> 24) as u8
+                })
+                .collect();
+            std::fs::write(dir.join(format!("doc{n}.txt")), bytes).unwrap();
+        }
+    })
+    .await;
+}
+
+/// "Retomar" num aviso de uma conta, com a pausa geral ligada, retoma todas, menos a que está
+/// pausada por atividade suspeita: essa só sai pela decisão sobre ela.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resume_on_one_account_keeps_the_other_suspicious() {
+    const OTHER: &str = "outra@example.com";
+    let h = Harness::new().await;
+    h.two_accounts(OTHER).await;
+    write_encrypted_burst(h.mount_of(OTHER).join("Meu Drive")).await;
+    poll_until(
+        "a outra conta pausada",
+        || h.proxy.status(OTHER),
+        |s| s.paused,
+    )
+    .await;
+    h.proxy.pause().await.unwrap();
+
+    h.daemon.run_action("", "resume").await.unwrap();
+
+    assert!(
+        !h.proxy.status("").await.unwrap().paused,
+        "a primeira retoma"
+    );
+    assert!(
+        h.proxy.status(OTHER).await.unwrap().paused,
+        "a suspeita continua"
+    );
 }
 
 /// Os avisos que dá para desligar trazem "Não mostrar de novo", que desliga a família.

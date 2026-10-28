@@ -939,11 +939,16 @@ impl Daemon {
     /// A ação `key` de um aviso, na conta `account` dele.
     pub(crate) async fn run_action(&self, account: &str, key: &str) -> Result<(), ServiceError> {
         let folder = match key {
-            // A pausa do usuário é do app inteiro, como "Retomar" no menu; sem ela, o aviso de
-            // atividade suspeita libera só a conta dele.
-            RESUME if self.paused.load(Ordering::SeqCst) => return self.set_paused(false).await,
+            // O aviso de atividade suspeita libera a conta dele; a pausa do usuário é do app
+            // inteiro, como "Retomar" no menu, e não desfaz a suspeita das outras contas.
             RESUME => {
-                apply_paused(&*self.account_engine(account).await?, false);
+                let engine = self.account_engine(account).await?;
+                engine.resume();
+                if self.paused.swap(false, Ordering::SeqCst) {
+                    for other in self.accounts.lock().await.iter() {
+                        other.engine.resume_keeping_suspicious();
+                    }
+                }
                 return Ok(());
             }
             // A tela de login da conta é da janela; o serviço só pede para abri-la.

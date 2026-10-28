@@ -407,16 +407,35 @@ impl Engine {
         self.update_pause(|r| r.user = true);
     }
 
-    /// Retoma, inclusive o que a conexão limitada pausou: a decisão do usuário vale mais.
+    /// Retoma tudo, inclusive o que a conexão limitada e a atividade suspeita pausaram: a
+    /// decisão do usuário vale mais ("Retomar" no menu, "Terminar de sincronizar").
     pub fn resume(&self) {
         self.update_pause(|r| *r = PauseReasons::default());
+    }
+
+    /// Desfaz a pausa do usuário e a da conexão limitada, mas não a de atividade suspeita: o
+    /// "Retomar" de um aviso de outra conta não decide sobre ela.
+    pub fn resume_keeping_suspicious(&self) {
+        self.update_pause(|r| {
+            r.user = false;
+            r.metered = false;
+        });
+    }
+
+    /// Desfaz só a pausa por atividade suspeita.
+    pub fn clear_suspicious_pause(&self) {
+        self.update_pause(|r| r.suspicious = false);
+    }
+
+    fn is_suspicious_paused(&self) -> bool {
+        lock(&self.pause_reasons).suspicious
     }
 
     /// Confere uma gravação fechada (`name`, conteúdo em `path`): `ransomware::THRESHOLD`
     /// arquivos com cara de cifrados na janela pausam os envios e avisam (`SuspiciousActivity`).
     /// Devolve se os envios podem seguir. Só lê o arquivo quando a conferência pode contar.
     pub fn screen_write(&self, name: &str, path: &Path, now: i64) -> bool {
-        if lock(&self.pause_reasons).suspicious {
+        if self.is_suspicious_paused() {
             return false;
         }
         if is_compressed(name) || lock(&self.ransomware).is_quiet(now) {
@@ -426,7 +445,7 @@ impl Engine {
         if head.is_ok_and(|head| entropy(&head) > MIN_ENTROPY) {
             self.observe_suspicious(now);
         }
-        !lock(&self.pause_reasons).suspicious
+        !self.is_suspicious_paused()
     }
 
     /// Confere um renomear de `old` para `new`: ganhar extensão de arquivo cifrado conta como
@@ -449,7 +468,7 @@ impl Engine {
     /// limitada) e não avisa de novo por `ransomware::QUIET_MS`.
     pub fn recognize_activity(&self, now: i64) {
         lock(&self.ransomware).quiet(now);
-        self.update_pause(|r| r.suspicious = false);
+        self.clear_suspicious_pause();
     }
 
     /// Pausa (ou desfaz) pela conexão limitada; desfazer não retoma uma pausa do usuário.

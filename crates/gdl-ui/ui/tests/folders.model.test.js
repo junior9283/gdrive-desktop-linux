@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { configurator, folderArg, folderName, folderRows, foldersCard, refusalKey } from '../screens/preferences/folders.js';
+import { configurator, folderArg, folderName, folderRows, foldersCard, refusalKey, suggestions } from '../screens/preferences/folders.js';
 
 const folder = (path, extra = {}) => ({ account: 'ana@example.com', id: 1, path, state: 'active', deletes: 0, ...extra });
 
@@ -66,4 +66,10 @@ test('o cartão do Início conta as pastas e destaca as que precisam de atençã
   assert.deepEqual(foldersCard([folder('/x/A'), folder('/x/B', { id: 2 })]), ['card-folders-text', { count: 2 }]);
   assert.deepEqual(foldersCard([folder('/x/A'), folder('/x/B', { id: 2, state: 'stopped-missing' })]),
     ['card-folders-attention', { count: 1 }]);
+});
+
+test('suggestions: as pastas do usuário que ainda não sincronizam', () => {
+  const suggested = ['/home/eu/Documentos', '/home/eu/Imagens', '/home/eu/Vídeos'];
+  assert.deepEqual(suggestions(suggested, [folder('/home/eu/Imagens')]), ['/home/eu/Documentos', '/home/eu/Vídeos']);
+  assert.deepEqual(suggestions(suggested, suggested.map((p) => folder(p))), []);
 });

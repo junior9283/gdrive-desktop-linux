@@ -5,7 +5,7 @@
 import { attempt, confirmDialog, el, menuButton, stylesheet, toast } from '../components.js';
 import { formatDate, formatSize } from '../format.js';
 import { itemArg } from '../router.js';
-import { versionActions } from './versions/model.js';
+import { versionActions, versionsNote } from './versions/model.js';
 
 // O estado entre as chamadas de `render` (ela é chamada de novo quando o serviço volta).
 const screen = { ctx: null, root: null, account: '', id: null };
@@ -18,8 +18,24 @@ export async function render(root, ctx) {
     root.replaceChildren(el('main', { class: 'versions' }, el('p', { class: 'empty' }, ctx.t('versions-missing'))));
     return;
   }
-  const [data] = await Promise.all([load(), css]);
-  draw(data);
+  await css;
+  await show();
+}
+
+// Lê as versões e desenha; sem resposta do Drive, diz isso e oferece tentar de novo.
+async function show() {
+  try {
+    draw(await load());
+  } catch {
+    drawFailed();
+  }
+}
+
+function drawFailed() {
+  const { t } = screen.ctx;
+  screen.root.replaceChildren(el('main', { class: 'versions' },
+    el('p', { class: 'empty', role: 'alert' }, t('versions-failed')),
+    el('div', { class: 'actions' }, el('button', { class: 'tonal retry', onclick: show }, t('versions-retry')))));
 }
 
 // O item da tela, nos argumentos de toda chamada.
@@ -36,6 +52,7 @@ const change = (promise, done) =>
 
 function draw(data) {
   const { api, t } = screen.ctx;
+  const note = versionsNote(data.versions);
   screen.root.replaceChildren(
     el(
       'main',
@@ -43,6 +60,7 @@ function draw(data) {
       el('h1', { class: 'name' }, t('versions-title', { name: data.name })),
       el('p', { class: 'meta' }, t('versions-text')),
       el('ul', { class: 'list version-list' }, data.versions.map((version) => row(version, data))),
+      note ? el('p', { class: 'empty' }, t(note)) : [],
       el('div', { class: 'actions' }, el('button', { class: 'filled', onclick: () => api.closeWindow() }, t('action-close'))),
     ),
   );

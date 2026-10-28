@@ -159,6 +159,8 @@ shortcut-add = Add shortcut
 shortcut-missing = No item to create the shortcut for.
 
 notifications-empty = No notifications.
+notification-mute = Don't show again
+notification-muted = This kind of notification won't show again. You can turn it back on in "Notification preferences".
 notification-dismiss = Dismiss
 
 link-drive-web = Google Drive on the web
@@ -343,6 +345,8 @@ pref-tab-computer = My computer
 pref-tab-drive = Google Drive
 pref-tab-settings = Settings
 pref-computer-empty = No folder from this computer is backed up to Google Drive.
+pref-suggested-folders = Suggestions: your folders that aren't synced yet
+pref-suggested-add = Add
 pref-add-folder = Add folder
 pref-computer-text = The folders you choose here go to "Computers" in Google Drive, and changes sync both ways.
 pref-devices = USB devices and memory cards
@@ -573,6 +577,9 @@ share-done = Done
 versions-missing = Open this window from the Google Drive menu in your file manager.
 versions-title = Versions of "{ $name }"
 versions-text = Older versions may be deleted after 30 days or 100 versions, except the ones kept forever.
+versions-none = This file has no earlier versions.
+versions-failed = Couldn't get the versions.
+versions-retry = Try again
 versions-current = Current
 versions-kept = Kept forever
 versions-actions = Version actions

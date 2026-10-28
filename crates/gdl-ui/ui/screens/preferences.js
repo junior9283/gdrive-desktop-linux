@@ -9,7 +9,7 @@ import { screenArg } from '../router.js';
 import { currentAccount } from '../state.js';
 import { disconnect } from './home/disconnect.js';
 import { deviceRows } from './preferences/devices.js';
-import { configurator, folderArg, folderName } from './preferences/folders.js';
+import { configurator, folderArg, folderName, suggestions } from './preferences/folders.js';
 import { mirrorConfirm, suggestedMirror } from './preferences/mirror.js';
 import {
   diff, fromPrefs, gbToKb, hotkeyFrom, kbToGb, numberOrNull, proxyMode, proxyPatch, validate,
@@ -23,7 +23,7 @@ const screen = { root: null, ctx: null, tab: 'drive', back: 'drive', listening: 
 const form = { original: {}, edited: {}, managed: new Set(), limits: {}, mount: '', restartDue: false };
 // As pastas do computador (`LocalFolders`), os dispositivos (`Devices`) e as contas, para o
 // configurador.
-const computer = { folders: [], devices: [], accounts: [] };
+const computer = { folders: [], devices: [], accounts: [], suggested: [] };
 // A pasta do Espelho da conta atual (vazia no Stream).
 const drive = { mirror: '' };
 // Os pedaços que mudam sem redesenhar e a conferência de cada campo com linha de erro.
@@ -108,7 +108,9 @@ const policyOn = (key) => form.managed.has(key) && form.original[key] === true;
 
 async function loadComputer() {
   const { api } = screen.ctx;
-  [computer.folders, computer.devices] = await Promise.all([api.call('local_folders'), api.call('devices')]);
+  [computer.folders, computer.devices, computer.suggested] = await Promise.all([
+    api.call('local_folders'), api.call('devices'), api.suggestedFolders().catch(() => []),
+  ]);
 }
 
 const pending = () => diff(form.original, form.edited);
@@ -194,11 +196,13 @@ function computerTab() {
   // A política desliga os dispositivos: a lista e a pergunta ficam bloqueadas.
   const noDevices = policyOn('DisableExternalMediaSync');
   ui.folders = el('ul', { class: 'local-folders' });
+  ui.suggestions = el('ul', { class: 'list suggested-folders' });
   ui.devices = el('ul', { class: 'devices' });
   drawFolders();
   return [
     el('p', { class: 'meta' }, t('pref-computer-text')),
     ui.folders,
+    ui.suggestions,
     el('fieldset', { class: 'pref', 'data-key': 'DisableMirroredFolders', disabled },
       el('button', { class: 'tonal add-folder', onclick: pickDir(addFolder) }, t('pref-add-folder')),
       disabled ? el('span', { class: 'meta managed-note' }, t('folder-refused-folders-disabled')) : []),
@@ -213,7 +217,20 @@ function computerTab() {
 // As listas de pastas e de dispositivos (redesenhadas quando o serviço avisa que mudaram).
 function drawFolders() {
   ui.folders?.replaceChildren(...folderItems(screen.ctx, computer.folders, computer.accounts.length > 1));
+  drawSuggestions();
   drawDevices();
+}
+
+// As pastas do usuário que ainda não sincronizam, cada uma com "Adicionar" (o configurador de
+// sempre); some quando todas já estão na lista.
+function drawSuggestions() {
+  const { t } = screen.ctx;
+  const paths = suggestions(computer.suggested, computer.folders);
+  ui.suggestions?.replaceChildren(...(paths.length ? [el('li', { class: 'meta' }, t('pref-suggested-folders'))] : []),
+    ...paths.map((path) => el('li', { 'data-path': path },
+      el('span', { class: 'name' }, folderName(path)),
+      el('button', { class: 'text add-suggested', disabled: policyOn('DisableMirroredFolders'), onclick: () => addFolder(path) },
+        t('pref-suggested-add')))));
 }
 
 function drawDevices() {

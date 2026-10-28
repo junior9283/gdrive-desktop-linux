@@ -10,3 +10,6 @@ export function versionActions(version, canEdit) {
     version.keep_forever ? 'unkeep' : 'keep',
   ];
 }
+
+// O aviso abaixo da lista: só com a versão atual, não há versões anteriores.
+export const versionsNote = (versions) => (versions.filter((v) => !v.current).length ? null : 'versions-none');

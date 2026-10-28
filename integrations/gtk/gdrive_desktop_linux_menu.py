@@ -64,10 +64,14 @@ def run_action(action, paths, on_text, on_error, bus=None):
              GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, -1, None, done)
 
 
+# Sem caixa de seleção nos menus do GTK, a marca vai no nome: "✓" ligado, "–" em parte.
+MARKS = {"on": "✓ ", "mixed": "– "}
+
+
 def build(module, entries, activate):
     """O item "Google Drive" com o submenu, nas classes de `module`; `activate(id)` roda ao
     escolher um item. Quem não tem separador (só o Nemo tem) fica sem; quem não tem marca de
-    seleção ganha um "✓" no nome."""
+    seleção ganha a marca (`MARKS`) no nome."""
     menu = module.Menu()
     separator = getattr(module.MenuItem, "new_separator", None)
     for index, (id, label, state) in enumerate(entries):
@@ -76,7 +80,7 @@ def build(module, entries, activate):
             if separator:
                 menu.append_item(separator(name))
             continue
-        item = module.MenuItem(name=name, label=("✓ " if state == "on" else "") + label)
+        item = module.MenuItem(name=name, label=MARKS.get(state, "") + label)
         item.connect("activate", lambda _item, *_, id=id: activate(id))
         menu.append_item(item)
     top = module.MenuItem(name="GDriveDesktopLinux::menu", label=TITLE, icon=APP_ICON)

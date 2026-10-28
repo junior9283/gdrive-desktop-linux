@@ -51,9 +51,9 @@ use crate::menu::{self, Action};
 use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
-    self, MOVE_LOST_FOUND, Notification, Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND,
-    OPEN_RELEASE, OPTIONAL_KINDS, RECOGNIZE_ACTIVITY, RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT,
-    SIGN_IN,
+    self, DEVICE_ALWAYS, DEVICE_IGNORE, MOVE_LOST_FOUND, MUTE, Notification, Notifier,
+    OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE, OPTIONAL_KINDS, RECOGNIZE_ACTIVITY,
+    RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT, SIGN_IN,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -830,12 +830,23 @@ impl Daemon {
     }
 
     /// Botão de um aviso clicado no servidor de notificações.
-    pub(crate) async fn on_desktop_action(&self, desktop_id: u32, key: &str) {
-        let id = self.history.by_desktop_id(desktop_id);
-        let account = id
-            .and_then(|id| self.history.get(id))
-            .map_or_else(String::new, |note| note.account);
-        if let Err(e) = self.run_action(&account, key).await {
+    pub(crate) async fn on_desktop_action(self: &Arc<Self>, desktop_id: u32, key: &str) {
+        let shown = self.history.shown_as(desktop_id);
+        let id = shown.as_ref().map(|(note, _)| note.id);
+        let device = shown
+            .as_ref()
+            .and_then(|(_, slot)| slot.as_deref())
+            .and_then(notify::device_of);
+        let done = match (key, &shown, device) {
+            (MUTE, Some((note, _)), _) => self.set_notification_enabled(&note.kind, false).await,
+            (DEVICE_ALWAYS, _, Some(device)) => self.backup_device(device, true).await,
+            (DEVICE_IGNORE, _, Some(device)) => self.ignore_device(device).await,
+            _ => {
+                let account = shown.as_ref().map_or("", |(note, _)| note.account.as_str());
+                self.run_action(account, key).await
+            }
+        };
+        if let Err(e) = done {
             tracing::warn!(erro = %e, acao = key, "ação do aviso falhou");
         }
         if let Some(id) = id
@@ -1913,7 +1924,12 @@ impl Daemon {
             .into_iter()
             .map(|(action, state)| MenuEntry {
                 id: action.map_or(menu::SEPARATOR, Action::id).into(),
-                label: action.map_or_else(String::new, |a| self.i18n.tr(a.label_key(), &[])),
+                // Uma pasta com parte do conteúdo off-line diz isso no nome, como no original.
+                label: match (action, state) {
+                    (Some(Action::Offline), "mixed") => self.i18n.tr("menu-offline-mixed", &[]),
+                    (Some(action), _) => self.i18n.tr(action.label_key(), &[]),
+                    (None, _) => String::new(),
+                },
                 state: state.into(),
             })
             .collect()

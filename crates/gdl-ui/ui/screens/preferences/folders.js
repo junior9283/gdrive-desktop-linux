@@ -59,3 +59,6 @@ export function foldersCard(folders) {
   const stuck = folders.filter((f) => f.state !== 'active').length;
   return stuck ? ['card-folders-attention', { count: stuck }] : ['card-folders-text', { count: folders.length }];
 }
+
+// As pastas sugeridas (as do usuário, como no primeiro uso) que ainda não sincronizam.
+export const suggestions = (suggested, folders) => suggested.filter((path) => !folders.some((f) => f.path === path));

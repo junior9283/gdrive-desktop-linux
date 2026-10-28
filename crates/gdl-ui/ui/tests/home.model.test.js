@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { I18n, parseFtl } from '../i18n.js';
 import { formatSize } from '../format.js';
-import { accountMenuFor, drivesCard, headerFor, rowActions, offlineText, paginate, shownStatus, sortRows, splitArg } from '../screens/home/model.js';
+import { notificationActions, accountMenuFor, drivesCard, headerFor, rowActions, offlineText, paginate, shownStatus, sortRows, splitArg } from '../screens/home/model.js';
 
 const load = (lang) =>
   new I18n(
@@ -192,4 +192,11 @@ test('splitArg separa a ação do resto do argumento', () => {
   // A janela aberta sem argumento (runArg ignora argumento vazio).
   assert.deepEqual(splitArg(null), ['', '']);
   assert.deepEqual(splitArg(undefined), ['', '']);
+});
+
+test('notificationActions: a ação do aviso e, nas famílias ligadas que dá para desligar, "Não mostrar de novo"', () => {
+  const mutable = new Set(['resume-syncing']);
+  assert.deepEqual(notificationActions({ kind: 'resume-syncing', action_key: 'resume' }, mutable), ['resume', 'mute']);
+  assert.deepEqual(notificationActions({ kind: 'quota-full', action_key: '' }, mutable), []);
+  assert.deepEqual(notificationActions({ kind: 'lost-and-found', action_key: 'open-lost-found' }, mutable), ['open-lost-found']);
 });

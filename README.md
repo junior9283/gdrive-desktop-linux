@@ -113,8 +113,6 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 - **Pastas de rede (NAS):** não podem ser sincronizadas; o app recusa volumes de rede e FUSE.
 - **"Adicionar ao espelho" no menu do Dolphin:** não existe, porque no Linux o Espelho é sempre do
   Meu Drive inteiro (não de pastas escolhidas).
-- **Dispositivos:** o aviso de um pendrive novo abre as preferências, onde fica a opção de fazer
-  backup sempre; os avisos do sistema não têm caixa de seleção.
 - **Atalho global:** usa só o portal XDG GlobalShortcuts, que o Plasma 6 e o GNOME 48 já
   implementam; sem o portal, o atalho fica desligado e as Preferências dizem isso.
 - **"Perguntar ao Gemini" no menu do Dolphin:** não há endereço público para abrir um arquivo no

@@ -1219,7 +1219,7 @@ async fn menu_shows_only_inside_my_drive_with_offline_marks() {
     );
     assert_eq!(state(&folder_menu, "offline"), "mixed");
     let offline = folder_menu.iter().find(|e| e.id == "offline").unwrap();
-    assert_eq!(offline.label, "Disponível off-line");
+    assert_eq!(offline.label, "Disponível off-line (em parte)");
     assert!(
         folder_menu
             .iter()
@@ -2736,6 +2736,39 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
         .on_desktop_action(note.id, "recognize-activity")
         .await;
     assert!(!h.proxy.status("").await.unwrap().paused);
+}
+
+/// Os avisos que dá para desligar trazem "Não mostrar de novo", que desliga a família.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mute_action_turns_the_kind_off() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.proxy.pause().await.unwrap();
+    let path = h.drive().join("a.txt");
+    blocking(move || std::fs::write(path, b"pausado").unwrap()).await;
+    wait_until("aviso para retomar", || {
+        h.notes()
+            .iter()
+            .any(|n| n.actions.iter().any(|a| a == "resume"))
+    })
+    .await;
+    let note = h
+        .notes()
+        .into_iter()
+        .find(|n| n.actions.iter().any(|a| a == "resume"))
+        .unwrap();
+    let keys: Vec<_> = note.actions.iter().step_by(2).map(String::as_str).collect();
+    assert_eq!(keys, ["resume", "mute"]);
+
+    h.daemon.on_desktop_action(note.id, "mute").await;
+
+    let settings = h.proxy.notification_settings().await.unwrap();
+    let resume = settings
+        .iter()
+        .find(|s| s.kind == "resume-syncing")
+        .unwrap();
+    assert!(!resume.enabled);
+    assert!(h.proxy.status("").await.unwrap().paused, "não retoma");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

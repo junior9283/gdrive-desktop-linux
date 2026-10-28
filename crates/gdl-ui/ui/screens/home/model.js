@@ -129,3 +129,12 @@ export function splitArg(arg) {
   const at = arg.indexOf(':');
   return at < 0 ? [arg, ''] : [arg.slice(0, at), arg.slice(at + 1)];
 }
+
+// Os botões de um aviso da lista: a ação dele e, se a família pode ser desligada e ainda está
+// ligada (`mutable`), "Não mostrar de novo".
+export function notificationActions(n, mutable) {
+  const keys = [];
+  if (n.action_key) keys.push(n.action_key);
+  if (mutable.has(n.kind)) keys.push('mute');
+  return keys;
+}

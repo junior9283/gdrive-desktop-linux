@@ -114,7 +114,7 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 | Pastas conectadas bidirecionais (destino "Computadores") | FEITO | `daemon/folders.rs`, pastas de apoio achadas por `appProperties`; "Computadores" na montagem |
 | Avisos: pasta sumiu/movida/sem permissão | FEITO | `notify::for_folder` (e exclusão em massa pedindo confirmação), "Escolher novo local" |
 | Proibir aninhar pastas sincronizadas | FEITO | `gdl-folders/src/guard.rs` (`overlap`, recusas `nested`/`contains`) |
-| Dispositivos removíveis via UDisks2 (notificação, lembrar, ignorados, backup único, "seguro remover") | FEITO | `gdl-daemon/src/devices.rs` e `daemon/devices.rs` (`Devices`, `BackupDevice`, `IgnoreDevice`, `ForgetDevice`); "Fazer backup" do aviso abre a aba "Meu computador", onde fica o "lembrar" |
+| Dispositivos removíveis via UDisks2 (notificação, lembrar, ignorados, backup único, "seguro remover") | FEITO | `gdl-daemon/src/devices.rs` e `daemon/devices.rs` (`Devices`, `BackupDevice`, `IgnoreDevice`, `ForgetDevice`); o aviso tem "Fazer backup", "Fazer backup sempre" e "Ignorar este dispositivo" (`DEVICE_ALWAYS`, `DEVICE_IGNORE`) |
 | `DisableExternalMediaSync` e preferência "perguntar sobre dispositivos" | FEITO | `devices_refused`, `PromptToBackupDevices` na aba "Meu computador" |
 | Compartilhamentos de rede (NAS), backup a cada 6 h | FALTA | Volumes de rede e FUSE são recusados (`guard::network_fs`); registrado em "Diferenças inevitáveis" |
 | `DisableMirroredMyDrive` e `DisableMirroredFolders` | FEITO | `mirror_refused`, `folders_refused` (pares guardados não rodam com a política) |

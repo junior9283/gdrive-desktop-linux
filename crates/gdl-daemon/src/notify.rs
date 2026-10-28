@@ -21,6 +21,11 @@ pub const OPEN_LOST_FOUND: &str = "open-lost-found";
 pub const MOVE_LOST_FOUND: &str = "move-lost-found";
 /// Ação do aviso de envio cancelado que abre a pasta de cancelados.
 pub const OPEN_CANCELED: &str = "open-canceled";
+/// As escolhas da pergunta de um dispositivo, lembradas como em Preferências > Meu computador.
+pub const DEVICE_ALWAYS: &str = "device-always";
+pub const DEVICE_IGNORE: &str = "device-ignore";
+/// "Não mostrar de novo": desliga a família do aviso (só nas que dá para desligar).
+pub const MUTE: &str = "mute";
 /// Ação do aviso de gravação com a sincronização pausada que a retoma.
 pub const RESUME: &str = "resume";
 /// Ação dos avisos de pasta do computador e de dispositivo que abre Preferências > Meu computador.
@@ -296,7 +301,7 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
 
 /// Os botões a mais que o aviso mostra na área de trabalho (o histórico guarda só o principal).
 pub fn extra_actions(note: &Notification, i18n: &I18n) -> Vec<(&'static str, String)> {
-    match note.kind_id {
+    let mut actions = match note.kind_id {
         // "Permitir sincronização" é o retomar de sempre, com a vigia ainda ligada.
         "suspicious-activity" => vec![
             (
@@ -306,8 +311,16 @@ pub fn extra_actions(note: &Notification, i18n: &I18n) -> Vec<(&'static str, Str
             (RESUME, i18n.tr("notify-suspicious-allow", &[])),
         ],
         "lost-and-found" => vec![(MOVE_LOST_FOUND, i18n.tr("notify-lost-found-move", &[]))],
+        "device-ask" => vec![
+            (DEVICE_ALWAYS, i18n.tr("notify-device-always", &[])),
+            (DEVICE_IGNORE, i18n.tr("notify-device-ignore", &[])),
+        ],
         _ => vec![],
+    };
+    if OPTIONAL_KINDS.contains(&note.kind_id) {
+        actions.push((MUTE, i18n.tr("notify-mute", &[])));
     }
+    actions
 }
 
 /// O aviso de uma pasta do computador (o par `pair`, chamado `name`) que parou ou espera
@@ -410,6 +423,15 @@ pub fn device_done(id: &str, label: &str, error: Option<&str>, i18n: &I18n) -> N
     }
 }
 
+/// A chave de substituição dos avisos de um dispositivo: `device:<id>` (no histórico, depois da
+/// conta, que é vazia).
+const DEVICE_SLOT: &str = "device:";
+
+/// O dispositivo do aviso cujo lugar no histórico é `slot` (`Notification::slot`).
+pub fn device_of(slot: &str) -> Option<&str> {
+    slot.split_once(DEVICE_SLOT).map(|(_, id)| id)
+}
+
 /// Um aviso por dispositivo: o novo substitui o anterior.
 fn device_note(
     id: &str,
@@ -424,7 +446,7 @@ fn device_note(
         summary: i18n.tr(title, &[]),
         body,
         action,
-        replaces_key: Some(format!("device:{id}")),
+        replaces_key: Some(format!("{DEVICE_SLOT}{id}")),
         account: String::new(),
     }
 }

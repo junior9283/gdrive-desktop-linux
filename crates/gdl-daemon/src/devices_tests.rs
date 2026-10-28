@@ -143,6 +143,36 @@ async fn remembered_device_backs_up_and_says_it_is_safe() {
     assert_eq!(h.proxy.devices().await.unwrap()[0].choice, "");
 }
 
+/// A pergunta oferece, como no original, "Fazer backup sempre" e "Ignorar este dispositivo" no
+/// próprio aviso (as mesmas escolhas de Preferências > Meu computador).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn device_notice_offers_always_and_ignore() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let mount = pendrive(&h);
+    h.plug(UUID, LABEL, &mount).await;
+    wait_until("pergunta", || notes_titled(&h, ASK).len() == 1).await;
+    let ask = notes_titled(&h, ASK)[0].clone();
+    let keys: Vec<_> = ask.actions.iter().step_by(2).map(String::as_str).collect();
+    assert_eq!(keys, ["open-folders", "device-always", "device-ignore"]);
+
+    h.daemon.on_desktop_action(ask.id, "device-always").await;
+
+    backed_up(&h, "praia.jpg").await;
+    let listed = h.proxy.devices().await.unwrap();
+    assert_eq!(listed[0].choice, "backup", "lembrado");
+    wait_until("aviso de concluído", || notes_titled(&h, DONE).len() == 1).await;
+
+    // O outro botão, num aviso novo: o dispositivo passa a ser ignorado.
+    h.proxy.forget_device(UUID).await.unwrap();
+    unplug(&h).await;
+    h.plug(UUID, LABEL, &mount).await;
+    wait_until("pergunta de novo", || notes_titled(&h, ASK).len() == 2).await;
+    let again = notes_titled(&h, ASK)[1].clone();
+    h.daemon.on_desktop_action(again.id, "device-ignore").await;
+    assert_eq!(h.proxy.devices().await.unwrap()[0].choice, "ignored");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn ignored_device_is_not_asked() {
     let h = Harness::new().await;

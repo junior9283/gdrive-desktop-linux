@@ -130,6 +130,11 @@ class WithService(unittest.TestCase):
             "Abrir no navegador", "Copiar link", "✓ Disponível off-line", "Somente on-line",
             "Ver itens na lixeira"])
 
+    def test_partly_offline_is_marked_with_a_dash(self):
+        entries = [("offline", "Disponível off-line (em parte)", "mixed"), ("online-only", "Somente on-line", "off")]
+        top = ext.build(Nautilus, entries, lambda _id: None)
+        self.assertEqual(labels(top), ["– Disponível off-line (em parte)", "Somente on-line"])
+
     def test_nemo_keeps_the_separators_and_thunar_uses_set_menu(self):
         [nemo] = ext.items_for(Nemo, [File(self.path("a.txt"))])
         self.assertEqual(labels(nemo)[2], "---")

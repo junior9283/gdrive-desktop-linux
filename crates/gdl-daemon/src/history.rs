@@ -106,12 +106,18 @@ impl History {
 
     /// O aviso que o servidor de notificações mostrou como `desktop_id`.
     pub fn by_desktop_id(&self, desktop_id: u32) -> Option<u64> {
+        Some(self.shown_as(desktop_id)?.0.id)
+    }
+
+    /// O aviso mostrado como `desktop_id` e o lugar dele (`Notification::slot`), se substitui o
+    /// anterior da mesma chave.
+    pub fn shown_as(&self, desktop_id: u32) -> Option<(NotificationItem, Option<String>)> {
         let saved = self.saved();
         let entry = saved
             .entries
             .iter()
             .find(|e| e.desktop_id == Some(desktop_id))?;
-        Some(entry.item.id)
+        Some((entry.item.clone(), entry.replaces_key.clone()))
     }
 
     pub fn items(&self) -> Vec<NotificationItem> {

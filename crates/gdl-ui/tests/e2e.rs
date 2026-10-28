@@ -1096,6 +1096,45 @@ async fn onboarding_suggests_folders() {
     );
 }
 
+/// A aba "Meu computador" sugere as pastas do usuário que ainda não sincronizam (as mesmas do
+/// primeiro uso); "Adicionar" abre o configurador de sempre.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn computer_tab_suggests_folders() {
+    let service = service().await;
+    let documents = std::env::var("GDL_E2E_DOCUMENTS").expect("rode pelo scripts/e2e.sh");
+    let session = Session::open("preferences:computer").await;
+
+    let suggested = session.wait_text(".suggested-folders", "Documentos").await;
+    session
+        .click(&format!(
+            ".suggested-folders [data-path='{documents}'] .add-suggested"
+        ))
+        .await;
+    session
+        .wait_text(".dialog .folder-summary", "1 arquivo")
+        .await;
+    session.click(".dialog .filled").await;
+    let added = until("a pasta sugerida sincronizando", async || {
+        let folders = service.local_folders().await.unwrap();
+        (!folders.is_empty()).then_some(folders)
+    })
+    .await;
+    let gone = session
+        .eval("return document.querySelector('.suggested-folders').textContent")
+        .await;
+    for folder in &added {
+        service.remove_local_folder("", folder.id).await.unwrap();
+    }
+
+    assert!(suggested.contains("Adicionar"), "{suggested}");
+    assert_eq!(
+        added.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        [documents.as_str()]
+    );
+    assert!(!gone.as_str().unwrap().contains("Documentos"), "{gone}");
+}
+
 /// Uma pasta do computador nova em `/tmp`, com `a.txt`.
 fn computer_folder(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("{name}-e2e-{}", std::process::id()));

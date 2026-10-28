@@ -159,6 +159,8 @@ shortcut-add = Adicionar atalho
 shortcut-missing = Nenhum item para criar o atalho.
 
 notifications-empty = Nenhuma notificação.
+notification-mute = Não mostrar de novo
+notification-muted = Esse tipo de aviso não vai mais aparecer. Dá para religar em "Preferências de notificação".
 notification-dismiss = Dispensar
 
 link-drive-web = Google Drive na web
@@ -343,6 +345,8 @@ pref-tab-computer = Meu computador
 pref-tab-drive = Google Drive
 pref-tab-settings = Configurações
 pref-computer-empty = Nenhuma pasta do computador está em backup no Google Drive.
+pref-suggested-folders = Sugestões: pastas suas que ainda não são sincronizadas
+pref-suggested-add = Adicionar
 pref-add-folder = Adicionar pasta
 pref-computer-text = As pastas escolhidas aqui ficam em "Computadores" no Google Drive, e as mudanças seguem nos dois sentidos.
 pref-devices = Dispositivos USB e cartões de memória
@@ -573,6 +577,9 @@ share-done = Concluído
 versions-missing = Abra esta janela pelo menu do Google Drive no gerenciador de arquivos.
 versions-title = Versões de "{ $name }"
 versions-text = As versões antigas podem ser apagadas depois de 30 dias ou de 100 versões, salvo as marcadas para manter para sempre.
+versions-none = Este arquivo não tem versões anteriores.
+versions-failed = Não foi possível obter as versões.
+versions-retry = Tentar de novo
 versions-current = Atual
 versions-kept = Mantida para sempre
 versions-actions = Ações da versão

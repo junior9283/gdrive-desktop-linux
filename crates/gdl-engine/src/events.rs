@@ -121,6 +121,10 @@ pub enum EngineEvent {
     MovedToSharedDrive {
         name: String,
     },
+    /// Um arquivo saiu de um Drive compartilhado: os membros do drive deixam de vê-lo.
+    MovedOutOfSharedDrive {
+        name: String,
+    },
     /// Um arquivo do usuário foi movido para uma pasta do Meu Drive que é de outra pessoa: quem
     /// tem acesso a ela passa a ver o arquivo.
     MovedToSharedFolder {

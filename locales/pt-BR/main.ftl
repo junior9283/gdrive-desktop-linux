@@ -67,12 +67,15 @@ notify-canceled-body = A sua versão de { $name } ficou guardada em Uploads canc
 notify-canceled-action = Ver arquivos
 notify-moved-shared-title = Arquivo movido para um Drive compartilhado
 notify-moved-shared-body = { $name } agora pertence ao Drive compartilhado: quem pode ver o arquivo passa a ser quem tem acesso a ele.
+notify-moved-out-title = Arquivo tirado de um Drive compartilhado
+notify-moved-out-body = { $name } saiu do Drive compartilhado: quem só tinha acesso pelo drive deixa de ver o arquivo.
 notify-folder-move-title = A pasta não pôde ser movida
 notify-folder-move-body = O Google não deixa mover a pasta { $name } entre o Meu Drive e um Drive compartilhado por aqui. Faça isso pelo Google Drive na web.
 notify-moved-folder-title = Arquivo movido para uma pasta de outra pessoa
 notify-moved-folder-body = { $name } agora está em "{ $folder }", que é de outra pessoa: quem tem acesso a essa pasta passa a ver o arquivo.
 notify-busy-drive-title = Muita atividade num Drive compartilhado
 notify-busy-drive-body = O Drive compartilhado "{ $name }" teve muitas mudanças de uma vez. A sincronização dele pode demorar um pouco.
+notify-kind-moved-out-of-shared-drive = Arquivos tirados de um Drive compartilhado
 notify-kind-moved-to-shared-folder = Arquivos movidos para pastas de outras pessoas
 notify-kind-busy-shared-drive = Muita atividade num Drive compartilhado
 notify-kind-moved-to-shared-drive = Arquivos movidos para um Drive compartilhado
@@ -125,6 +128,10 @@ login-rejected = A conta { $email } não é permitida neste computador.
 shared-drives-pending = Algum dos drives que você desligou tem arquivos que ainda não foram enviados. Espere os envios terminarem (ou mantenha o drive ligado) e salve de novo.
 logout-pending = Há { $count } itens que ainda não estão no Drive (envios pendentes ou cópias no Lost and Found). Escolha terminar os envios, mover os arquivos para uma pasta ou descartá-los; o Lost and Found nunca é apagado.
 reset-local-offline = Sem conexão com o Google Drive. Os dados locais só podem ser redefinidos com o computador conectado.
+lost-found-moved-partly = { $count ->
+    [1] Um item foi movido; o resto continua em Lost and Found.
+   *[other] { $count } itens foram movidos; o resto continua em Lost and Found.
+}
 not-logged-in = Nenhuma conta conectada.
 uninstall-signed-in = Desconecte a conta antes de apagar os dados deste computador: a saída da conta decide o que fazer com os envios pendentes.
 path-not-in-drive = { $path } não está no Meu Drive nem num Drive compartilhado.

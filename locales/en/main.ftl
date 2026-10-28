@@ -67,12 +67,15 @@ notify-canceled-body = Your version of { $name } is kept in Canceled uploads.
 notify-canceled-action = View files
 notify-moved-shared-title = File moved to a shared drive
 notify-moved-shared-body = { $name } now belongs to the shared drive: whoever can see the file is now whoever has access to that drive.
+notify-moved-out-title = File moved out of a shared drive
+notify-moved-out-body = { $name } left the shared drive: people who only had access through the drive can no longer see it.
 notify-folder-move-title = The folder could not be moved
 notify-folder-move-body = Google doesn't allow moving the folder { $name } between My Drive and a shared drive from here. Do it in Google Drive on the web.
 notify-moved-folder-title = File moved to someone else's folder
 notify-moved-folder-body = { $name } is now in "{ $folder }", which belongs to someone else: anyone with access to that folder can now see the file.
 notify-busy-drive-title = Lots of activity in a shared drive
 notify-busy-drive-body = The shared drive "{ $name }" had many changes at once. Syncing it may take a while.
+notify-kind-moved-out-of-shared-drive = Files moved out of a shared drive
 notify-kind-moved-to-shared-folder = Files moved to other people's folders
 notify-kind-busy-shared-drive = Lots of activity in a shared drive
 notify-kind-moved-to-shared-drive = Files moved to a shared drive
@@ -125,6 +128,10 @@ login-rejected = The account { $email } isn't allowed on this computer.
 shared-drives-pending = A drive you turned off has files that have not been uploaded yet. Wait for the uploads to finish (or keep the drive on) and save again.
 logout-pending = There are { $count } items not yet in Drive (pending uploads or copies in Lost and Found). Choose to finish the uploads, move the files to a folder, or discard them; Lost and Found is never deleted.
 reset-local-offline = No connection to Google Drive. Local data can only be reset while the computer is online.
+lost-found-moved-partly = { $count ->
+    [1] One item was moved; the rest is still in Lost and Found.
+   *[other] { $count } items were moved; the rest is still in Lost and Found.
+}
 not-logged-in = No account is connected.
 uninstall-signed-in = Disconnect the account before deleting the data on this computer: signing out decides what happens to pending uploads.
 path-not-in-drive = { $path } isn't in My Drive or in a shared drive.

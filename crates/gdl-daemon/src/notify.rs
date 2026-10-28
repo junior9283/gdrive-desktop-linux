@@ -41,6 +41,7 @@ pub const SEND_CRASH_REPORT: &str = "send-crash-report";
 pub const OPTIONAL_KINDS: &[&str] = &[
     "copied-as-shortcut",
     "moved-to-shared-drive",
+    "moved-out-of-shared-drive",
     "moved-to-shared-folder",
     "busy-shared-drive",
     "mount-moved",
@@ -200,6 +201,11 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
             "moved-to-shared-drive",
             "notify-moved-shared-title",
             i18n.tr("notify-moved-shared-body", &[("name", name)]),
+        ),
+        EngineEvent::MovedOutOfSharedDrive { name } => note(
+            "moved-out-of-shared-drive",
+            "notify-moved-out-title",
+            i18n.tr("notify-moved-out-body", &[("name", name)]),
         ),
         EngineEvent::MovedToSharedFolder { name, folder } => note(
             "moved-to-shared-folder",
@@ -548,6 +554,9 @@ mod tests {
                 name: "a.txt".into(),
             },
             EngineEvent::MovedToSharedDrive {
+                name: "a.txt".into(),
+            },
+            EngineEvent::MovedOutOfSharedDrive {
                 name: "a.txt".into(),
             },
             EngineEvent::FolderMoveUnsupported {

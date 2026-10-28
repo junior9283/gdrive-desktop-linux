@@ -226,7 +226,7 @@ impl ChangePoller {
             .ok_or(EngineError::NotIndexed)?;
         let (changes, next) = self.client.changes(&token).await?;
         self.register_new_drives(&changes).await?;
-        self.warn_busy_drives(&changes, now_ms())?;
+        self.warn_busy_drives(&changes, now_ms());
         // Os ids só são juntados se alguém ouve (a indexação traz milhares de mudanças).
         let ids: Vec<ItemId> = changes
             .iter()
@@ -293,10 +293,16 @@ impl ChangePoller {
         Ok(())
     }
 
-    /// Avisa dos Drives compartilhados com mais de `BUSY_DRIVE_CHANGES` mudanças nesta consulta,
-    /// cada um no máximo uma vez a cada `BUSY_DRIVE_GAP_MS` (a hora do último aviso fica no
-    /// banco, em `busy_drive.<id>`).
-    pub(crate) fn warn_busy_drives(&self, changes: &[Change], now: i64) -> Result<()> {
+    /// Avisa dos Drives compartilhados ligados com mais de `BUSY_DRIVE_CHANGES` mudanças nesta
+    /// consulta, cada um no máximo uma vez a cada `BUSY_DRIVE_GAP_MS` (a hora do último aviso fica
+    /// no banco, em `busy_drive.<id>`). Uma falha aqui só vai para o log: as mudanças seguem.
+    pub(crate) fn warn_busy_drives(&self, changes: &[Change], now: i64) {
+        if let Err(e) = self.try_warn_busy_drives(changes, now) {
+            tracing::warn!(erro = %e, "falha ao conferir a atividade dos Drives compartilhados");
+        }
+    }
+
+    fn try_warn_busy_drives(&self, changes: &[Change], now: i64) -> Result<()> {
         let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
         for change in changes {
             if let Change::Upsert(r) = change
@@ -317,7 +323,7 @@ impl ChangePoller {
                 Some(drives) => drives,
                 none => none.insert(self.store.shared_drives()?),
             };
-            let Some(known) = drives.iter().find(|d| d.id.0 == drive) else {
+            let Some(known) = drives.iter().find(|d| d.id.0 == drive && d.enabled) else {
                 continue;
             };
             self.store.kv_set(&key, &now.to_string())?;
@@ -662,17 +668,43 @@ mod tests {
         };
         let now = 1_000_000_000;
 
-        poller.warn_busy_drives(calm, now).unwrap();
+        poller.warn_busy_drives(calm, now);
         assert_eq!(warned(&mut events), 0, "até 1 000 mudanças, sem aviso");
-        poller.warn_busy_drives(&busy, now).unwrap();
-        poller
-            .warn_busy_drives(&busy, now + BUSY_DRIVE_GAP_MS - 1)
-            .unwrap();
+        poller.warn_busy_drives(&busy, now);
+        poller.warn_busy_drives(&busy, now + BUSY_DRIVE_GAP_MS - 1);
         assert_eq!(warned(&mut events), 1, "uma vez por dia");
-        poller
-            .warn_busy_drives(&busy, now + BUSY_DRIVE_GAP_MS)
-            .unwrap();
+        poller.warn_busy_drives(&busy, now + BUSY_DRIVE_GAP_MS);
         assert_eq!(warned(&mut events), 1, "no dia seguinte, de novo");
+    }
+
+    // Um drive que o usuário desligou não aparece na montagem: muita atividade nele não avisa.
+    #[tokio::test]
+    async fn busy_drive_ignores_disabled_drives() {
+        let (env, poller) = indexed().await;
+        let ana = env.fake.add_account("ana@example.com");
+        let drive = ana.add_shared_drive("Equipe");
+        env.fake.share_drive(&drive, &env.fake.email());
+        initial_index(&env.store, &env.client).await.unwrap();
+        env.store
+            .set_drive_enabled(&ItemId(drive.clone()), false)
+            .unwrap();
+        let mut events = poller.events.subscribe();
+        let busy: Vec<Change> = (0..=BUSY_DRIVE_CHANGES)
+            .map(|n| {
+                Change::Upsert(Box::new(gdl_drive::model::RemoteFile {
+                    id: format!("f{n}"),
+                    drive_id: Some(drive.clone()),
+                    ..remote("f")
+                }))
+            })
+            .collect();
+
+        poller.warn_busy_drives(&busy, 1_000_000_000);
+
+        assert!(
+            std::iter::from_fn(|| events.try_recv().ok())
+                .all(|e| !matches!(e, EngineEvent::BusySharedDrive { .. }))
+        );
     }
 
     fn remote(id: &str) -> gdl_drive::model::RemoteFile {

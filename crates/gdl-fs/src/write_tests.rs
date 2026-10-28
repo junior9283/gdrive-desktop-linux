@@ -314,6 +314,87 @@ async fn move_into_someone_elses_folder_warns() {
     );
 }
 
+/// Uma pasta minha dentro de uma pasta de outra pessoa também expõe o arquivo: quem tem acesso à
+/// de cima passa a vê-lo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_under_someone_elses_folder_warns() {
+    let fake = FakeDrive::start().await;
+    let (_, file) = drive_and_my_files(&fake);
+    let theirs = fake.add_folder(&fake.root_id(), "Da Ana");
+    fake.set_owner(&theirs, "ana@example.com");
+    let sub = fake.add_folder(&theirs, "Minha");
+    // Na pasta da Ana, o simulado herda o dono; esta é minha.
+    fake.set_owner(&sub, &fake.email());
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+
+    std::fs::rename(
+        m.drive().join("Pasta/a.txt"),
+        m.drive().join("Da Ana/Minha/a.txt"),
+    )
+    .unwrap();
+
+    assert_eq!(m.fake.meta(&file)["parents"], serde_json::json!([sub]));
+    assert_eq!(
+        warnings(&mut events),
+        [EngineEvent::MovedToSharedFolder {
+            name: "a.txt".into(),
+            folder: "Da Ana".into(),
+        }]
+    );
+}
+
+/// Entre duas pastas dentro da mesma pasta de outra pessoa, quem vê o arquivo não muda: sem aviso.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_between_same_owner_folders_is_quiet() {
+    let fake = FakeDrive::start().await;
+    let theirs = fake.add_folder(&fake.root_id(), "Da Ana");
+    fake.set_owner(&theirs, "ana@example.com");
+    let one = fake.add_folder(&theirs, "Um");
+    let two = fake.add_folder(&theirs, "Dois");
+    let file = fake.add_file(&one, "a.txt", b"conteudo".to_vec());
+    // O simulado herda o dono da pasta de cima; as subpastas e o arquivo são meus.
+    for mine in [&one, &two, &file] {
+        fake.set_owner(mine, &fake.email());
+    }
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+
+    std::fs::rename(
+        m.drive().join("Da Ana/Um/a.txt"),
+        m.drive().join("Da Ana/Dois/a.txt"),
+    )
+    .unwrap();
+
+    assert_eq!(m.fake.meta(&file)["parents"], serde_json::json!([two]));
+    assert!(warnings(&mut events).is_empty());
+}
+
+/// Tirar um arquivo de um Drive compartilhado também muda quem o vê: os membros do drive deixam
+/// de ver.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_out_of_shared_drive_warns() {
+    let fake = FakeDrive::start().await;
+    let (drive, _) = drive_and_my_files(&fake);
+    let file = fake.add_file(&drive, "da-equipe.txt", b"equipe".to_vec());
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+
+    std::fs::rename(
+        m.mnt.join("Drives compartilhados/Equipe/da-equipe.txt"),
+        m.drive().join("Pasta/da-equipe.txt"),
+    )
+    .unwrap();
+
+    assert_ne!(m.fake.meta(&file)["parents"], serde_json::json!([drive]));
+    assert_eq!(
+        warnings(&mut events),
+        [EngineEvent::MovedOutOfSharedDrive {
+            name: "da-equipe.txt".into()
+        }]
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn move_into_own_folder_is_quiet() {
     let fake = FakeDrive::start().await;

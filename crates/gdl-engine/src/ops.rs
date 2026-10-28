@@ -39,10 +39,11 @@ pub(crate) fn never_uploaded(item: &Item) -> bool {
     is_local_id(&item.id) || item.local_state == LocalState::LocalOnly
 }
 
-/// Quem passa a ver um item movido: os membros de um Drive compartilhado ou quem tem acesso à
-/// pasta (de outra pessoa) que o recebeu.
+/// Quem passa a ver (ou deixa de ver) um item movido: os membros de um Drive compartilhado ou
+/// quem tem acesso a uma pasta (de outra pessoa) acima do destino.
 enum Exposure {
     SharedDrive,
+    LeftSharedDrive,
     Folder(String),
 }
 
@@ -228,8 +229,8 @@ impl Engine {
 
     /// Renomeia e/ou move para outra pasta do Meu Drive ou de um Drive compartilhado. Uma pasta
     /// não muda de raiz (a API não move assim): recusa com `FolderCrossDrive` e avisa. Um arquivo
-    /// que passa a um Drive compartilhado, ou um item do usuário que vai para uma pasta de outra
-    /// pessoa, muda quem o vê: avisa.
+    /// que entra num Drive compartilhado ou sai dele, ou um item do usuário que vai para baixo de
+    /// uma pasta de outra pessoa, muda quem o vê: avisa.
     pub async fn move_item(&self, id: &ItemId, parent: &ItemId, name: &str) -> Result<Item> {
         let item = self.item(id)?;
         let action = if item.parent.as_ref() == Some(parent) {
@@ -248,14 +249,28 @@ impl Engine {
                     });
                     return Err(EngineError::FolderCrossDrive);
                 }
-                match to {
-                    Some(DriveRoot::Shared { .. }) if from != to => Some(Exposure::SharedDrive),
-                    // Uma pasta do Meu Drive que é de outra pessoa: quem a vê passa a ver o item.
-                    Some(DriveRoot::MyDrive) if item.owned_by_me => self
-                        .item(parent)
-                        .ok()
-                        .filter(|folder| !folder.owned_by_me)
-                        .map(|folder| Exposure::Folder(folder.local_name)),
+                match (&from, &to) {
+                    (_, Some(DriveRoot::Shared { .. })) if from != to => {
+                        Some(Exposure::SharedDrive)
+                    }
+                    (Some(DriveRoot::Shared { .. }), _) if from != to => {
+                        Some(Exposure::LeftSharedDrive)
+                    }
+                    // Pastas do Meu Drive que são de outra pessoa: quem tem acesso a uma delas que
+                    // não estava acima do item passa a vê-lo.
+                    // A origem só é olhada quando o destino tem alguma (o caso comum não tem).
+                    (_, Some(DriveRoot::MyDrive)) if item.owned_by_me => {
+                        let after = self.foreign_folders(parent);
+                        let before = if after.is_empty() {
+                            Vec::new()
+                        } else {
+                            self.foreign_folders(old)
+                        };
+                        after
+                            .into_iter()
+                            .find(|(id, _)| before.iter().all(|(b, _)| b != id))
+                            .map(|(_, name)| Exposure::Folder(name))
+                    }
                     _ => None,
                 }
             }
@@ -267,10 +282,24 @@ impl Engine {
             let name = moved.local_name.clone();
             let _ = self.events.send(match exposure {
                 Exposure::SharedDrive => EngineEvent::MovedToSharedDrive { name },
+                Exposure::LeftSharedDrive => EngineEvent::MovedOutOfSharedDrive { name },
                 Exposure::Folder(folder) => EngineEvent::MovedToSharedFolder { name, folder },
             });
         }
         Ok(moved)
+    }
+
+    /// As pastas de outras pessoas de `dir` até a raiz (id e nome), da mais próxima à mais alta.
+    fn foreign_folders(&self, dir: &ItemId) -> Vec<(ItemId, String)> {
+        let mut found = Vec::new();
+        let mut next = Some(dir.clone());
+        while let Some(folder) = next.and_then(|id| self.item(&id).ok()) {
+            if !folder.owned_by_me {
+                found.push((folder.id.clone(), folder.local_name.clone()));
+            }
+            next = folder.parent;
+        }
+        found
     }
 
     /// A raiz da pasta `dir`; `None` fora do Meu Drive e dos drives ligados.

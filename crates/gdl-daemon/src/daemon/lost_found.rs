@@ -12,7 +12,8 @@ use super::{Daemon, failed};
 
 impl Daemon {
     /// Move o Lost and Found da conta para a pasta `dest` (caminho absoluto de uma pasta fora das
-    /// montagens e do próprio Lost and Found) e devolve quantas entradas moveu.
+    /// montagens, das pastas do app e do próprio Lost and Found) e devolve quantas entradas
+    /// moveu. Se alguma não sai, as outras vão assim mesmo e o erro diz quantas foram.
     pub async fn move_lost_and_found(
         &self,
         account: &str,
@@ -24,53 +25,83 @@ impl Daemon {
             .get(KeptFolder::LostAndFound)
             .dir()
             .to_path_buf();
-        let mounts = self.mount_points().await;
-        let refuse = {
-            let dest = dest.to_owned();
-            move || ServiceError::InvalidArgs(dest)
-        };
+        let paths = &self.config.paths;
+        let mut forbidden = self.mount_points().await;
+        forbidden.extend([
+            paths.config_dir.clone(),
+            paths.data_dir.clone(),
+            paths.state_dir.clone(),
+            kept.clone(),
+        ]);
+        let refuse = ServiceError::InvalidArgs(dest.to_owned());
         let dest = PathBuf::from(dest);
         // Tudo que toca o disco fica fora da thread assíncrona.
-        tokio::task::spawn_blocking(move || {
-            let outside = |d: &PathBuf| d.is_dir() && !mounts.iter().any(|m| d.starts_with(m));
-            let dest = dest
-                .is_absolute()
-                .then(|| dest.canonicalize().ok())
-                .flatten()
-                .filter(outside)
-                .ok_or_else(refuse.clone())?;
-            let Ok(kept_real) = kept.canonicalize() else {
-                return Ok(0);
-            };
-            if dest.starts_with(&kept_real) {
-                return Err(refuse());
-            }
-            move_all(&kept, &dest).map_err(failed)
+        let (moved, error) = tokio::task::spawn_blocking(move || {
+            let dest = chosen_dest(&dest, &forbidden).ok_or(refuse)?;
+            Ok::<_, ServiceError>(if kept.exists() {
+                move_all(&kept, &dest)
+            } else {
+                (0, None)
+            })
         })
         .await
-        .map_err(failed)?
+        .map_err(failed)??;
+        match error {
+            None => Ok(moved),
+            Some(e) if moved == 0 => Err(failed(e)),
+            Some(e) => {
+                let done = self.i18n.tr_count("lost-found-moved-partly", moved.into());
+                Err(ServiceError::Failed(format!("{done} ({e})")))
+            }
+        }
     }
 }
 
+/// O caminho real de `dest`, se é uma pasta absoluta fora de todas as `forbidden` (comparadas
+/// pelo caminho real também: uma montagem pode estar atrás de um link).
+fn chosen_dest(dest: &Path, forbidden: &[PathBuf]) -> Option<PathBuf> {
+    let dest = dest.is_absolute().then(|| dest.canonicalize().ok())??;
+    let inside = |f: &PathBuf| dest.starts_with(real_place(f).as_ref().unwrap_or(f));
+    (dest.is_dir() && !forbidden.iter().any(inside)).then_some(dest)
+}
+
+/// O caminho real de `path` resolvendo só a pasta de cima: o nome final não é seguido, para não
+/// entrar numa montagem (o FUSE responderia, ou pararia se estiver travado).
+fn real_place(path: &Path) -> Option<PathBuf> {
+    Some(path.parent()?.canonicalize().ok()?.join(path.file_name()?))
+}
+
 /// Move cada entrada de `from` para `dest`; um nome que já existe em `dest` ganha um número
-/// (`nome (1).ext`, `pasta (1)`). Devolve quantas entradas moveu.
-pub(super) fn move_all(from: &Path, dest: &Path) -> io::Result<u32> {
-    let mut moved = 0;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let dir = entry.file_type()?.is_dir();
-        // O nome livre é reservado criando o lugar vazio, que a troca substitui.
-        let target = if dir {
-            free_dir(dest, &name)?
-        } else {
-            let (stem, ext) = split_ext(&name);
-            create_numbered(dest, stem, ext)?.0
-        };
-        relocate(&entry.path(), &target, dir)?;
-        moved += 1;
+/// (`nome (1).ext`, `pasta (1)`). Uma entrada que não sai não para as outras. Devolve quantas
+/// moveu e o primeiro erro.
+pub(super) fn move_all(from: &Path, dest: &Path) -> (u32, Option<io::Error>) {
+    let (mut moved, mut first) = (0, None);
+    let entries = match std::fs::read_dir(from) {
+        Ok(entries) => entries,
+        Err(e) => return (0, Some(e)),
+    };
+    for entry in entries {
+        match entry.and_then(|entry| move_one(&entry, dest)) {
+            Ok(()) => moved += 1,
+            Err(e) => {
+                first.get_or_insert(e);
+            }
+        }
     }
-    Ok(moved)
+    (moved, first)
+}
+
+fn move_one(entry: &std::fs::DirEntry, dest: &Path) -> io::Result<()> {
+    let name = entry.file_name().to_string_lossy().into_owned();
+    let dir = entry.file_type()?.is_dir();
+    // O nome livre é reservado criando o lugar vazio, que a troca substitui.
+    let target = if dir {
+        free_dir(dest, &name)?
+    } else {
+        let (stem, ext) = split_ext(&name);
+        create_numbered(dest, stem, ext)?.0
+    };
+    relocate(&entry.path(), &target, dir)
 }
 
 /// Cria em `dest` a pasta `name`, ou `name (1)`, `name (2)`… se já existir.
@@ -165,9 +196,10 @@ mod tests {
         std::fs::write(from.join("a (local 2026-10-28 101010).txt"), "a").unwrap();
         std::fs::write(from.join("Recuperados 2026-10-28/sub/b.txt"), "b").unwrap();
 
-        let moved = move_all(&from, &dest).unwrap();
+        let (moved, error) = move_all(&from, &dest);
 
         assert_eq!(moved, 2);
+        assert!(error.is_none());
         assert_eq!(read(&dest.join("a (local 2026-10-28 101010).txt")), "a");
         assert_eq!(read(&dest.join("Recuperados 2026-10-28/sub/b.txt")), "b");
         assert_eq!(std::fs::read_dir(&from).unwrap().count(), 0);
@@ -198,6 +230,54 @@ mod tests {
         assert_eq!(read(&from.join("travada/a.txt")), "a");
     }
 
+    // Uma entrada que não sai não para as outras; quem chamou fica sabendo quantas foram.
+    #[test]
+    fn move_lost_found_reports_a_partial_move() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let (from, dest) = (tmp.path().join("lf"), tmp.path().join("destino"));
+        // Mover uma pasta para outra pasta pede escrita nela (o `..` muda).
+        std::fs::create_dir_all(from.join("travada")).unwrap();
+        std::fs::set_permissions(from.join("travada"), PermissionsExt::from_mode(0o500)).unwrap();
+        std::fs::create_dir(&dest).unwrap();
+        std::fs::write(from.join("a.txt"), "a").unwrap();
+        std::fs::write(from.join("b.txt"), "b").unwrap();
+
+        let (moved, error) = move_all(&from, &dest);
+        std::fs::set_permissions(from.join("travada"), PermissionsExt::from_mode(0o700)).unwrap();
+
+        assert_eq!(moved, 2);
+        assert!(error.is_some());
+        assert!(from.join("travada").is_dir());
+        assert_eq!(read(&dest.join("b.txt")), "b");
+    }
+
+    // A montagem pode estar atrás de um link (o caminho dela não é o canônico): o destino é
+    // comparado com o caminho real.
+    #[test]
+    fn move_lost_found_refuses_mount_behind_a_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("Google Drive/Meu Drive")).unwrap();
+        std::os::unix::fs::symlink(&real, tmp.path().join("atalho")).unwrap();
+        let mount = tmp.path().join("atalho/Google Drive");
+        let outside = tmp.path().join("fora");
+        std::fs::create_dir(&outside).unwrap();
+
+        let forbidden = [mount];
+        assert_eq!(
+            chosen_dest(&real.join("Google Drive/Meu Drive"), &forbidden),
+            None
+        );
+        assert_eq!(chosen_dest(&real.join("Google Drive"), &forbidden), None);
+        assert_eq!(
+            chosen_dest(&outside, &forbidden),
+            Some(outside.canonicalize().unwrap())
+        );
+        assert_eq!(chosen_dest(Path::new("fora"), &forbidden), None, "relativo");
+        assert_eq!(chosen_dest(&tmp.path().join("nada"), &forbidden), None);
+    }
+
     #[test]
     fn move_lost_found_numbers_clashes() {
         let tmp = tempfile::tempdir().unwrap();
@@ -208,7 +288,7 @@ mod tests {
         std::fs::write(from.join("pasta/x"), "x").unwrap();
         std::fs::write(dest.join("nota.txt"), "antiga").unwrap();
 
-        assert_eq!(move_all(&from, &dest).unwrap(), 2);
+        assert_eq!(move_all(&from, &dest).0, 2);
 
         assert_eq!(read(&dest.join("nota.txt")), "antiga", "nada é sobrescrito");
         assert_eq!(read(&dest.join("nota (1).txt")), "nova");

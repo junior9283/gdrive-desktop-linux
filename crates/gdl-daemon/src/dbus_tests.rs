@@ -276,8 +276,8 @@ async fn repeated_warnings_replace_the_previous_one() {
     assert_eq!(notes[1].replaces_id, notes[0].id, "{notes:?}");
 }
 
-/// "Mover tudo para…": as cópias do Lost and Found vão para a pasta escolhida; dentro da montagem
-/// ou do próprio Lost and Found, não.
+/// "Mover tudo para…": as cópias do Lost and Found vão para a pasta escolhida; dentro da montagem,
+/// do próprio Lost and Found ou das pastas do app, não.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn move_lost_found_refuses_inside_the_mount() {
     let h = Harness::new().await;
@@ -316,7 +316,14 @@ async fn move_lost_found_refuses_inside_the_mount() {
         .await
         .unwrap();
 
-    for err in [refused, into_itself, relative] {
+    let app_data = h.paths().state_dir;
+    std::fs::create_dir_all(&app_data).unwrap();
+    let into_app_data = h
+        .proxy
+        .move_lost_and_found("", app_data.to_str().unwrap())
+        .await
+        .unwrap_err();
+    for err in [refused, into_itself, relative, into_app_data] {
         assert!(matches!(err, ServiceError::InvalidArgs(_)), "{err}");
     }
     assert_eq!(moved, 1);

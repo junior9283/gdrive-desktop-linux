@@ -189,4 +189,7 @@ test('splitArg separa a ação do resto do argumento', () => {
   assert.deepEqual(splitArg('move-lost-found:eu@x.com'), ['move-lost-found', 'eu@x.com']);
   assert.deepEqual(splitArg('a:b:c'), ['a', 'b:c']);
   assert.deepEqual(splitArg(''), ['', '']);
+  // A janela aberta sem argumento (runArg ignora argumento vazio).
+  assert.deepEqual(splitArg(null), ['', '']);
+  assert.deepEqual(splitArg(undefined), ['', '']);
 });

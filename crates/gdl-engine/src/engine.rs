@@ -27,6 +27,7 @@ use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, initial_index};
 use crate::kept::{Kept, KeptCopies, KeptFolder};
 use crate::pins::PinManager;
 use crate::ransomware::{Detector, MIN_ENTROPY, SAMPLE_BYTES, entropy, is_compressed};
+use crate::recovery;
 use crate::thumbs::seeder::ThumbSeeder;
 use crate::uploads::{CancelOutcome, UploadOutcome, UploadWorker, recover_on_start};
 use crate::{Result, lock};
@@ -76,6 +77,8 @@ pub struct Engine {
     ransomware: std::sync::Mutex<Detector>,
     /// Já avisou desta pausa que uma gravação espera a sincronização voltar.
     saved_while_paused: AtomicBool,
+    /// Edições salvas de um banco estragado na abertura; avisadas quando os laços começam.
+    pub(crate) recovered: usize,
     pub(crate) activity: Arc<ActivityLog>,
     pub(crate) thumbs: Arc<ThumbSeeder>,
 }
@@ -175,7 +178,14 @@ impl Engine {
         if std::fs::read(&marker).ok().as_deref() != Some(cache_bytes) {
             write_atomic(&marker, cache_bytes)?;
         }
-        let store = Arc::new(Store::open(&data_dir.join("metadata.db"))?);
+        let kept = Kept::in_dir(&data_dir);
+        let (store, recovered) = recovery::open_store(
+            &data_dir,
+            &cache_dir.join(CONTENT_DIR),
+            kept.get(KeptFolder::LostAndFound).dir(),
+            now_ms(),
+        )?;
+        let store = Arc::new(store);
         let client = Arc::new(client);
         let signed_out = client.signed_out();
         let (events, _) = broadcast::channel(64);
@@ -188,7 +198,6 @@ impl Engine {
             events.clone(),
         );
         recover_on_start(&store, &cache)?;
-        let kept = Kept::in_dir(&data_dir);
         let activity = Arc::new(ActivityLog::default());
         Ok(Engine {
             pins: PinManager::new(store.clone(), cache.clone()).with_activity(activity.clone()),
@@ -219,6 +228,7 @@ impl Engine {
             pause_reasons: Default::default(),
             ransomware: Default::default(),
             saved_while_paused: AtomicBool::new(false),
+            recovered,
         })
     }
 
@@ -463,6 +473,12 @@ impl Engine {
 
     /// Roda os laços do serviço até `shutdown` ser cancelado.
     pub async fn run(&self, shutdown: CancellationToken) {
+        if self.recovered > 0 {
+            // Sem ninguém ouvindo, o aviso pode se perder.
+            let _ = self.events.send(EngineEvent::ItemsRecovered {
+                count: self.recovered,
+            });
+        }
         tokio::select! {
             () = shutdown.cancelled() => {}
             () = self.announce_sign_in() => {}

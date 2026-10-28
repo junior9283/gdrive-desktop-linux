@@ -27,6 +27,7 @@ tracing.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 gdl-fake-drive.workspace = true
+gdl-store = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 
 [lints]

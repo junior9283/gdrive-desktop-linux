@@ -1,5 +1,6 @@
 //! Banco SQLite por conta: metadados do Drive, intervalos em cache, fila de envios.
 
+pub mod salvage;
 mod schema;
 pub mod types;
 
@@ -170,9 +171,11 @@ pub struct Store {
 }
 
 impl Store {
-    /// Abre (ou cria) o banco em modo WAL com `synchronous=FULL` e aplica as migrações.
+    /// Abre (ou cria) o banco em modo WAL com `synchronous=FULL` e aplica as migrações. Um
+    /// banco estragado (ou um arquivo que não é banco) dá `StoreError::Corrupt`.
     pub fn open(path: &Path) -> Result<Store> {
-        let mut conn = Connection::open(path)?;
+        let mut conn = Connection::open(path).map_err(salvage::corrupt_or_sqlite)?;
+        salvage::check(&conn)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "FULL")?;
         // Comparação da pesquisa (`search_names`): sem maiúsculas nem acentos.
@@ -1063,7 +1066,7 @@ impl Store {
 }
 
 /// Estados de um item com edição local que ainda não está no Drive.
-const EDITED: [LocalState; 3] = [
+pub(crate) const EDITED: [LocalState; 3] = [
     LocalState::Dirty,
     LocalState::Uploading,
     LocalState::Conflict,
@@ -1555,6 +1558,79 @@ mod tests {
         gone.sort();
         assert_eq!(gone, [id("a.txt"), id("equipe")]);
         assert!(!store.shared_drives().unwrap()[0].enabled);
+    }
+
+    #[test]
+    fn damaged_database_is_reported_as_corrupt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let garbage = tmp.path().join("lixo.db");
+        std::fs::write(&garbage, vec![0x5A; 8192]).unwrap();
+        assert!(matches!(Store::open(&garbage), Err(StoreError::Corrupt(_))));
+
+        let db = tmp.path().join("db.sqlite");
+        drop(Store::open(&db).unwrap());
+        assert!(Store::open(&db).is_ok(), "banco são abre");
+        salvage::damage_table(&db, "access");
+        assert!(matches!(Store::open(&db), Err(StoreError::Corrupt(_))));
+    }
+
+    #[test]
+    fn edited_items_are_read_from_a_damaged_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("db.sqlite");
+        let store = Store::open(&db).unwrap();
+        store
+            .upsert_item(&Item {
+                inode: Inode::ROOT,
+                kind: ItemKind::Folder,
+                ..item("root", None)
+            })
+            .unwrap();
+        store.upsert_item(&folder("pasta", Some("root"))).unwrap();
+        for (name, state) in [
+            ("sujo.txt", LocalState::Dirty),
+            ("subindo.txt", LocalState::Uploading),
+            ("limpo.txt", LocalState::Clean),
+        ] {
+            store
+                .upsert_item(&Item {
+                    local_state: state,
+                    ..item(name, Some("pasta"))
+                })
+                .unwrap();
+        }
+        store
+            .upsert_item(&Item {
+                local_name: "..".into(),
+                local_state: LocalState::Conflict,
+                ..item("estranho", Some("root"))
+            })
+            .unwrap();
+        drop(store);
+        salvage::damage_table(&db, "access");
+
+        let mut found = salvage::edited_items(&db);
+        found.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let path = |p: &str| Some(std::path::PathBuf::from(p));
+        assert_eq!(
+            found,
+            [
+                salvage::Salvaged {
+                    id: "estranho".into(),
+                    path: None
+                },
+                salvage::Salvaged {
+                    id: "subindo.txt".into(),
+                    path: path("pasta/subindo.txt")
+                },
+                salvage::Salvaged {
+                    id: "sujo.txt".into(),
+                    path: path("pasta/sujo.txt")
+                },
+            ]
+        );
+        assert!(salvage::edited_items(&tmp.path().join("nada.db")).is_empty());
     }
 
     #[test]

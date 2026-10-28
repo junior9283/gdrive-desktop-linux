@@ -102,6 +102,11 @@ notify-kind-no-permission = Actions refused for lack of permission
 notify-new-version-title = New version available
 notify-new-version-body = Version { $version } of the app has been released.
 notify-new-version-action = See what's new
+notify-items-recovered-title = Items recovered
+notify-items-recovered-body = { $count ->
+    [1] The app's data for this account was damaged. An edit that hadn't been uploaded yet was saved to Lost and Found; move it back if you want it.
+   *[other] The app's data for this account was damaged. { $count } edits that hadn't been uploaded yet were saved to Lost and Found; move them back if you want them.
+}
 notify-suspicious-title = Suspicious activity in your files
 notify-suspicious-body = Many files changed in a way that looks like a virus encrypting them. Uploads for this account are paused; previous versions are still in Drive.
 notify-suspicious-action = Review

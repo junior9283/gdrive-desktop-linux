@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# `salvage::damage_table`, para os testes de outros crates.
+testing = []
+
 [dependencies]
 gdl-common.workspace = true
 rusqlite.workspace = true

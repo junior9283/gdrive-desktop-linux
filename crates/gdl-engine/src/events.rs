@@ -150,6 +150,11 @@ pub enum EngineEvent {
     AccountDisabled,
     /// Muitos arquivos regravados com cara de cifrados: os envios da conta foram pausados.
     SuspiciousActivity,
+    /// O banco da conta estava estragado: `count` edições que não subiram foram para o
+    /// `Lost and Found` e a conta se reindexa.
+    ItemsRecovered {
+        count: usize,
+    },
 }
 
 /// O que o Drive recusou fazer (`EngineEvent::NoPermission`).

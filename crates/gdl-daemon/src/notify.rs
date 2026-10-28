@@ -248,6 +248,14 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
                 i18n.tr("notify-suspicious-body", &[]),
             )
         },
+        EngineEvent::ItemsRecovered { count } => Notification {
+            action: Some((OPEN_LOST_FOUND, i18n.tr("notify-lost-found-action", &[]))),
+            ..note(
+                "items-recovered",
+                "notify-items-recovered-title",
+                i18n.tr_count("notify-items-recovered-body", *count as u64),
+            )
+        },
         EngineEvent::AccountDisabled => state(
             "account-disabled",
             "notify-account-disabled-title",
@@ -598,12 +606,17 @@ mod tests {
             let stuck = note(EngineEvent::UploadsStuck { count: 3 });
             assert_eq!(stuck.kind_id, "uploads-stuck");
             assert!(stuck.body.contains('3'), "{lang}: {stuck:?}");
+            let recovered = note(EngineEvent::ItemsRecovered { count: 2 });
+            assert_eq!(recovered.kind_id, "items-recovered");
+            assert!(recovered.body.contains('2'), "{lang}: {recovered:?}");
+            assert_eq!(recovered.action.as_ref().unwrap().0, OPEN_LOST_FOUND);
             let trashed = items_trashed(4, &i18n);
             assert_eq!(trashed.kind_id, "items-trashed");
             assert!(trashed.body.contains('4'), "{lang}: {trashed:?}");
             for note in [
                 quota,
                 stuck,
+                recovered,
                 trashed,
                 note(EngineEvent::LocalDiskFull),
                 note(EngineEvent::AccountDisabled),

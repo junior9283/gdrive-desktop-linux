@@ -1222,11 +1222,13 @@ impl Daemon {
 
         // Daqui em diante nada falha: o motor só roda com a conta guardada em `account`.
         let shutdown = CancellationToken::new();
+        // Assina antes de rodar: o motor avisa logo de cara (login recusado, itens recuperados).
+        let events = engine.subscribe();
         tokio::spawn({
             let (engine, shutdown) = (engine.clone(), shutdown.clone());
             async move { engine.run(shutdown).await }
         });
-        self.forward_events(email.into(), engine.subscribe(), shutdown.clone());
+        self.forward_events(email.into(), events, shutdown.clone());
         self.forward_activity(engine.activity_changes(), shutdown.clone());
         self.forward_states(engine.clone(), mount_point.clone(), shutdown.clone());
         let folders = Arc::new(folders::Runners::default());

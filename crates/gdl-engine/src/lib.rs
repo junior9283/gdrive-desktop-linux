@@ -15,6 +15,7 @@ pub mod kept;
 pub mod ops;
 pub mod pins;
 pub mod ransomware;
+pub mod recovery;
 pub mod search;
 pub mod sharing;
 #[cfg(test)]

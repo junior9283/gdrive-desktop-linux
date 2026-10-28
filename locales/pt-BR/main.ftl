@@ -102,6 +102,11 @@ notify-kind-no-permission = Ações recusadas por falta de permissão
 notify-new-version-title = Nova versão disponível
 notify-new-version-body = A versão { $version } do app foi publicada.
 notify-new-version-action = Ver novidades
+notify-items-recovered-title = Itens recuperados
+notify-items-recovered-body = { $count ->
+    [1] Os dados do app nesta conta estavam danificados. Uma edição que ainda não tinha subido foi guardada no Lost and Found; mova-a de volta se quiser.
+   *[other] Os dados do app nesta conta estavam danificados. { $count } edições que ainda não tinham subido foram guardadas no Lost and Found; mova-as de volta se quiser.
+}
 notify-suspicious-title = Atividade suspeita nos arquivos
 notify-suspicious-body = Muitos arquivos foram alterados de um jeito que lembra um vírus que cifra arquivos. Os envios desta conta foram pausados; as versões anteriores continuam no Drive.
 notify-suspicious-action = Verificar

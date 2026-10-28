@@ -902,6 +902,13 @@ impl Daemon {
         note
     }
 
+    /// Se o aviso mostrado como `desktop_id` já está no histórico (o servidor de notificações
+    /// recebe o aviso antes de o serviço guardar o ID que ele deu).
+    #[cfg(test)]
+    pub(crate) fn knows_shown(&self, desktop_id: u32) -> bool {
+        self.history.shown_as(desktop_id).is_some()
+    }
+
     /// Botão de um aviso clicado no servidor de notificações.
     pub(crate) async fn on_desktop_action(self: &Arc<Self>, desktop_id: u32, key: &str) {
         let shown = self.history.shown_as(desktop_id);

@@ -7,6 +7,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Corrigido
+- Trocar de lugar uma pasta do computador às vezes deixava de baixar os arquivos dela na pasta
+  nova: a troca agora espera a comparação em andamento terminar.
+
 ## [1.0.0] - 2026-10-28
 
 Primeira versão estável: cada item da [matriz de paridade](docs/paridade.md) com a versão Windows

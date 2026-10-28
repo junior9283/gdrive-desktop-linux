@@ -14,6 +14,7 @@ use gdl_folders::trash::Trash;
 use gdl_ipc::{FolderCheck, LocalFolder, ServiceError};
 use gdl_store::ItemId;
 use gdl_store::folders::{Direction, Pair, PairKind, PairState, StopReason};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::{Daemon, failed};
@@ -90,21 +91,23 @@ pub(super) struct FolderAccount {
     pub mount: PathBuf,
 }
 
-type RunnerMap = HashMap<i64, (Arc<FolderSync>, CancellationToken)>;
+type RunnerMap = HashMap<i64, (Arc<FolderSync>, CancellationToken, JoinHandle<()>)>;
 
 impl Runners {
     fn lock(&self) -> std::sync::MutexGuard<'_, RunnerMap> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn stop(&self, id: i64) {
-        if let Some((_, stop)) = self.lock().remove(&id) {
-            stop.cancel();
-        }
+    /// Pede ao laço do par para parar; ele termina a passada em andamento, e quem vai subir
+    /// outro no mesmo par espera o que sai daqui.
+    fn stop(&self, id: i64) -> Option<JoinHandle<()>> {
+        let (_, stop, running) = self.lock().remove(&id)?;
+        stop.cancel();
+        Some(running)
     }
 
     pub(super) fn get(&self, id: i64) -> Option<Arc<FolderSync>> {
-        self.lock().get(&id).map(|(sync, _)| sync.clone())
+        self.lock().get(&id).map(|(sync, ..)| sync.clone())
     }
 }
 
@@ -161,7 +164,7 @@ impl Daemon {
         };
         let sync = Arc::new(sync.with_screen(Arc::new(screen)));
         let stop = shutdown.child_token();
-        tokio::spawn({
+        let running = tokio::spawn({
             let (sync, stop, events) = (sync.clone(), stop.clone(), engine.subscribe());
             let timing = self.config.folder_timing;
             async move { sync.run(events, timing, stop).await }
@@ -217,7 +220,7 @@ impl Daemon {
             }
         });
         self.forward_folder_states(sync.clone(), stop.clone());
-        runners.lock().insert(id, (sync, stop));
+        runners.lock().insert(id, (sync, stop, running));
     }
 
     pub async fn local_folders(&self) -> Result<Vec<LocalFolder>, ServiceError> {
@@ -322,13 +325,27 @@ impl Daemon {
         self.folders_refused()?;
         let account = self.folder_account(account).await?;
         let local = self.validated(path, Some(id)).await?;
-        let store = account.engine.store();
-        account.runners.stop(id);
-        store.set_pair_local(id, &local).map_err(failed)?;
-        store
-            .set_pair_state(id, PairState::Active)
-            .map_err(failed)?;
-        self.restart_folder(&account, id).await
+        let old = account.runners.stop(id);
+        // A passada em andamento do laço antigo ainda grava o estado sincronizado do par: o lugar
+        // novo (que zera esse estado) só entra quando ele termina, e a resposta não espera.
+        let daemon = self.clone();
+        tokio::spawn(async move {
+            if let Some(old) = old {
+                let _ = old.await;
+            }
+            let moved = async {
+                let store = account.engine.store();
+                store.set_pair_local(id, &local).map_err(failed)?;
+                store
+                    .set_pair_state(id, PairState::Active)
+                    .map_err(failed)?;
+                daemon.restart_folder(&account, id).await
+            };
+            if let Err(e) = moved.await {
+                tracing::warn!(erro = %e, "não deu para levar a pasta para o lugar novo");
+            }
+        });
+        Ok(())
     }
 
     /// A lixeira do usuário, para onde vai o que sai do Drive.

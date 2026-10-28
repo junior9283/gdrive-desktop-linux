@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { GUIDE, actions, firstState, loginFailure, nextStep, stepsFor } from '../screens/onboarding/model.js';
+import { GUIDE, actions, firstState, loginFailure, nextStep, stepsFor, summaryRows } from '../screens/onboarding/model.js';
 
 const signIn = (fields = {}) => ({ ...firstState({ signedIn: false, loginOnly: false }), step: 'sign-in', ...fields });
 
@@ -45,11 +45,13 @@ test('Continuar e Voltar percorrem os passos depois do login', () => {
   state = nextStep(state, { type: 'continue' });
   assert.equal(state.step, 'files');
   state = nextStep(state, { type: 'continue' });
-  assert.equal(state.step, 'offline');
+  assert.equal(state.step, 'folders', 'o passo 5 sugere pastas do computador');
   assert.equal(nextStep(state, { type: 'back' }).step, 'files');
   state = nextStep(state, { type: 'continue' });
-  assert.equal(state.step, 'folders', 'o passo 5 sugere pastas do computador');
-  assert.equal(nextStep(state, { type: 'back' }).step, 'offline');
+  assert.equal(state.step, 'summary', 'o passo 6 resume as escolhas');
+  assert.equal(nextStep(state, { type: 'back' }).step, 'folders', 'Alterar volta às pastas');
+  state = nextStep(state, { type: 'continue' });
+  assert.equal(state.step, 'offline', 'o passo 7 ensina o off-line');
   assert.equal(nextStep(state, { type: 'continue' }).step, 'end');
   // Depois do login não se volta para ele.
   assert.equal(nextStep({ ...state, step: 'intro' }, { type: 'back' }).step, 'intro');
@@ -105,11 +107,11 @@ test('a tela de consentimento recebe as páginas do site do projeto', () => {
 
 test('DisableOnboardingDialog deixa só os passos do login', () => {
   assert.deepEqual(stepsFor(true), ['setup', 'sign-in', 'waiting']);
-  assert.deepEqual(stepsFor(false), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'offline', 'folders']);
+  assert.deepEqual(stepsFor(false), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'folders', 'summary', 'offline']);
 });
 
 test('com DisableMirroredFolders, o primeiro uso não sugere pastas', () => {
-  assert.deepEqual(stepsFor(false, '', true), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'offline']);
+  assert.deepEqual(stepsFor(false, '', true), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'summary', 'offline']);
   const state = { ...firstState({ signedIn: true, loginOnly: false, foldersOff: true }), step: 'offline' };
   assert.equal(actions(state).primary, 'finish');
   assert.equal(nextStep(state, { type: 'continue' }).step, 'end');
@@ -129,8 +131,9 @@ test('botões de cada passo', () => {
   assert.deepEqual(at('waiting'), { skip: false, back: true, primary: null });
   assert.deepEqual(at('intro'), { skip: true, back: false, primary: 'continue' });
   assert.deepEqual(at('files'), { skip: true, back: true, primary: 'continue' });
-  assert.deepEqual(at('offline'), { skip: true, back: true, primary: 'continue' });
-  assert.deepEqual(at('folders'), { skip: false, back: true, primary: 'finish' });
+  assert.deepEqual(at('folders'), { skip: true, back: true, primary: 'continue' });
+  assert.deepEqual(at('summary'), { skip: true, back: true, primary: 'continue' });
+  assert.deepEqual(at('offline'), { skip: false, back: true, primary: 'finish' });
   assert.deepEqual(actions({ ...signIn(), loginOnly: true }).primary, 'continue');
 });
 
@@ -210,4 +213,17 @@ test('o motivo do serviço vira o texto do erro; outro texto vai como veio', () 
     assert.deepEqual(loginFailure(reason), [`onboarding-login-failed-${reason}`]);
   }
   assert.deepEqual(loginFailure('tempo esgotado'), ['onboarding-login-failed', { error: 'tempo esgotado' }]);
+});
+
+test('o resumo mostra conta, modo, pasta do Drive e as pastas escolhidas', () => {
+  const rows = summaryRows({ email: 'eu@example.com', mirror: false, mount: '/home/eu/Google Drive', folders: ['/home/eu/Fotos'] });
+  assert.deepEqual(rows, [
+    ['onboarding-summary-account', 'eu@example.com'],
+    ['onboarding-summary-mode', ['onboarding-summary-stream']],
+    ['onboarding-summary-mount', '/home/eu/Google Drive'],
+    ['onboarding-summary-folders', '/home/eu/Fotos'],
+  ]);
+  const none = summaryRows({ email: 'eu@example.com', mirror: true, mount: '/m', folders: [] });
+  assert.deepEqual(none[1], ['onboarding-summary-mode', ['onboarding-summary-mirror']]);
+  assert.deepEqual(none[3], ['onboarding-summary-folders', ['onboarding-summary-no-folders']]);
 });

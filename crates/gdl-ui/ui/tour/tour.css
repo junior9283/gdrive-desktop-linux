@@ -1,0 +1,49 @@
+.tour {
+  position: fixed;
+  z-index: 20;
+  max-width: 320px;
+  padding: 16px 16px 12px;
+  border-radius: var(--md-shape-medium);
+  background: var(--md-on-surface);
+  color: var(--md-surface);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 30%);
+}
+
+.tour h2 {
+  margin: 0 32px 8px 0;
+  font-size: 1rem;
+}
+
+.tour p {
+  margin: 0 0 12px;
+}
+
+.tour-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: inherit;
+}
+
+.tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tour-actions .meta {
+  margin-right: auto;
+  color: inherit;
+  opacity: 0.8;
+}
+
+.tour-back {
+  color: inherit;
+}
+
+.tour-target {
+  outline: 3px solid var(--md-primary);
+  outline-offset: 2px;
+  border-radius: 8px;
+}

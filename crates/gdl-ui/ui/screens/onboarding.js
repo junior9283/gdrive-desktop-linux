@@ -5,7 +5,7 @@ import { prefValue } from '../api.js';
 import { attempt, card, choice, el, errorText, stylesheet, toast, toastError } from '../components.js';
 import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
-import { GUIDE, TROUBLES, actions, firstState, nextStep, stepsFor } from './onboarding/model.js';
+import { GUIDE, TROUBLES, actions, firstState, nextStep, stepsFor, summaryRows } from './onboarding/model.js';
 import { refusalToast } from './folder-actions.js';
 import { configurator, folderName } from './preferences/folders.js';
 
@@ -19,7 +19,7 @@ function loginMode(arg) {
 
 // `picked`: as pastas marcadas no passo de pastas, sincronizadas ao concluir; `suggested`: a
 // conferência delas (feita uma vez: ela percorre a pasta inteira).
-const screen = { root: null, ctx: null, state: null, listening: null, picked: new Set(), suggested: null };
+const screen = { root: null, ctx: null, state: null, listening: null, picked: new Set(), suggested: null, summary: null };
 
 export async function render(root, ctx) {
   const css = stylesheet('screens/onboarding.css');
@@ -53,6 +53,8 @@ function dispatch(event) {
   screen.state = nextStep(screen.state, event);
   const moved = screen.state.step !== before;
   if (moved && screen.state.step === 'waiting') beginLogin();
+  // O Resumo lê o serviço uma vez por visita, não a cada redesenho.
+  if (moved) screen.summary = null;
   if (event.type !== 'edit') draw(moved);
 }
 
@@ -221,13 +223,38 @@ const STEPS = {
     ];
   },
 
-  offline({ t }) {
+  // O último passo oferece o tour da janela principal.
+  offline({ api, t }) {
     return [
       title(t('onboarding-offline-title')),
       el('p', {}, t('onboarding-offline-text')),
       el('pre', { class: 'command' }, t('onboarding-offline-command')),
       el('p', {}, t('onboarding-offline-list')),
+      el('button', { class: 'tonal take-tour', onclick: () => {
+        api.openScreen('home', 'tour');
+        api.closeWindow();
+      } }, t('onboarding-take-tour')),
     ];
+  },
+
+  // O que foi escolhido: conta, modo, pasta do Drive e pastas do computador (as marcadas já foram
+  // adicionadas ao continuar no passo delas).
+  summary({ api, t }) {
+    const list = el('dl', { class: 'summary' });
+    screen.summary ??= Promise.all([api.call('status'), api.call('mirror'), api.call('local_folders')]);
+    screen.summary
+      .then(([status, mirror, folders]) => {
+        const rows = summaryRows({
+          email: status.account,
+          mirror: Boolean(mirror),
+          mount: mirror || status.mount_point,
+          folders: folders.filter((f) => f.account === status.account).map((f) => f.path),
+        });
+        list.replaceChildren(...rows.flatMap(([label, value]) =>
+          [el('dt', {}, t(label)), el('dd', {}, Array.isArray(value) ? t(...value) : value)]));
+      })
+      .catch(toastError);
+    return [title(t('onboarding-summary-title')), el('p', {}, t('onboarding-summary-text')), list];
   },
 
   // As pastas sugeridas (Área de trabalho, Documentos, Imagens, Vídeos) com o tamanho; a que o

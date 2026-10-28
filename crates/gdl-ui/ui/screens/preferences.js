@@ -434,7 +434,8 @@ function settingsPage() {
     section('pref-section-network', proxy(), limit('BandwidthRxKBPS', 'pref-bandwidth-rx'), limit('BandwidthTxKBPS', 'pref-bandwidth-tx')),
     section('pref-section-other',
       hotkey(),
-      checkbox('AutomaticErrorReporting', 'pref-error-reports', 'pref-error-reports-hint')),
+      checkbox('AutomaticErrorReporting', 'pref-error-reports', 'pref-error-reports-hint'),
+      el('button', { class: 'text take-tour', onclick: () => api.openScreen('home', 'tour') }, t('pref-take-tour'))),
     section('pref-account',
       el('button', { class: 'tonal danger', onclick: () => disconnect(screen.ctx) }, t('account-disconnect'))),
   ];

@@ -906,7 +906,7 @@ async fn onboarding_suggests_folders() {
     let service = service().await;
     let documents = std::env::var("GDL_E2E_DOCUMENTS").expect("rode pelo scripts/e2e.sh");
     let session = Session::open("onboarding").await;
-    for _ in 0..3 {
+    for _ in 0..2 {
         session.click(".continue").await;
     }
 
@@ -922,11 +922,14 @@ async fn onboarding_suggests_folders() {
         (!folders.is_empty()).then_some(folders)
     })
     .await;
+    // O passo seguinte, o Resumo, lista a pasta escolhida.
+    let summary = session.wait_text(".summary", &documents).await;
     for folder in &added {
         service.remove_local_folder("", folder.id).await.unwrap();
     }
 
     assert!(row.contains("Documentos"), "{row}");
+    assert!(summary.contains(&documents), "{summary}");
     assert_eq!(
         added.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
         [documents.as_str()]
@@ -1392,4 +1395,47 @@ async fn gear_changes_are_saved_with_the_tabs() {
         .unwrap();
     assert!(pending.contains("pendentes"), "{pending}");
     assert_eq!(metered.value, "true");
+}
+
+// O passo Resumo do primeiro uso mostra a conta e a pasta do Drive escolhidas.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn onboarding_summary_lists_the_choices() {
+    let account = service().await.status("").await.unwrap().account;
+    let session = Session::open("onboarding").await;
+    session.wait_text(".step-title", "").await;
+    for _ in 0..3 {
+        session.click(".continue").await;
+    }
+    let summary = session.wait_text(".summary", &account).await;
+    session.click(".back").await;
+    session.find(".suggested-folders").await;
+
+    assert!(summary.contains("Streaming"), "{summary}");
+    assert!(summary.contains("Google Drive"), "{summary}");
+}
+
+// "Fazer o tour" percorre a janela principal com um balão por parte e termina em Concluir.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn tour_walks_the_home_screen() {
+    let session = Session::open("home:tour").await;
+    let first = session.wait_text(".tour", "O estado da sincronização").await;
+    let outlined = session
+        .eval("return document.querySelector('.tour-target')?.classList.contains('header') ?? false")
+        .await;
+    let mut seen = 1;
+    while session.text(".tour .tour-next").await != "Concluir" {
+        session.click(".tour .tour-next").await;
+        seen += 1;
+    }
+    session.click(".tour .tour-next").await;
+    let gone = session
+        .eval("return document.querySelector('.tour') === null")
+        .await;
+
+    assert!(first.contains("pausar"), "{first}");
+    assert_eq!(outlined, json!(true));
+    assert_eq!(seen, 5);
+    assert_eq!(gone, json!(true));
 }

@@ -4,6 +4,8 @@ import { attempt, confirmDialog, popupMenu, toast } from '../../components.js';
 import { disconnect, disconnectAll } from './disconnect.js';
 import { withoutAccount } from './model.js';
 import { currentAccount } from '../../state.js';
+import { HOME_TOUR } from '../../tour/model.js';
+import { startTour } from '../../tour/tour.js';
 
 export async function moreMenu(anchor, ctx) {
   const { api, t, home } = ctx;
@@ -35,9 +37,13 @@ export async function moreMenu(anchor, ctx) {
   ]);
 }
 
-// O que a bandeja pede ao abrir a janela (`home:<argumento>`): ela não tem diálogo, então a
-// confirmação acontece aqui.
-const ARG_ACTIONS = { 'reset-preferences': reset, 'disconnect-all': disconnectAll };
+// O que pedem ao abrir a janela (`home:<argumento>`): da bandeja, que não tem diálogo, as ações
+// com confirmação; do primeiro uso e das Preferências, o tour.
+const ARG_ACTIONS = {
+  'reset-preferences': reset,
+  'disconnect-all': disconnectAll,
+  tour: ({ t }) => startTour(HOME_TOUR, t),
+};
 
 export function runArg(arg, ctx) {
   ARG_ACTIONS[arg]?.(ctx);

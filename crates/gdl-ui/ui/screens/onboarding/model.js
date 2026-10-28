@@ -34,8 +34,9 @@ export const GUIDE = [
 
 // Os problemas mais comuns do login, com o que fazer (os mesmos do fim do guia em `docs/`).
 export const TROUBLES = ['publish-blocked', 'access-denied', 'redirect-mismatch', 'weekly-logout', 'api-disabled'];
-// O último passo sugere pastas do computador para sincronizar.
-const TOUR = ['intro', 'files', 'offline', 'folders'];
+// Depois do login, na ordem do original: apresentação, a pasta do Drive, pastas do computador,
+// o resumo das escolhas e como deixar arquivos off-line.
+const TOUR = ['intro', 'files', 'folders', 'summary', 'offline'];
 
 // Os passos mostrados: com `DisableOnboardingDialog`, só os do login; adicionando outra conta
 // (`mode` `add`) ou entrando de novo numa (`resume`), só o passo dela e a espera, sem o guia: as
@@ -65,6 +66,16 @@ export function loginFailure(error) {
   return REASONS.includes(error)
     ? [`onboarding-login-failed-${error}`]
     : ['onboarding-login-failed', { error }];
+}
+
+// As linhas do passo Resumo, como `[rótulo, valor]`; o valor é texto ou `[chave]` traduzível.
+export function summaryRows({ email, mirror, mount, folders }) {
+  return [
+    ['onboarding-summary-account', email],
+    ['onboarding-summary-mode', [mirror ? 'onboarding-summary-mirror' : 'onboarding-summary-stream']],
+    ['onboarding-summary-mount', mount],
+    ['onboarding-summary-folders', folders.length ? folders.join('\n') : ['onboarding-summary-no-folders']],
+  ];
 }
 
 // O passo seguinte dentro de `steps`, ou o fim.

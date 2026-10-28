@@ -142,7 +142,8 @@ impl Tools for DriveTools {
                     anything outside home are refused). \"backup\" keeps it in place and backs it up \
                     to Computers in Drive. \"stream\" moves it into My Drive (my_drive_path, \
                     default the root) and leaves a symbolic link in its place; the original goes \
-                    to the system trash.",
+                    to the system trash. A folder holding symbolic links or special files is \
+                    refused for \"stream\" (has-links).",
                 input_schema: schema(
                     json!({
                         "path": path,

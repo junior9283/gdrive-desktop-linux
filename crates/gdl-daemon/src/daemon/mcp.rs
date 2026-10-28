@@ -61,7 +61,8 @@ impl Daemon {
 
     /// Leva a pasta `path` para `drive_dir` (relativo ao Meu Drive da conta; vazio, a raiz) e
     /// deixa no lugar um link para a cópia. Recusa com `Refused`: um motivo de
-    /// `CheckLocalFolder`, `destination-missing`, `exists` ou `no-space`. Devolve o caminho novo.
+    /// `CheckLocalFolder`, `has-links`, `destination-missing`, `exists` ou `no-space`. Devolve o
+    /// caminho novo.
     pub async fn move_to_drive(
         &self,
         account: &str,
@@ -78,6 +79,10 @@ impl Daemon {
         // Medir a pasta e perguntar a cota ao Drive não dependem um do outro.
         let (checked, about) = tokio::join!(self.check(Path::new(path), None), engine.about());
         let (local, info) = checked.map_err(|r| refused(refusal_text(r)))?;
+        // A cópia só leva arquivos comuns: os links ficariam para trás, na lixeira.
+        if info.others > 0 {
+            return Err(refused("has-links"));
+        }
         let parent = inside(&mount.join(&self.layout.my_drive), drive_dir)
             .filter(|p| p.is_dir())
             .ok_or_else(|| refused("destination-missing"))?;

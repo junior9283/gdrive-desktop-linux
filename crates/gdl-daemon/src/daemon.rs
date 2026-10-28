@@ -848,6 +848,9 @@ impl Daemon {
     /// A ação `key` de um aviso, na conta `account` dele.
     async fn run_action(&self, account: &str, key: &str) -> Result<(), ServiceError> {
         let folder = match key {
+            // A pausa do usuário é do app inteiro, como "Retomar" no menu; sem ela, o aviso de
+            // atividade suspeita libera só a conta dele.
+            RESUME if self.paused.load(Ordering::SeqCst) => return self.set_paused(false).await,
             RESUME => {
                 apply_paused(&*self.account_engine(account).await?, false);
                 return Ok(());

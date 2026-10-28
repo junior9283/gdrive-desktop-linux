@@ -29,6 +29,8 @@ pub enum Refusal {
 pub struct FolderInfo {
     pub size: u64,
     pub files: u64,
+    /// Links e arquivos especiais, que a sincronização não leva.
+    pub others: u64,
 }
 
 /// Confere `path` contra as pastas já em uso (`taken`: pares, montagens, pasta de dados) e o
@@ -52,7 +54,8 @@ pub fn check_folder(
     Ok(measure(&path))
 }
 
-/// Quantos arquivos comuns há dentro de `path` e quanto somam (sem seguir links).
+/// Quantos arquivos comuns há dentro de `path` e quanto somam, e quantos links e arquivos
+/// especiais (sem seguir links).
 pub fn measure(path: &Path) -> FolderInfo {
     let mut info = FolderInfo::default();
     for entry in walkdir::WalkDir::new(path)
@@ -60,9 +63,12 @@ pub fn measure(path: &Path) -> FolderInfo {
         .into_iter()
         .flatten()
     {
-        if entry.file_type().is_file() {
+        let kind = entry.file_type();
+        if kind.is_file() {
             info.files += 1;
             info.size += entry.metadata().map_or(0, |m| m.len());
+        } else if !kind.is_dir() {
+            info.others += 1;
         }
     }
     info
@@ -156,7 +162,11 @@ mod tests {
         );
         assert_eq!(
             check_folder(&free, &[docs], local),
-            Ok(FolderInfo { size: 4, files: 1 })
+            Ok(FolderInfo {
+                size: 4,
+                files: 1,
+                others: 0
+            })
         );
     }
 

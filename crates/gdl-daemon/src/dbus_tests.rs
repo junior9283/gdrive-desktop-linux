@@ -1796,7 +1796,7 @@ async fn id_methods_act_on_the_requested_account() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn notification_action_acts_on_its_account() {
+async fn resume_from_notification_resumes_all_accounts() {
     let h = Harness::new().await;
     h.two_accounts("ana@example.com").await;
     h.proxy.pause().await.unwrap();
@@ -1828,7 +1828,10 @@ async fn notification_action_acts_on_its_account() {
         .await
         .unwrap();
 
+    // A pausa é do app inteiro, como no original: retomar pelo aviso retoma todas as contas.
     assert!(!h.proxy.status("ana@example.com").await.unwrap().paused);
+    assert!(!h.proxy.status(&h.fake.email()).await.unwrap().paused);
+    h.proxy.pause().await.unwrap();
     assert!(h.proxy.status(&h.fake.email()).await.unwrap().paused);
 }
 
@@ -2581,6 +2584,26 @@ fn local_folder(h: &Harness, name: &str) -> PathBuf {
     let path = h.home.join(name);
     std::fs::create_dir_all(&path).unwrap();
     path
+}
+
+/// Levar uma pasta com links para o Drive deixaria os links para trás (a cópia só leva arquivos
+/// comuns): o serviço recusa sem mexer em nada.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mcp_add_folder_refuses_links() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Projetos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    std::os::unix::fs::symlink("a.txt", docs.join("atalho")).unwrap();
+    let path = docs.to_str().unwrap();
+
+    let err = h.proxy.move_to_drive("", path, "").await.unwrap_err();
+
+    assert_eq!(err.short_name(), "Refused", "{err}");
+    assert!(err.to_string().contains("has-links"), "{err}");
+    assert!(!std::fs::symlink_metadata(&docs).unwrap().is_symlink());
+    assert_eq!(names_in(&docs), ["a.txt", "atalho"]);
+    assert!(!h.drive().join("Projetos").exists());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

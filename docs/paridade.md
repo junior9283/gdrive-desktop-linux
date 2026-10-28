@@ -154,7 +154,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Visão Pastas conectadas | FEITO | Visão com as linhas de `folderRows` e o mesmo menu das Preferências |
 | Visão Arquivos off-line | FEITO | `home/offline.js` + tela `offline.js` |
 | Visão Compartilhados comigo | FEITO | `home/shared.js` (Adicionar atalho / Abrir na web) |
-| Visão Drives compartilhados | FALTA | Não existe |
+| Visão Drives compartilhados | FALTA | Não há visão na janela principal; a tela "Gerenciar drives compartilhados" (`shared-drives.js`) existe à parte |
 | Notificações com contador de não lidas | FEITO | `home/notifications.js`, `home.js` `setUnread` / `updateBadge` |
 | Links rápidos (Drive web, FAQ, ajuda off-line) | FEITO | `home/links.js` |
 | Mais opções: Arquivos off-line, Lista de erros (contagem), Preferências, Sobre | FEITO | `home/more.js` `moreMenu` |
@@ -279,7 +279,7 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
 | Notificações do sistema com ações + lista na janela | FEITO | `gdl-daemon/src/notify.rs` (`Notifier`, `org.freedesktop.Notifications`), D-Bus `Notifications/InvokeNotificationAction` (`dbus.rs:62-74`), tela em `ui/screens/home/notifications.js`. |
-| Erros fatais e de conta | PARCIAL | Existem `Offline`, `UploadFailed`; sem famílias de conta (token expirado, conta bloqueada). |
+| Erros fatais e de conta | PARCIAL | Existem `Offline`, `UploadFailed` e o login expirado ou revogado (`NeedsSignIn`, com "Entrar"); falta conta desativada ou bloqueada pela organização. |
 | Armazenamento e cota | PARCIAL | `QuotaFull`, `DiskLow` (`notify.rs:108,116`); faltam "quase cheio" da cota e "disco local cheio" separado. |
 | Sincronização e pastas | PARCIAL | `LostAndFound`, `SavedWhilePaused`, `UploadCanceled`, `CopiedAsShortcut`, pasta conectada sumiu/movida/sem permissão, exclusão em massa; faltam itens recuperados, uploads parados há N dias, itens movidos para a lixeira. |
 | Permissões e movimentações | FALTA | Nenhum evento (não pode criar/mover/excluir/renomear; avisos de compartilhamento). |

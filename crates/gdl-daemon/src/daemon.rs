@@ -1078,10 +1078,10 @@ impl Daemon {
         creds: ClientCredentials,
         expected: &str,
     ) -> Result<String, (String, String)> {
-        let tokens = flow
-            .wait(LOGIN_TIMEOUT)
-            .await
-            .map_err(|e| (String::new(), e.to_string()))?;
+        let tokens = flow.wait(LOGIN_TIMEOUT).await.map_err(|e| {
+            let error = e.reason().map(str::to_owned).unwrap_or_else(|| e.to_string());
+            (String::new(), error)
+        })?;
         let email = tokens.email.clone();
         let fail = |e: &dyn std::fmt::Display| (email.clone(), e.to_string());
         let (connected, already) = {

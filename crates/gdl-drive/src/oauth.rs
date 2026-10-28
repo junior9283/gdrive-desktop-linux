@@ -77,6 +77,17 @@ pub enum AuthError {
     Http(u16),
 }
 
+impl LoginError {
+    /// O motivo que a janela traduz (`LoginFinished`); os outros erros vão como texto.
+    pub fn reason(&self) -> Option<&'static str> {
+        match self {
+            LoginError::BlockedByOrg => Some("blocked-by-organization"),
+            LoginError::AccountDisabled => Some("account-disabled"),
+            _ => None,
+        }
+    }
+}
+
 impl From<reqwest::Error> for AuthError {
     fn from(e: reqwest::Error) -> Self {
         AuthError::Network(e.to_string())
@@ -89,6 +100,10 @@ pub enum LoginError {
     Timeout,
     #[error("o acesso à conta foi recusado")]
     Denied,
+    #[error("a organização não permite usar esta conta neste app")]
+    BlockedByOrg,
+    #[error("a conta está desativada")]
+    AccountDisabled,
     #[error(
         "o Google não enviou o token de renovação; remova o acesso do app na conta e entre de novo"
     )]
@@ -230,14 +245,16 @@ impl LoginFlow {
             ],
         )
         .await?;
-        let user: UserInfo = http
+        let response = http
             .get(self.endpoints.userinfo.clone())
             .bearer_auth(&tokens.access_token)
             .send()
-            .await?
-            .error_for_status()?
-            .json()
             .await?;
+        // Com o código aceito, só uma conta desativada é recusada ao abrir os próprios dados.
+        if response.status() == StatusCode::FORBIDDEN {
+            return Err(LoginError::AccountDisabled);
+        }
+        let user: UserInfo = response.error_for_status()?.json().await?;
         Ok(TokenSet {
             refresh_token: tokens
                 .refresh_token
@@ -251,8 +268,9 @@ impl LoginFlow {
 
 /// O que o retorno do navegador significa: `?code=…` ou `?error=…` (o `state` já conferido).
 fn parse_callback(params: &HashMap<String, String>) -> CallbackResult {
-    match params.get("code") {
-        Some(code) if !params.contains_key("error") => Ok(code.clone()),
+    match (params.get("code"), params.get("error").map(String::as_str)) {
+        (Some(code), None) => Ok(code.clone()),
+        (_, Some("admin_policy_enforced" | "org_internal")) => Err(LoginError::BlockedByOrg),
         _ => Err(LoginError::Denied),
     }
 }
@@ -421,7 +439,7 @@ mod tests {
     use std::time::Duration;
 
     use gdl_common::paths::Paths;
-    use gdl_fake_drive::FakeDrive;
+    use gdl_fake_drive::{FakeDrive, Fault};
 
     use super::*;
     use crate::token_store::{ClientCredentials, MemoryStore, TokenStore};
@@ -537,6 +555,38 @@ mod tests {
             flow.wait(Duration::from_secs(5)).await,
             Err(LoginError::Denied)
         ));
+    }
+
+    #[tokio::test]
+    async fn admin_block_is_its_own_error() {
+        for error in ["admin_policy_enforced", "org_internal"] {
+            let fake = FakeDrive::start().await;
+            let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
+            let url = flow.auth_url();
+            let redirect = param(&url, "redirect_uri").unwrap();
+            let state = param(&url, "state").unwrap();
+            reqwest::get(format!("{redirect}?error={error}&state={state}"))
+                .await
+                .unwrap();
+            let e = flow.wait(Duration::from_secs(5)).await.unwrap_err();
+            assert!(matches!(e, LoginError::BlockedByOrg), "{error}: {e:?}");
+            assert_eq!(e.reason(), Some("blocked-by-organization"));
+        }
+    }
+
+    #[tokio::test]
+    async fn disabled_account_is_its_own_error() {
+        let fake = FakeDrive::start().await;
+        let flow = LoginFlow::start(creds(), endpoints(&fake)).await.unwrap();
+        // O Google aceita o código, mas a conta desativada não abre os dados dela.
+        fake.inject(Fault::AccountDisabled { times: 1 });
+        assert!(approve_in_browser(&flow).await.status().is_success());
+
+        let e = flow.wait(Duration::from_secs(5)).await.unwrap_err();
+
+        assert!(matches!(e, LoginError::AccountDisabled), "{e:?}");
+        assert_eq!(e.reason(), Some("account-disabled"));
+        assert_eq!(LoginError::Denied.reason(), None);
     }
 
     #[tokio::test]

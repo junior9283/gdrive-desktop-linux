@@ -59,7 +59,17 @@ export function firstState({ signedIn, loginOnly, mount = '', mode = '', expecte
 }
 
 // Os motivos de recusa do serviço que têm texto próprio (`onboarding-login-failed-<motivo>`).
-export const REASONS = ['already-connected', 'other-account', 'too-many-accounts', 'add-account-disabled'];
+export const REASONS = [
+  'already-connected', 'other-account', 'too-many-accounts', 'add-account-disabled',
+  'blocked-by-organization', 'account-disabled',
+];
+
+// Esperando o navegador há tanto tempo, o passo oferece ajuda ("O login está demorando?").
+export const SLOW_LOGIN_MS = 60000;
+
+export function slowLogin(startedMs, nowMs) {
+  return startedMs != null && nowMs - startedMs >= SLOW_LOGIN_MS;
+}
 
 // O erro de um login que não deu certo, como `[chave, argumentos]`.
 export function loginFailure(error) {

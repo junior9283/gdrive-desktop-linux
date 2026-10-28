@@ -187,6 +187,11 @@ onboarding-login-failed-already-connected = Esta conta já está conectada.
 onboarding-login-failed-other-account = O login foi feito com outra conta. Entre com a conta que precisava entrar de novo.
 onboarding-login-failed-too-many-accounts = O máximo de 4 contas já foi atingido. Desconecte uma antes de adicionar outra.
 onboarding-login-failed-add-account-disabled = O administrador não permite adicionar outra conta.
+onboarding-login-failed-blocked-by-organization = A organização da conta não permite usá-la neste app. Fale com o administrador ou entre com outra conta.
+onboarding-login-failed-account-disabled = A conta está desativada. Verifique a conta no Google ou entre com outra.
+onboarding-slow-title = O login está demorando?
+onboarding-slow-text = Se a página do Google fechou ou deu erro, gere um link de novo e tente outra vez.
+onboarding-regenerate-link = Gerar link de novo
 storage-manage = Gerenciar armazenamento
 
 more-errors = { $count ->

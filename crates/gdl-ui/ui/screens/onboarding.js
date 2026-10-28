@@ -5,7 +5,7 @@ import { prefValue } from '../api.js';
 import { attempt, card, choice, el, errorText, stylesheet, toast, toastError } from '../components.js';
 import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
-import { GUIDE, TROUBLES, actions, firstState, nextStep, stepsFor, summaryRows } from './onboarding/model.js';
+import { GUIDE, SLOW_LOGIN_MS, TROUBLES, actions, firstState, nextStep, slowLogin, stepsFor, summaryRows } from './onboarding/model.js';
 import { refusalToast } from './folder-actions.js';
 import { configurator, folderName } from './preferences/folders.js';
 
@@ -19,7 +19,7 @@ function loginMode(arg) {
 
 // `picked`: as pastas marcadas no passo de pastas, sincronizadas ao concluir; `suggested`: a
 // conferência delas (feita uma vez: ela percorre a pasta inteira).
-const screen = { root: null, ctx: null, state: null, listening: null, picked: new Set(), suggested: null, summary: null };
+const screen = { root: null, ctx: null, state: null, listening: null, picked: new Set(), suggested: null, summary: null, loginStarted: null, slowTimer: null };
 
 export async function render(root, ctx) {
   const css = stylesheet('screens/onboarding.css');
@@ -53,13 +53,18 @@ function dispatch(event) {
   screen.state = nextStep(screen.state, event);
   const moved = screen.state.step !== before;
   if (moved && screen.state.step === 'waiting') beginLogin();
+  else if (moved) clearTimeout(screen.slowTimer);
   // O Resumo lê o serviço uma vez por visita, não a cada redesenho.
   if (moved) screen.summary = null;
   if (event.type !== 'edit') draw(moved);
 }
 
-// Pede o login ao serviço (ele abre o navegador); o fim chega pelo evento `login-finished`.
+// Pede o login ao serviço (ele abre o navegador); o fim chega pelo evento `login-finished`. Um
+// minuto depois, se ainda espera, o passo redesenha com a ajuda de "O login está demorando?".
 function beginLogin() {
+  screen.loginStarted = Date.now();
+  clearTimeout(screen.slowTimer);
+  screen.slowTimer = setTimeout(() => screen.state.step === 'waiting' && draw(false), SLOW_LOGIN_MS);
   const { mode, expected, clientId, secret } = screen.state;
   // Sem Client ID, o serviço usa o que a primeira conta guardou.
   const credentials = mode ? { expected } : { client_id: clientId.trim(), client_secret: secret.trim() };
@@ -140,6 +145,10 @@ function guideSection(ctx, { id, link, copy = [] }) {
 
 // Um problema comum do login e o que fazer.
 const trouble = (t, id) => [el('dt', {}, t(`onboarding-trouble-${id}`)), el('dd', {}, t(`onboarding-trouble-${id}-fix`))];
+const troubles = (t) =>
+  el('details', { class: 'troubles' },
+    el('summary', {}, t('onboarding-trouble-title')),
+    el('dl', {}, TROUBLES.flatMap((id) => trouble(t, id))));
 
 // O passo de `add` e de `resume`: o que vai acontecer e o erro do último login.
 const accountStep = (mode) => ({ t }, state) => [
@@ -159,9 +168,7 @@ const STEPS = {
       title(t('onboarding-setup-title')),
       el('p', {}, t('onboarding-setup-text')),
       el('ol', { class: 'guide' }, GUIDE.map((section) => guideSection(ctx, section))),
-      el('details', { class: 'troubles' },
-        el('summary', {}, t('onboarding-trouble-title')),
-        el('dl', {}, TROUBLES.flatMap((id) => trouble(t, id)))),
+      troubles(t),
       el('button', { class: 'text', onclick: () => attempt(api.openLink('client-id-guide')) }, t('onboarding-client-guide')),
     ];
   },
@@ -198,6 +205,15 @@ const STEPS = {
         dispatch({ type: 'show-link' });
       },
     }, t('onboarding-generate-link'));
+    const slow = slowLogin(screen.loginStarted, Date.now())
+      ? el('div', { class: 'slow-login', role: 'status' },
+        el('p', {}, el('strong', {}, t('onboarding-slow-title')), ' ', t('onboarding-slow-text')),
+        el('button', { class: 'text regenerate-link', onclick: () => {
+          beginLogin();
+          draw(false);
+        } }, t('onboarding-regenerate-link')),
+        troubles(t))
+      : [];
     return [
       title(t('onboarding-waiting-title')),
       el('p', {}, t('onboarding-waiting-text')),
@@ -207,6 +223,7 @@ const STEPS = {
       state.linkShown
         ? el('input', { class: 'login-url', readonly: true, value: state.url, 'aria-label': t('onboarding-generate-link') })
         : [],
+      slow,
     ];
   },
 

@@ -10,7 +10,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let conn = zbus::Connection::session().await?;
     // Logo depois de instalar, o barramento ainda pode não saber abrir o serviço.
     let _ = gdl_ipc::ensure_activatable(&conn).await;
-    let tools = DriveTools::new(ServiceProxy::new(&conn).await?);
+    let home = std::env::home_dir().ok_or("sem pasta pessoal ($HOME)")?;
+    let tools = DriveTools::new(ServiceProxy::new(&conn).await?, home);
     let stdin = BufReader::new(tokio::io::stdin());
     gdl_mcp::serve(&tools, stdin, tokio::io::stdout()).await?;
     Ok(())

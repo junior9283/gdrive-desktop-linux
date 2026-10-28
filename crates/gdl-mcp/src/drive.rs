@@ -1,5 +1,7 @@
 //! As ferramentas do app para clientes MCP, sobre o D-Bus do serviço (`ServiceProxy`).
 
+use std::path::{Component, Path, PathBuf};
+
 use gdl_ipc::{ServiceError, ServiceProxy};
 use serde_json::{Map, Value, json};
 
@@ -8,11 +10,13 @@ use crate::{Tool, ToolError, Tools};
 /// As ferramentas, falando com o serviço por `proxy`.
 pub struct DriveTools {
     proxy: ServiceProxy<'static>,
+    /// A pasta pessoal: só as pastas visíveis dentro dela podem ir para o Drive.
+    home: PathBuf,
 }
 
 impl DriveTools {
-    pub fn new(proxy: ServiceProxy<'static>) -> DriveTools {
-        DriveTools { proxy }
+    pub fn new(proxy: ServiceProxy<'static>, home: PathBuf) -> DriveTools {
+        DriveTools { proxy, home }
     }
 
     async fn sync_status(&self, args: &Args) -> Result<Value, ToolError> {
@@ -61,6 +65,12 @@ impl DriveTools {
     async fn add_folder(&self, args: &Args) -> Result<Value, ToolError> {
         let path = args.text("path")?;
         let account = args.optional("account_id")?;
+        if !visible_in_home(Path::new(path), &self.home) {
+            return Err(ToolError::Failed(format!(
+                "not-allowed: only visible folders inside {} can be added",
+                self.home.display()
+            )));
+        }
         match args.text("sync_mode")? {
             "backup" => {
                 let id = self
@@ -124,7 +134,8 @@ impl Tools for DriveTools {
             },
             Tool {
                 name: "add_folder_to_sync",
-                description: "Sync a local folder. \"backup\" keeps it in place and backs it up \
+                description: "Sync a visible folder inside the home folder (hidden folders and \
+                    anything outside home are refused). \"backup\" keeps it in place and backs it up \
                     to Computers in Drive. \"stream\" moves it into My Drive (my_drive_path, \
                     default the root) and leaves a symbolic link in its place; the original goes \
                     to the system trash.",
@@ -168,6 +179,22 @@ impl Tools for DriveTools {
             _ => Err(ToolError::Unknown),
         }
     }
+}
+
+/// `path` (seguindo links) é uma pasta dentro de `home`, sem nenhum nome oculto no caminho: um
+/// assistente, ou um texto que o engane, não leva ao Drive `~/.ssh`, `~/.gnupg`, `~/.config` nem
+/// nada fora da pasta pessoal.
+fn visible_in_home(path: &Path, home: &Path) -> bool {
+    let (Ok(path), Ok(home)) = (path.canonicalize(), home.canonicalize()) else {
+        return false;
+    };
+    path.strip_prefix(&home).is_ok_and(|inside| {
+        inside.components().next().is_some()
+            && inside.components().all(|c| match c {
+                Component::Normal(name) => !name.to_string_lossy().starts_with('.'),
+                _ => false,
+            })
+    })
 }
 
 fn schema(properties: Value, required: &[&str]) -> Value {

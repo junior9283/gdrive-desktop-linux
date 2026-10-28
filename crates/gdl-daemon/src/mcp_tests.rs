@@ -10,7 +10,9 @@ use serde_json::{Value, json};
 use crate::testutil::{Harness, blocking, wait_until};
 
 async fn call(h: &Harness, name: &str, args: Value) -> Result<Value, ToolError> {
-    DriveTools::new(h.proxy.clone()).call(name, args).await
+    DriveTools::new(h.proxy.clone(), h.home.clone())
+        .call(name, args)
+        .await
 }
 
 /// Uma pasta `Projeto` na pasta pessoal com `a.txt` e `sub/b.txt`.
@@ -259,4 +261,51 @@ async fn stream_move_undoes_on_failure() {
         "a cópia pela metade saiu"
     );
     assert!(!h.paths().data_home.join("Trash/files/Projeto").exists());
+}
+
+/// Um assistente (ou um texto que o engane) não leva ao Drive pastas ocultas, como as chaves de
+/// `~/.ssh`, nem nada fora da pasta pessoal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn agent_cannot_add_hidden_or_outside_folders() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let ssh = h.home.join(".ssh");
+    let nested = h.home.join(".config/app");
+    let outside = h.paths().data_home.join("fora");
+    for dir in [&ssh, &nested, &outside] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("chave"), "segredo").unwrap();
+    }
+
+    for dir in [&ssh, &nested, &outside, &h.home] {
+        for mode in ["backup", "stream"] {
+            let refused = call(
+                &h,
+                "add_folder_to_sync",
+                json!({ "path": text(dir), "sync_mode": mode }),
+            )
+            .await;
+            assert!(
+                matches!(&refused, Err(ToolError::Failed(m)) if m.contains("not-allowed")),
+                "{} em {mode}: {refused:?}",
+                dir.display()
+            );
+        }
+    }
+    // Pelo link, a pasta de verdade é a oculta.
+    let link = h.home.join("Chaves");
+    std::os::unix::fs::symlink(&ssh, &link).unwrap();
+    let through_link = call(
+        &h,
+        "add_folder_to_sync",
+        json!({ "path": text(&link), "sync_mode": "backup" }),
+    )
+    .await;
+    assert!(
+        matches!(through_link, Err(ToolError::Failed(_))),
+        "{through_link:?}"
+    );
+
+    assert!(h.proxy.local_folders().await.unwrap().is_empty());
+    assert!(!ssh.is_symlink() && ssh.join("chave").is_file());
 }

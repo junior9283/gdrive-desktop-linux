@@ -4,11 +4,12 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const PROGRAMS: [&str; 4] = [
+const PROGRAMS: [&str; 5] = [
     "gdrive-desktop-linuxd",
     "gdrive-desktop-linux",
     "gdrive-desktop-linux-tray",
     "gdrive-desktop-linux-ui",
+    "gdrive-desktop-linux-mcp",
 ];
 
 /// O que a instalação põe em `<prefixo>` (fora os programas).

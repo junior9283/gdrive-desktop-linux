@@ -1609,7 +1609,9 @@ mod tests {
         drop(store);
         salvage::damage_table(&db, "access");
 
-        let mut found = salvage::edited_items(&db);
+        let salvage = salvage::edited_items(&db);
+        assert!(salvage.complete, "a tabela `items` está inteira");
+        let mut found = salvage.items;
         found.sort_by(|a, b| a.id.cmp(&b.id));
 
         let path = |p: &str| Some(std::path::PathBuf::from(p));
@@ -1630,7 +1632,8 @@ mod tests {
                 },
             ]
         );
-        assert!(salvage::edited_items(&tmp.path().join("nada.db")).is_empty());
+        let missing = salvage::edited_items(&tmp.path().join("nada.db"));
+        assert!(missing.items.is_empty() && !missing.complete);
     }
 
     #[test]

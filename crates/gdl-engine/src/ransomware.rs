@@ -197,6 +197,50 @@ mod tests {
         assert_eq!(suspicious(&mut events), 0);
     }
 
+    /// A pausa por atividade suspeita continua depois de reabrir a conta, e "Eu reconheço" não
+    /// desfaz a pausa do usuário.
+    #[tokio::test]
+    async fn suspicious_pause_survives_restart() {
+        use gdl_common::config::load_preferences;
+        use gdl_common::paths::Paths;
+        use gdl_common::time::now_ms;
+
+        use crate::engine::Engine;
+        use crate::testutil::fast_client;
+
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let (prefs, _) = load_preferences(&paths).unwrap();
+        let open = || Engine::open(&paths, &prefs, "teste@example.com", fast_client(&fake, 3));
+        let engine = open().unwrap();
+        let file = tmp.path().join("cifrado");
+        std::fs::write(&file, random_bytes(8192, 7)).unwrap();
+        let now = now_ms();
+        for n in 0..THRESHOLD as i64 {
+            engine.screen_write(&format!("doc{n}.txt"), &file, now + n);
+        }
+        assert!(engine.is_paused());
+        drop(engine);
+
+        let engine = open().unwrap();
+        assert!(
+            engine.is_paused(),
+            "reaberta, a pausa continua até o usuário decidir"
+        );
+        assert!(!engine.screen_write("outro.txt", &file, now + 100));
+
+        engine.pause();
+        engine.recognize_activity(now + 200);
+        assert!(engine.is_paused(), "a pausa do usuário continua");
+        engine.resume();
+        drop(engine);
+        assert!(
+            !open().unwrap().is_paused(),
+            "reconhecida, não volta a pausar"
+        );
+    }
+
     #[test]
     fn recognized_activity_is_quiet_for_an_hour() {
         let mut detector = Detector::default();

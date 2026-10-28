@@ -113,6 +113,7 @@ impl Tools for DriveTools {
             "type": "string",
             "description": "Email of the account; defaults to the first one.",
         });
+        let read_only = json!({ "readOnlyHint": true, "openWorldHint": false });
         vec![
             Tool {
                 name: "get_sync_status",
@@ -120,17 +121,20 @@ impl Tools for DriveTools {
                     conflict, online (only in the cloud) or outside (not in Drive nor in a synced \
                     folder), plus the state of its account.",
                 input_schema: schema(json!({ "path": path }), &["path"]),
+                annotations: read_only.clone(),
             },
             Tool {
                 name: "get_drive_url",
                 description: "Google Drive web link of a file or folder in the Drive mount.",
                 input_schema: schema(json!({ "path": path }), &["path"]),
+                annotations: read_only.clone(),
             },
             Tool {
                 name: "list_tracked_folders",
                 description: "Drive mount point and mirror folder of each account, and the \
                     computer folders backed up to Drive.",
                 input_schema: schema(json!({}), &[]),
+                annotations: read_only,
             },
             Tool {
                 name: "add_folder_to_sync",
@@ -151,6 +155,13 @@ impl Tools for DriveTools {
                     }),
                     &["path", "sync_mode"],
                 ),
+                // Leva a pasta para a nuvem e, no modo stream, a original para a lixeira.
+                annotations: json!({
+                    "readOnlyHint": false,
+                    "destructiveHint": true,
+                    "idempotentHint": false,
+                    "openWorldHint": true,
+                }),
             },
             Tool {
                 name: "open_acl_dialog",
@@ -164,6 +175,8 @@ impl Tools for DriveTools {
                     }),
                     &["email", "item_id"],
                 ),
+                // Só abre a janela; compartilhar é o usuário quem confirma.
+                annotations: json!({ "readOnlyHint": false, "destructiveHint": false }),
             },
         ]
     }

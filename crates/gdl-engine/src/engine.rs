@@ -93,6 +93,10 @@ struct PauseReasons {
     suspicious: bool,
 }
 
+/// Chave do kv com a pausa por atividade suspeita, que sobrevive a reinícios: os envios da fila
+/// só seguem quando o usuário decidir.
+const SUSPICIOUS_PAUSE: &str = "suspicious_pause";
+
 /// Arquivo (na pasta de dados da conta) com a pasta de cache da última abertura, para saber se
 /// `ContentCachePath` mudou.
 const CACHE_DIR_FILE: &str = "cache_dir";
@@ -199,6 +203,7 @@ impl Engine {
         );
         recover_on_start(&store, &cache)?;
         let activity = Arc::new(ActivityLog::default());
+        let suspicious = store.kv_get(SUSPICIOUS_PAUSE)?.as_deref() == Some("1");
         Ok(Engine {
             pins: PinManager::new(store.clone(), cache.clone()).with_activity(activity.clone()),
             uploads: UploadWorker::new(
@@ -223,9 +228,12 @@ impl Engine {
             cache,
             events,
             intervals: Intervals::default(),
-            paused: watch::Sender::new(false),
+            paused: watch::Sender::new(suspicious),
             signed_out,
-            pause_reasons: Default::default(),
+            pause_reasons: std::sync::Mutex::new(PauseReasons {
+                suspicious,
+                ..Default::default()
+            }),
             ransomware: Default::default(),
             saved_while_paused: AtomicBool::new(false),
             recovered,
@@ -394,10 +402,11 @@ impl Engine {
         !lock(&self.pause_reasons).suspicious
     }
 
-    /// "Eu reconheço esta atividade": retoma e não avisa de novo por `ransomware::QUIET_MS`.
+    /// "Eu reconheço esta atividade": desfaz a pausa dela (não a do usuário nem a da conexão
+    /// limitada) e não avisa de novo por `ransomware::QUIET_MS`.
     pub fn recognize_activity(&self, now: i64) {
         lock(&self.ransomware).quiet(now);
-        self.resume();
+        self.update_pause(|r| r.suspicious = false);
     }
 
     /// Pausa (ou desfaz) pela conexão limitada; desfazer não retoma uma pausa do usuário.
@@ -407,7 +416,14 @@ impl Engine {
 
     fn update_pause(&self, change: impl FnOnce(&mut PauseReasons)) {
         let mut reasons = lock(&self.pause_reasons);
+        let was_suspicious = reasons.suspicious;
         change(&mut reasons);
+        if reasons.suspicious != was_suspicious {
+            let value = if reasons.suspicious { "1" } else { "0" };
+            if let Err(e) = self.store.kv_set(SUSPICIOUS_PAUSE, value) {
+                tracing::error!(erro = %e, "não deu para gravar a pausa por atividade suspeita");
+            }
+        }
         // Ainda com a trava: duas mudanças seguidas não publicam fora de ordem.
         self.set_paused(reasons.user || reasons.metered || reasons.suspicious);
     }

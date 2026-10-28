@@ -1,12 +1,15 @@
 //! Banco da conta estragado: o banco vai para `recuperacao/<data>/` (não é apagado), o
 //! conteúdo das edições que não subiram vai para `Lost and Found/Recuperados <data>/` e a conta
-//! começa um banco novo, que se reindexa a partir do Drive. Nada é reenviado sozinho.
+//! começa um banco novo, que se reindexa a partir do Drive. Nada é reenviado sozinho. Se o banco
+//! não deu para ler inteiro, o cache também fica guardado, em `content-recuperacao-<data>/`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use gdl_common::names::{create_numbered, split_ext};
 use gdl_common::paths::create_private_dir;
 use gdl_common::time::local_stamp;
-use gdl_store::{Store, StoreError, salvage};
+use gdl_store::salvage::{self, Salvaged};
+use gdl_store::{Store, StoreError};
 
 use crate::Result;
 
@@ -27,34 +30,50 @@ pub(crate) fn open_store(
         Err(StoreError::Corrupt(why)) => {
             tracing::error!(motivo = %why, "banco da conta estragado; recuperando");
             let stamp = local_stamp(now);
+            let salvage = salvage::edited_items(&db);
             let recovered = keep_edits(
-                &db,
+                &salvage.items,
                 content_dir,
                 &lost_and_found.join(format!("Recuperados {stamp}")),
             )?;
             set_aside(&db, &data_dir.join(RECOVERY_DIR).join(&stamp))?;
-            // O conteúdo do cache era do banco antigo; o novo começa sem nada baixado.
-            unless_missing(std::fs::remove_dir_all(content_dir))?;
+            // O conteúdo do cache era do banco antigo; o novo começa sem nada baixado. Sem a
+            // lista inteira das edições, o cache pode ter alguma que não subiu: fica guardado.
+            if salvage.complete {
+                unless_missing(std::fs::remove_dir_all(content_dir))?;
+            } else {
+                let name = content_dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let aside = content_dir.with_file_name(format!("{name}-recuperacao-{stamp}"));
+                unless_missing(std::fs::rename(content_dir, &aside))?;
+                tracing::error!(pasta = %aside.display(), "banco ilegível; o cache ficou guardado");
+            }
             Ok((Store::open(&db)?, recovered))
         }
         opened => Ok((opened?, 0)),
     }
 }
 
-/// Copia para `dest` o conteúdo local de cada edição legível do banco `db`, pelo caminho (ou
-/// pelo ID, sem caminho legível); devolve quantas foram copiadas.
-fn keep_edits(db: &Path, content_dir: &Path, dest: &Path) -> Result<usize> {
+/// Copia para `dest` o conteúdo local de cada item de `items`, pelo caminho (ou pelo ID, sem
+/// caminho legível), numerando nomes repetidos; devolve quantos foram copiados.
+fn keep_edits(items: &[Salvaged], content_dir: &Path, dest: &Path) -> Result<usize> {
     let mut copied = 0;
-    for item in salvage::edited_items(db) {
+    for item in items {
+        // Um ID lido de banco estragado não pode levar para fora das pastas.
         let src = content_dir.join(&item.id);
-        if !src.is_file() {
+        if !salvage::usable(&item.id) || !src.is_file() {
             continue;
         }
-        let target = dest.join(item.path.unwrap_or_else(|| PathBuf::from(&item.id)));
-        if let Some(parent) = target.parent() {
-            create_private_dir(parent)?;
-        }
-        std::fs::copy(&src, &target)?;
+        let mut src = std::fs::File::open(src)?;
+        let target = dest.join(item.path.as_deref().unwrap_or(Path::new(&item.id)));
+        let parent = target.parent().unwrap_or(dest);
+        create_private_dir(parent)?;
+        let name = target.file_name().unwrap_or_default().to_string_lossy();
+        let (stem, ext) = split_ext(&name);
+        let (_, mut dst) = create_numbered(parent, stem, ext)?;
+        std::io::copy(&mut src, &mut dst)?;
         copied += 1;
     }
     Ok(copied)
@@ -80,6 +99,8 @@ fn unless_missing(done: std::io::Result<()>) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use gdl_common::config::load_preferences;
     use gdl_common::paths::Paths;
     use gdl_fake_drive::FakeDrive;
@@ -171,6 +192,107 @@ mod tests {
         assert_eq!(announced, 1);
         shutdown.cancel();
         run.await.unwrap();
+    }
+
+    /// A pasta do cache guardada ao lado de `content` (o cache fica nos dados da conta, por
+    /// padrão), quando o banco não deu para ler inteiro.
+    fn content_aside(paths: &Paths) -> Vec<PathBuf> {
+        subdirs(&paths.data_dir.join(ACCOUNT))
+            .into_iter()
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("content-recuperacao-")
+            })
+            .collect()
+    }
+
+    /// Uma conta indexada com `nota.txt` editada que não subiu; o motor fica fechado.
+    async fn unsent_note(paths: &Paths, fake: &FakeDrive) -> gdl_store::Item {
+        let engine = open(paths, fake);
+        engine.ensure_indexed().await.unwrap();
+        let note = engine
+            .create_file(&ItemId(fake.root_id()), "nota.txt")
+            .unwrap();
+        std::fs::write(engine.cache().local_path(&note.id), "não subiu ainda").unwrap();
+        engine
+            .store()
+            .set_local_state(&note.id, LocalState::Dirty)
+            .unwrap();
+        note
+    }
+
+    #[tokio::test]
+    async fn damaged_items_table_keeps_the_cache() {
+        let fake = FakeDrive::start().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let note = unsent_note(&paths, &fake).await;
+        salvage::damage_table(&paths.data_dir.join(ACCOUNT).join(DB_FILE), "items");
+
+        let engine = open(&paths, &fake);
+
+        let aside = content_aside(&paths);
+        assert_eq!(
+            aside.len(),
+            1,
+            "o cache não lido é guardado, não apagado: {aside:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(aside[0].join(&note.id.0)).unwrap(),
+            "não subiu ainda"
+        );
+        assert!(!engine.cache().local_path(&note.id).exists());
+    }
+
+    #[tokio::test]
+    async fn unreadable_file_keeps_the_cache() {
+        let fake = FakeDrive::start().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let note = unsent_note(&paths, &fake).await;
+        std::fs::write(paths.data_dir.join(ACCOUNT).join(DB_FILE), vec![0x5A; 4096]).unwrap();
+
+        open(&paths, &fake);
+
+        let aside = content_aside(&paths);
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert!(aside[0].join(&note.id.0).is_file());
+    }
+
+    #[test]
+    fn same_path_edits_are_both_kept_and_bad_ids_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (content, dest) = (tmp.path().join("content"), tmp.path().join("dest"));
+        std::fs::create_dir_all(&content).unwrap();
+        for (id, text) in [("a", "primeiro"), ("b", "segundo")] {
+            std::fs::write(content.join(id), text).unwrap();
+        }
+        std::fs::write(tmp.path().join("fora"), "não é do cache").unwrap();
+        let item = |id: &str, path: Option<&str>| salvage::Salvaged {
+            id: id.into(),
+            path: path.map(PathBuf::from),
+        };
+        let items = [
+            item("a", Some("pasta/nota.txt")),
+            item("b", Some("pasta/nota.txt")),
+            item("../fora", None),
+        ];
+
+        assert_eq!(keep_edits(&items, &content, &dest).unwrap(), 2);
+
+        let mut kept: Vec<String> = std::fs::read_dir(dest.join("pasta"))
+            .unwrap()
+            .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+            .collect();
+        kept.sort();
+        assert_eq!(kept, ["primeiro", "segundo"]);
+        assert_eq!(
+            std::fs::read_dir(&dest).unwrap().count(),
+            1,
+            "nada sai da pasta"
+        );
     }
 
     #[tokio::test]

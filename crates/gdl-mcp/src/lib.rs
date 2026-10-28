@@ -23,6 +23,9 @@ pub struct Tool {
     pub description: &'static str,
     /// JSON Schema dos argumentos.
     pub input_schema: Value,
+    /// Dicas para o cliente (`readOnlyHint`, `destructiveHint`…), que decide se pergunta ao
+    /// usuário antes de chamar.
+    pub annotations: Value,
 }
 
 /// Por que uma chamada de ferramenta não deu resultado.
@@ -102,7 +105,14 @@ pub async fn handle(tools: &impl Tools, line: &str) -> Option<Value> {
             let list: Vec<Value> = tools
                 .list()
                 .into_iter()
-                .map(|t| json!({ "name": t.name, "description": t.description, "inputSchema": t.input_schema }))
+                .map(|t| {
+                    json!({
+                        "name": t.name,
+                        "description": t.description,
+                        "inputSchema": t.input_schema,
+                        "annotations": t.annotations,
+                    })
+                })
                 .collect();
             success(id, json!({ "tools": list }))
         }
@@ -158,6 +168,7 @@ mod tests {
                 name: "echo",
                 description: "Returns its arguments.",
                 input_schema: json!({ "type": "object" }),
+                annotations: json!({ "readOnlyHint": true }),
             }]
         }
 
@@ -198,6 +209,10 @@ mod tests {
         assert_eq!(list["id"], "a");
         assert_eq!(list["result"]["tools"][0]["name"], "echo");
         assert_eq!(list["result"]["tools"][0]["inputSchema"]["type"], "object");
+        assert_eq!(
+            list["result"]["tools"][0]["annotations"]["readOnlyHint"],
+            true
+        );
 
         let ping = ask(r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#)
             .await

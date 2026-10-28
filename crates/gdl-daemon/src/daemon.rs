@@ -2133,6 +2133,11 @@ impl Daemon {
             })
             .await?;
         self.refuse_pending(&engine)?;
+        // A conta só sobe de novo falando com o Drive; sem ele, o banco apagado levaria junto as
+        // pastas do computador.
+        if engine.about().await.is_err() {
+            return Err(ServiceError::Failed(self.i18n.tr("reset-local-offline", &[])));
+        }
         let pairs = engine.store().pairs().map_err(failed)?;
         let (engine, _) = self
             .remove_account(&email)

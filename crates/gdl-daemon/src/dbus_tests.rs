@@ -3284,6 +3284,32 @@ async fn reset_local_data_reindexes() {
     assert_eq!(h.fake.find_live("a.txt").len(), 1, "sem cópia repetida");
 }
 
+/// Sem conexão, a conta não subiria de novo depois de apagar o banco (e as pastas do computador
+/// se perderiam): a redefinição é recusada antes de apagar qualquer coisa.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reset_local_data_refuses_offline() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = h.home.join("Documentos");
+    std::fs::create_dir_all(&docs).unwrap();
+    let path = docs.to_str().unwrap();
+    h.proxy.add_local_folder("", path, false).await.unwrap();
+    let before = h.daemon.engine().await.unwrap();
+    h.fake.inject(gdl_fake_drive::Fault::Offline);
+
+    let err = h.proxy.reset_local_data("").await.unwrap_err();
+
+    h.fake.clear_faults();
+    assert_eq!(err.short_name(), "Failed", "{err:?}");
+    let after = h.daemon.engine().await.unwrap();
+    assert!(std::sync::Arc::ptr_eq(&before, &after), "nada foi apagado");
+    let listed = h.proxy.local_folders().await.unwrap();
+    assert_eq!(
+        listed.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        [path]
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reset_preferences_keeps_policies() {
     let h = Harness::with_policy("BandwidthRxKBPS = 500\n").await;

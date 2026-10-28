@@ -28,6 +28,27 @@ fn text(path: &Path) -> String {
     path.display().to_string()
 }
 
+/// Os clientes MCP perguntam ao usuário pelas anotações: só as ferramentas de leitura dizem que
+/// não mudam nada, e a que move pastas diz que é destrutiva.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tools_declare_what_they_change() {
+    let h = Harness::new().await;
+    let tools = DriveTools::new(h.proxy.clone(), h.home.clone()).list();
+    let hints = |name: &str| {
+        let tool = tools.iter().find(|t| t.name == name).unwrap();
+        tool.annotations.clone()
+    };
+    for name in ["get_sync_status", "get_drive_url", "list_tracked_folders"] {
+        assert_eq!(hints(name)["readOnlyHint"], true, "{name}");
+    }
+    let add = hints("add_folder_to_sync");
+    assert_eq!(
+        (add["readOnlyHint"].clone(), add["destructiveHint"].clone()),
+        (json!(false), json!(true))
+    );
+    assert_eq!(hints("open_acl_dialog")["readOnlyHint"], false);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn status_of_a_synced_path() {
     let h = Harness::new().await;

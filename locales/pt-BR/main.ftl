@@ -117,6 +117,7 @@ notify-suspicious-allow = Permitir sincronização
 login-rejected = A conta { $email } não é permitida neste computador.
 shared-drives-pending = Algum dos drives que você desligou tem arquivos que ainda não foram enviados. Espere os envios terminarem (ou mantenha o drive ligado) e salve de novo.
 logout-pending = Há { $count } itens que ainda não estão no Drive (envios pendentes ou cópias no Lost and Found). Escolha terminar os envios, mover os arquivos para uma pasta ou descartá-los; o Lost and Found nunca é apagado.
+reset-local-offline = Sem conexão com o Google Drive. Os dados locais só podem ser redefinidos com o computador conectado.
 not-logged-in = Nenhuma conta conectada.
 uninstall-signed-in = Desconecte a conta antes de apagar os dados deste computador: a saída da conta decide o que fazer com os envios pendentes.
 path-not-in-drive = { $path } não está no Meu Drive nem num Drive compartilhado.

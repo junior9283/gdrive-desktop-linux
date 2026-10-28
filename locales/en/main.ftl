@@ -117,6 +117,7 @@ notify-suspicious-allow = Allow syncing
 login-rejected = The account { $email } isn't allowed on this computer.
 shared-drives-pending = A drive you turned off has files that have not been uploaded yet. Wait for the uploads to finish (or keep the drive on) and save again.
 logout-pending = There are { $count } items not yet in Drive (pending uploads or copies in Lost and Found). Choose to finish the uploads, move the files to a folder, or discard them; Lost and Found is never deleted.
+reset-local-offline = No connection to Google Drive. Local data can only be reset while the computer is online.
 not-logged-in = No account is connected.
 uninstall-signed-in = Disconnect the account before deleting the data on this computer: signing out decides what happens to pending uploads.
 path-not-in-drive = { $path } isn't in My Drive or in a shared drive.

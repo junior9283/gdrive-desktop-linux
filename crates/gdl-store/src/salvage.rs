@@ -37,27 +37,55 @@ pub(crate) fn corrupt_or_sqlite(e: rusqlite::Error) -> StoreError {
     }
 }
 
-/// Os itens com edição local (sujos, subindo ou em conflito) que dá para ler de `path`, só
-/// lendo; a leitura para no primeiro erro, com o que já tinha.
-pub fn edited_items(path: &Path) -> Vec<Salvaged> {
+/// O que deu para ler de um banco quebrado.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Salvage {
+    /// Os itens com edição local (sujos, subindo ou em conflito) lidos.
+    pub items: Vec<Salvaged>,
+    /// A lista foi lida inteira; sem isso, pode haver edições que não estão em `items`.
+    pub complete: bool,
+}
+
+/// As edições locais que dá para ler de `path`, só lendo; a leitura para no primeiro erro, com o
+/// que já tinha.
+pub fn edited_items(path: &Path) -> Salvage {
     let Ok(conn) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
-        return vec![];
+        return Salvage::default();
     };
-    edited_ids(&conn)
-        .unwrap_or_default()
+    let (ids, complete) = edited_ids(&conn);
+    let items = ids
         .into_iter()
         .map(|id| Salvaged {
             path: path_of(&conn, &id),
             id,
         })
-        .collect()
+        .collect();
+    Salvage { items, complete }
 }
 
-fn edited_ids(conn: &Connection) -> rusqlite::Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT id FROM items WHERE local_state IN (?1, ?2, ?3)")?;
-    let rows = stmt.query_map(params_from_iter(EDITED), |r| r.get(0))?;
-    // `map_while`: depois de um erro de página, o passo seguinte pode repetir o erro.
-    Ok(rows.map_while(rusqlite::Result::ok).collect())
+/// Os IDs lidos e se a leitura chegou ao fim.
+fn edited_ids(conn: &Connection) -> (Vec<String>, bool) {
+    let mut ids = vec![];
+    let Ok(mut stmt) = conn.prepare("SELECT id FROM items WHERE local_state IN (?1, ?2, ?3)")
+    else {
+        return (ids, false);
+    };
+    let Ok(rows) = stmt.query_map(params_from_iter(EDITED), |r| r.get(0)) else {
+        return (ids, false);
+    };
+    // Para no primeiro erro: depois de um erro de página, o passo seguinte pode repeti-lo.
+    for row in rows {
+        match row {
+            Ok(id) => ids.push(id),
+            Err(_) => return (ids, false),
+        }
+    }
+    (ids, true)
+}
+
+/// `name` serve de componente de caminho (nem vazio, nem `.`/`..`, sem `/` nem NUL).
+pub fn usable(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\0'])
 }
 
 /// Sobe pelos pais de `id` juntando os nomes locais, sem a raiz (inode 1); `None` se algum
@@ -78,8 +106,7 @@ fn path_of(conn: &Connection, id: &str) -> Option<PathBuf> {
         .ok()?
         .collect::<rusqlite::Result<_>>()
         .ok()?;
-    let usable = |n: &String| !n.is_empty() && n != "." && n != ".." && !n.contains(['/', '\0']);
-    (!names.is_empty() && names.iter().all(usable)).then(|| names.iter().collect())
+    (!names.is_empty() && names.iter().all(|n| usable(n))).then(|| names.iter().collect())
 }
 
 /// Estraga a primeira página da tabela `table` de `db` (fechado), sem mexer nas outras: o

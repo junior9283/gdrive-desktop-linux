@@ -86,6 +86,12 @@ async fn main() -> Result<(), Error> {
             name: "Computador e2e".into(),
         },
         folder_timing: Default::default(),
+        // O e2e não pergunta nada ao GitHub: o servidor falso responde, e só depois de uma hora.
+        updates: gdl_daemon::updates::UpdateCheck {
+            url: fake.releases_url(),
+            first: std::time::Duration::from_secs(3600),
+            every: std::time::Duration::from_secs(3600),
+        },
     })?;
     let conn = zbus::connection::Builder::session()?
         .serve_at(OBJECT_PATH, Service::new(daemon.clone()))?

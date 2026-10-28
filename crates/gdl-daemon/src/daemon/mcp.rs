@@ -113,11 +113,13 @@ fn inside(base: &Path, dir: &str) -> Option<PathBuf> {
 
 /// Copia `local` para `target`, confere e troca `local` por um link; desfaz ao falhar.
 fn swap(local: &Path, target: &Path, info: guard::FolderInfo, trash: &Trash) -> io::Result<()> {
+    // Criar antes de tudo: se outra chamada já criou o destino, esta falha sem desfazer nada.
+    std::fs::create_dir(target)?;
     // A cópia (inteira ou pela metade) sai do Drive: vai para a lixeira dele.
     let undo = || {
         let _ = std::fs::remove_dir_all(target);
     };
-    let trashed = copy_tree(local, target)
+    let trashed = copy_contents(local, target)
         .and_then(|()| match guard::measure(target) {
             copy if copy == info => Ok(()),
             copy => Err(io::Error::other(format!(
@@ -135,16 +137,16 @@ fn swap(local: &Path, target: &Path, info: guard::FolderInfo, trash: &Trash) -> 
     })
 }
 
-/// Copia as pastas e os arquivos comuns de `from` para `to` (que não pode existir); links e
-/// arquivos especiais ficam de fora, como nas pastas do computador.
-fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
-    std::fs::create_dir(to)?;
+/// Copia as pastas e os arquivos comuns de `from` para a pasta `to`; links e arquivos especiais
+/// ficam de fora, como nas pastas do computador.
+fn copy_contents(from: &Path, to: &Path) -> io::Result<()> {
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let kind = entry.file_type()?;
         let dest = to.join(entry.file_name());
         if kind.is_dir() {
-            copy_tree(&entry.path(), &dest)?;
+            std::fs::create_dir(&dest)?;
+            copy_contents(&entry.path(), &dest)?;
         } else if kind.is_file() {
             std::fs::copy(entry.path(), &dest)?;
         }
@@ -166,5 +168,29 @@ mod tests {
         );
         assert_eq!(inside(base, "../fora"), None);
         assert_eq!(inside(base, "a/./b"), Some(base.join("a/b")));
+    }
+
+    /// Outra chamada criou o destino entre a conferência e a cópia: esta falha sem apagar o que
+    /// não criou.
+    #[test]
+    fn swap_leaves_a_target_it_did_not_create() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (local, target) = (
+            tmp.path().join("Projetos"),
+            tmp.path().join("drive/Projetos"),
+        );
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("a.txt"), "local").unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("b.txt"), "da outra chamada").unwrap();
+        let trash = Trash::new(tmp.path().join("Trash"));
+
+        assert!(swap(&local, &target, guard::measure(&local), &trash).is_err());
+
+        assert_eq!(
+            std::fs::read_to_string(target.join("b.txt")).unwrap(),
+            "da outra chamada"
+        );
+        assert!(local.join("a.txt").is_file());
     }
 }

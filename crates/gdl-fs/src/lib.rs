@@ -6,7 +6,7 @@ mod layout;
 mod trash;
 mod write;
 
-pub use fs::{DriveFs, OpenFiles, THUMB_WAIT, mount};
+pub use fs::{DriveFs, OpenFiles, THUMB_WAIT, detach, mount};
 pub use layout::{Layout, item_state};
 
 #[cfg(test)]

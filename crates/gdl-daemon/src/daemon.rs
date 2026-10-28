@@ -136,7 +136,7 @@ struct Account {
     folders: Arc<folders::Runners>,
     /// Os arquivos abertos na montagem, que continua atendendo-os depois de desmontada.
     open_files: gdl_fs::OpenFiles,
-    _session: fuser::BackgroundSession,
+    session: fuser::BackgroundSession,
     _stop: DropGuard,
 }
 
@@ -586,9 +586,9 @@ impl Daemon {
 
     /// Para todas as contas e as reabre com as preferências de agora, sem reiniciar o serviço;
     /// uma reabertura espera a outra terminar, e um login espera a reabertura. Antes de reabrir,
-    /// espera fechar o que ficou aberto nas montagens desfeitas e as tarefas dos motores antigos
-    /// terminarem (com limite: uma que não termina vai para o log).
-    async fn restart_accounts(self: &Arc<Self>) {
+    /// espera as sessões FUSE desfeitas terminarem (fecha o que ficou aberto nelas) e as tarefas
+    /// dos motores antigos (com limite: uma que não termina vai para o log).
+    pub(crate) async fn restart_accounts(self: &Arc<Self>) {
         let _reopening = self.reopening.lock().await;
         self.resuming.store(true, Ordering::Relaxed);
         let old: Vec<_> = self
@@ -596,20 +596,23 @@ impl Daemon {
             .lock()
             .await
             .iter()
-            .map(|a| (a.open_files.clone(), Arc::downgrade(&a.engine)))
+            .map(|a| Arc::downgrade(&a.engine))
             .collect();
-        self.stop_all_accounts().await;
+        let sessions = self.stop_all_accounts().await;
         // Sem limite de propósito: reabrir com um arquivo aberto na montagem antiga perderia o
         // que for gravado nele (quem chama já recusa quando há arquivo aberto; aqui só sobra
-        // um aberto no meio-tempo, e o editor fechá-lo libera a espera).
-        if old.iter().any(|(files, _)| files.count() > 0) {
-            tracing::info!("esperando fechar os arquivos abertos nas montagens antigas");
-        }
-        while old.iter().any(|(files, _)| files.count() > 0) {
+        // um aberto no meio-tempo, e o editor fechá-lo libera a espera). Olha de tempos em
+        // tempos em vez de esperar numa thread: assim o encerramento do serviço não fica preso.
+        while sessions.iter().any(|session| !session.is_finished()) {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        for session in sessions {
+            if !matches!(session.join(), Ok(Ok(()))) {
+                tracing::warn!("uma montagem antiga terminou com erro");
+            }
+        }
         let deadline = tokio::time::Instant::now() + ENGINE_STOP_LIMIT;
-        while old.iter().any(|(_, engine)| engine.strong_count() > 0) {
+        while old.iter().any(|engine| engine.strong_count() > 0) {
             if tokio::time::Instant::now() > deadline {
                 tracing::warn!("um motor antigo não terminou; reabrindo assim mesmo");
                 break;
@@ -1393,7 +1396,7 @@ impl Daemon {
             _stop: shutdown.clone().drop_guard(),
             shutdown,
             open_files,
-            _session: session,
+            session,
         };
         Ok((account, moved))
     }
@@ -1532,9 +1535,9 @@ impl Daemon {
 
     /// Desmonta e para todas as contas, sem mexer na lista guardada (o serviço vai voltar a
     /// elas); quem sai de uma conta é `sign_out`, que atualiza a lista.
-    async fn stop_all_accounts(&self) {
+    async fn stop_all_accounts(&self) -> Vec<FuseThread> {
         let accounts = std::mem::take(&mut *self.accounts.lock().await);
-        unmount(accounts).await;
+        unmount(accounts).await
     }
 
     /// Tira a conta `email` da lista e a desmonta, sem mexer nas outras nem em `accounts`.
@@ -2456,9 +2459,20 @@ impl Daemon {
     }
 }
 
-/// Desmonta e para as contas; desmontar espera as threads do FUSE terminarem.
-async fn unmount(accounts: Vec<Account>) {
-    let _ = tokio::task::spawn_blocking(move || drop(accounts)).await;
+/// A thread de uma sessão FUSE desmontada: termina quando fecha o último arquivo aberto nela.
+type FuseThread = std::thread::JoinHandle<std::io::Result<()>>;
+
+/// Desmonta e depois para as contas; devolve as threads das montagens desfeitas.
+async fn unmount(accounts: Vec<Account>) -> Vec<FuseThread> {
+    let detach = move || {
+        accounts
+            .into_iter()
+            .map(|account| gdl_fs::detach(account.session))
+            .collect()
+    };
+    tokio::task::spawn_blocking(detach)
+        .await
+        .unwrap_or_default()
 }
 
 /// A pasta de uma conta que não é a primeira: `<preferida> (<e-mail>)`.

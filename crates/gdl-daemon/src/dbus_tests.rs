@@ -1067,6 +1067,43 @@ async fn cache_change_waits_for_open_files() {
     drop(open);
 }
 
+/// A reabertura das contas (o cache mudou de lugar) espera a montagem antiga largar o arquivo
+/// que ficou aberto nela: o que o editor grava até fechar ainda chega ao Drive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restart_waits_for_the_old_session() {
+    use std::io::Write;
+    let h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "aberto.txt", b"antes".to_vec());
+    h.logged_in().await;
+    let path = h.drive().join("aberto.txt");
+    let mut open =
+        blocking(move || std::fs::OpenOptions::new().append(true).open(path).unwrap()).await;
+
+    let daemon = h.daemon.clone();
+    let restart = tokio::spawn(async move { daemon.restart_accounts().await });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(
+        !restart.is_finished(),
+        "a reabertura espera o arquivo fechar"
+    );
+
+    blocking(move || {
+        open.write_all(b" depois").unwrap();
+        drop(open);
+    })
+    .await;
+    restart.await.unwrap();
+    assert!(h.daemon.engine().await.is_some(), "a conta voltou");
+    wait_until("a gravação no Drive", || {
+        h.fake
+            .find_live("aberto.txt")
+            .first()
+            .is_some_and(|id| h.fake.content(id) == b"antes depois")
+    })
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn metered_connection_pauses_and_resumes() {
     let h = Harness::new().await;

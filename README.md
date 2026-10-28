@@ -4,7 +4,7 @@
 
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.8.0-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.11.0-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-pr%C3%A9via-orange)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
@@ -39,8 +39,8 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 | **Off-line** | ✅ "Disponível off-line" em arquivos e pastas; as alterações feitas sem internet sobem quando a conexão volta. |
 | **Sincronização** | ✅ Envio e recebimento automáticos, fila que sobrevive a reinícios, conflitos guardados no Lost and Found, lixeira, limites de banda e pausa. |
 | **Documentos Google** | ✅ Docs, Planilhas e Apresentações aparecem na pasta e abrem no navegador com duplo clique. |
-| **Bandeja e janela** | ✅ Ícone na bandeja, janela principal, atividade com progresso, pesquisa rápida, erros, arquivos off-line, preferências, notificações e menu da conta com foto e uso do espaço. |
-| **Primeiro uso** | ✅ Guia do Client ID dentro do app, com botões que abrem cada página do Google Cloud. |
+| **Bandeja e janela** | ✅ Ícone na bandeja, janela principal, atividade com progresso, pesquisa rápida, erros (avisando quando são de outra conta), arquivos off-line, Preferências com as abas e a engrenagem como no original, notificações e menu da conta com foto e uso do espaço. |
+| **Primeiro uso** | ✅ Guia do Client ID dentro do app, com botões que abrem cada página do Google Cloud, Resumo do que foi escolhido e tour da janela principal. |
 | **Miniaturas** | ✅ As imagens aparecem com miniatura no Dolphin e em outros gerenciadores, usando as miniaturas do próprio Google, sem baixar os arquivos. |
 | **Menu do botão direito** | ✅ Abrir no navegador, copiar link (com o aviso de quem pode abrir), adicionar atalho ao Drive, sincronizar uma pasta do computador, off-line / só on-line, novo Documento, Planilha ou Apresentação, atualizar e lixeira, no Dolphin, Nautilus, Nemo, Caja, Thunar e COSMIC Files. |
 | **Compartilhar e versões** | ✅ Pelo menu do botão direito: janela Compartilhar (pessoas, papéis, acesso geral e link), Gerenciar versões (baixar, restaurar, manter para sempre) e arquivos do Office abertos no Docs, Planilhas ou Apresentações. |
@@ -48,9 +48,9 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 | **Ícones de status** | ✅ Na nuvem, off-line, sincronizando e em conflito, no Dolphin, também nas pastas do computador sincronizadas. A pasta do Drive fica fora do indexador do KDE (Baloo), que baixaria tudo para ler. |
 | **Backup e espelho** | ✅ Pastas do computador sincronizadas com "Computadores" no Drive, o Meu Drive em modo Espelho (cópia completa numa pasta comum, com a troca de volta para o Stream) e backup de pendrives e cartões de memória quando são conectados. |
 | **Contas** | ✅ Até 4 contas Google ao mesmo tempo, cada uma com a própria pasta, trocadas pelo menu da conta. |
-| **Drives compartilhados** | ✅ Na pasta de cada conta, com a janela "Gerenciar drives compartilhados" para escolher quais aparecem e criar um novo. |
-| **Proteção e recuperação** | ✅ Arquivos regravados com cara de cifrados por um vírus pausam os envios e pedem confirmação; dados locais danificados são refeitos a partir do Drive, com as edições pendentes guardadas no Lost and Found. |
-| **Avisos** | ✅ Sem permissão, conta bloqueada, armazenamento quase cheio, disco cheio, envios parados há dias, itens recuperados, nova versão do app e os demais, cada tipo podendo ser desligado nas preferências de notificação. |
+| **Drives compartilhados** | ✅ Na pasta de cada conta e numa visão própria da janela principal, com a janela "Gerenciar drives compartilhados" para escolher quais aparecem e criar um novo. |
+| **Proteção e recuperação** | ✅ Arquivos regravados com cara de cifrados por um vírus pausam os envios e pedem confirmação; dados locais danificados são refeitos a partir do Drive, com as edições pendentes guardadas no Lost and Found, que pode ser levado inteiro para uma pasta escolhida. |
+| **Avisos** | ✅ Sem permissão, conta bloqueada, armazenamento quase cheio, disco cheio, envios parados há dias, itens recuperados, limites do Drive, login bloqueado pela organização, itens movidos para onde outras pessoas veem, nova versão do app e os demais, cada tipo podendo ser desligado nas preferências de notificação. |
 | **Diagnóstico e feedback** | ✅ Registro detalhado, pacote de informações de diagnóstico sem tokens nem e-mails, Enviar feedback (issue já preenchida) e relatório de falhas, enviado só por você. |
 | **Assistentes de IA** | ✅ Servidor MCP: estado e link de um caminho, pastas acompanhadas, janela Compartilhar com o e-mail já digitado e adicionar pastas à sincronização. |
 
@@ -73,6 +73,10 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 | ![Lista de Drives compartilhados com uma chave para cada um](docs/imagens/drives-compartilhados.png) | ![Escolha da pasta do atalho: o Meu Drive e os Drives compartilhados](docs/imagens/adicionar-atalho.png) |
 | **Meu computador** | **Espelhar o Meu Drive** |
 | ![Pastas do computador e dispositivos USB nas preferências](docs/imagens/meu-computador.png) | ![Escolha da pasta do Espelho, com o tamanho a baixar e o espaço livre](docs/imagens/espelhar.png) |
+| **Drives compartilhados** | **Configurações (engrenagem)** |
+| ![Visão Drives compartilhados da janela principal, com abrir na pasta ou na web](docs/imagens/visao-drives.png) | ![Configurações atrás da engrenagem das Preferências](docs/imagens/configuracoes.png) |
+| **Resumo do primeiro uso** | **Tour da janela principal** |
+| ![Resumo com a conta, o modo do Meu Drive e as pastas escolhidas](docs/imagens/resumo.png) | ![Balão do tour sobre o estado da sincronização](docs/imagens/tour.png) |
 | **Enviar feedback** | |
 | ![Enviar feedback: o tipo, a descrição e o pacote de diagnóstico opcional](docs/imagens/feedback.png) | |
 
@@ -262,8 +266,8 @@ Cada etapa sai funcionando antes da próxima.
 | 0.7 | Dolphin completo: ícones de status, janelas de compartilhar e de versões |
 | 0.8 | Várias contas e Drives compartilhados |
 | 0.9 | Backup de pastas, pastas conectadas, modo espelho e dispositivos |
-| 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes, ransomware e recuperação do banco ← **estamos aqui** |
-| 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria |
+| 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes, ransomware e recuperação do banco |
+| 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria ← **estamos aqui** |
 | 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) |
 
 ## Versionamento

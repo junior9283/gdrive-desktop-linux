@@ -1275,7 +1275,20 @@ async fn screenshots_for_the_readme() {
     home.wait_text(".activity-table tbody", "enviado-pelo-teste.txt")
         .await;
     save(&home, "atividade").await;
+    home.click("[data-view='drives']").await;
+    home.wait_text(".drives", "Equipe").await;
+    save(&home, "visao-drives").await;
     drop(home);
+
+    let (summary, _) = open_onboarding_summary().await;
+    save(&summary, "resumo").await;
+    drop(summary);
+
+    let gear = Session::open("preferences").await;
+    gear.click(".settings-gear").await;
+    gear.wait_text(".tab-content", "Iniciar").await;
+    save(&gear, "configuracoes").await;
+    drop(gear);
 
     let search = Session::open("search").await;
     search.fill(".search-field", "r").await;
@@ -1300,6 +1313,7 @@ async fn screenshots_for_the_readme() {
             "Equipe",
             "drives-compartilhados",
         ),
+        ("home:tour", ".tour", "O estado da sincronização", "tour"),
     ] {
         let session = Session::open(screen).await;
         session.wait_text(css, wanted).await;
@@ -1443,10 +1457,8 @@ async fn gear_changes_are_saved_with_the_tabs() {
     assert_eq!(metered.value, "true");
 }
 
-// O passo Resumo do primeiro uso mostra a conta e a pasta do Drive escolhidas.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "precisa do scripts/e2e.sh"]
-async fn onboarding_summary_lists_the_choices() {
+/// Abre o primeiro uso já no passo Resumo (com a conta de teste) e devolve o texto dele.
+async fn open_onboarding_summary() -> (Session, String) {
     let account = service().await.status("").await.unwrap().account;
     let session = Session::open("onboarding").await;
     session.wait_text(".step-title", "").await;
@@ -1454,6 +1466,14 @@ async fn onboarding_summary_lists_the_choices() {
         session.click(".continue").await;
     }
     let summary = session.wait_text(".summary", &account).await;
+    (session, summary)
+}
+
+// O passo Resumo do primeiro uso mostra a conta e a pasta do Drive escolhidas.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn onboarding_summary_lists_the_choices() {
+    let (session, summary) = open_onboarding_summary().await;
     session.click(".back").await;
     session.find(".suggested-folders").await;
 

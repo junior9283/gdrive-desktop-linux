@@ -6,6 +6,8 @@
 2. Clique no ícone do Google Drive na bandeja e escolha **Fazer login**.
 3. Depois do login, a pasta `~/Google Drive` aparece com o `Meu Drive` dentro, e também no painel
    "Locais" do Dolphin. Os Drives compartilhados ficam em `~/Google Drive/Drives compartilhados`.
+4. O primeiro uso termina com um **Resumo** do que foi escolhido e oferece o **tour** da janela
+   principal, que também fica nas Preferências.
 
 ## Várias contas
 
@@ -18,9 +20,11 @@ opções** há **Desconectar todas as contas**.
 ## Drives compartilhados
 
 Em **Preferências › Google Drive › Gerenciar drives compartilhados** (ou pelo botão direito na
-pasta "Drives compartilhados"), escolha quais drives aparecem na pasta e crie um novo. Mover um
+pasta "Drives compartilhados", ou na visão **Drives compartilhados** da janela principal), escolha quais drives aparecem na pasta e crie um novo. Mover um
 arquivo para um Drive compartilhado muda quem pode vê-lo; mover uma pasta do Meu Drive para um
-drive não é possível pelo app e precisa ser feito no Drive pela web.
+drive não é possível pelo app e precisa ser feito no Drive pela web. O app avisa quando um item
+vai para um Drive compartilhado ou para a pasta de outra pessoa, e quando um Drive compartilhado
+tem muita atividade.
 
 ## Espelho do Meu Drive
 
@@ -54,10 +58,14 @@ ignorá-lo ou desligar a pergunta.
 - **Início:** o que precisa de atenção, os arquivos off-line, os compartilhados com você e o
   estado da sincronização.
 - **Atividade de sincronização:** o que subiu, desceu ou foi para a lixeira, com o menu de cada
-  linha (abrir, copiar link, cancelar um envio).
+  linha (abrir, copiar link, compartilhar, cancelar um envio). Com os envios pausados, a fila
+  aparece como "Pausado".
+- **Drives compartilhados:** abrir cada drive na pasta ou na web.
 - **Notificações:** o histórico dos avisos.
-- **Mais opções:** arquivos off-line, lista de erros, preferências, desconectar todas as contas e
-  sair.
+- **Mais opções:** arquivos off-line, lista de erros, preferências, Drives compartilhados,
+  desconectar todas as contas e sair.
+- **Preferências:** as abas **Meu computador** e **Google Drive**; as demais configurações ficam
+  atrás da engrenagem.
 
 ## Arquivos off-line
 
@@ -90,7 +98,9 @@ sincronização** retoma. Fotos, vídeos, `.zip` e outros formatos já comprimid
 Se os dados do app de uma conta se danificarem (queda de energia, disco com defeito), o app os
 guarda numa pasta `recuperacao` e lê a conta de novo do Drive. As edições que ainda não tinham
 subido vão para o Lost and Found, na pasta "Recuperados <data>"; o aviso "Itens recuperados" leva
-até elas. Nada é reenviado sozinho: mova de volta para a pasta do Drive o que quiser manter.
+até elas. Nada é reenviado sozinho: mova de volta para a pasta do Drive o que quiser manter. No
+aviso do Lost and Found, **Mover tudo para…** leva tudo para uma pasta escolhida, sem sobrescrever
+nada.
 
 ## Assistentes de IA (MCP)
 

@@ -7,6 +7,36 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [0.11.0] - 2026-10-28
+
+### Adicionado
+- Bandeja: Gerenciar drives compartilhados, Ativar/Desativar o registro detalhado, Redefinir as
+  preferências e Desconectar todas as contas (estes dois pedem confirmação na janela principal).
+  Mais opções ganha Gerenciar drives compartilhados.
+- Janela principal: cartão e visão "Drives compartilhados", com abrir na pasta ou na web e
+  "Gerenciar drives compartilhados".
+- Atividade: "Compartilhar" no menu de um item enviado; com os envios pausados, a fila aparece
+  como "Pausado".
+- Preferências com as abas "Meu computador" e "Google Drive" e as configurações atrás da
+  engrenagem, como no original.
+- Primeiro uso: passo de Resumo (conta, modo do Meu Drive, pasta e pastas escolhidas) e um tour da
+  janela principal, também nas Preferências.
+- Aviso do Lost and Found com "Mover tudo para…": leva as cópias guardadas para uma pasta
+  escolhida, sem sobrescrever nada.
+- Mensagens próprias para os limites do Drive: limite de download, pasta com níveis demais e Drive
+  compartilhado cheio.
+- Lista de erros: avisa quando os erros são de outra conta e troca para ela.
+- Login: mensagens para bloqueio pela organização e conta desativada; depois de um minuto, ajuda
+  para quando o login demora, com um link novo.
+- Avisos de Drive compartilhado: mover para a pasta de outra pessoa ou para um Drive compartilhado
+  (outras pessoas passam a ver) e Drive compartilhado com muita atividade (uma vez por dia).
+
+### Mudado
+- D-Bus: `MoveLostAndFound`; `AccountSummary` ganha a contagem de erros; categorias de erro
+  `download-limit`, `folder-too-deep` e `shared-drive-full`; `LoginFinished` com os motivos
+  `blocked-by-organization` e `account-disabled`.
+- O banco ganha a coluna `owned_by_me` (migração automática).
+
 ## [0.10.0] - 2026-10-27
 
 ### Adicionado
@@ -489,7 +519,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.10.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.7.0...v0.8.0

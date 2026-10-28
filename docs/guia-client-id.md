@@ -1,7 +1,7 @@
 # Guia: criar o seu Client ID do Google
 
-Nas versões 0.x, o gdrive-desktop-linux não vem com uma identidade própria no Google. Cada pessoa cria
-a sua, de graça, no Google Cloud. Leva uns 10 minutos e só precisa ser feito uma vez.
+O gdrive-desktop-linux não vem com uma identidade própria no Google. Cada pessoa cria a sua, de
+graça, no Google Cloud. Leva uns 10 minutos e só precisa ser feito uma vez.
 
 O primeiro uso do app traz este mesmo guia, com um botão que abre cada página do Google Cloud e
 botões para copiar os escopos e os endereços da tela de consentimento.

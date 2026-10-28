@@ -1,7 +1,7 @@
 # Matriz de paridade
 
 Situação de cada item do catálogo da [especificação](superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md)
-(seção 6) no código, conferida depois da versão 0.11.0 (28/10/2026). A 1.0 sai quando todos os itens estiverem
+(seção 6) no código, conferida de novo para a versão 1.0.0 (28/10/2026). A 1.0 sai quando todos os itens estiverem
 **FEITO** ou registrados em "Diferenças inevitáveis" no README como risco aceito.
 
 Legenda: **FEITO**, **PARCIAL** (existe, mas incompleto), **FALTA**.
@@ -37,15 +37,15 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
 | Login pelo navegador (xdg-open), loopback, PKCE | FEITO | `gdl-drive/src/oauth.rs` (`LoginFlow::start`, PKCE S256, 127.0.0.1); `gdl-common/src/browser.rs` (xdg-open) |
-| Tempo limite de 5 min | FEITO | `daemon.rs:56` `LOGIN_TIMEOUT = 300 s`; `LoginError::Timeout` |
-| Botão "Gerar link" | FEITO | `locales/pt-BR/ui.ftl:235` `onboarding-generate-link`; `oauth.rs:197` `auth_url` |
-| Página de resultado própria | FEITO | `oauth.rs:261` `result_page` (login-success/login-failure) |
+| Tempo limite de 5 min | FEITO | `daemon.rs` `LOGIN_TIMEOUT = 300 s`; `LoginError::Timeout` |
+| Botão "Gerar link" | FEITO | `locales/pt-BR/ui.ftl` `onboarding-generate-link`; `oauth.rs` `auth_url` |
+| Página de resultado própria | FEITO | `oauth.rs` `result_page` (login-success/login-failure) |
 | Até 4 contas simultâneas | FEITO | `daemon/accounts.rs` (`MAX_ACCOUNTS = 4`), uma montagem por conta (`<pasta> (<e-mail>)` a partir da segunda); testes `second_account_mounts_beside_the_first`, `fifth_account_is_refused` |
 | Adicionar, alternar, reautenticar, desconectar uma/todas | FEITO | `home/account.js` (lista de contas, trocar, "Adicionar outra conta", "Entrar de novo"), `more.js` "Desconectar todas as contas" (`LogoutAll`); testes `signing_in_again_resumes_the_queue`, `logout_of_one_keeps_the_other_mounted` |
-| Erros com mensagem própria | FEITO | Timeout, Denied, sem refresh token, "Sem conexão", conta já conectada, máximo atingido, outra conta no "entrar de novo", `DisableAddAccount`, organização que bloqueia o app (`admin_policy_enforced`, `org_internal`) e conta desativada (`onboarding-login-failed-*`); "O login está demorando?" depois de 60 s, com "Gerar link de novo" e os problemas comuns (`gdl-drive/src/oauth.rs`, `onboarding.js`) |
+| Erros com mensagem própria | FEITO | Timeout, Denied, sem refresh token, "Sem conexão", conta já conectada, máximo atingido, outra conta no "entrar de novo", `DisableAddAccount`, organização que bloqueia o app (`admin_policy_enforced`, `org_internal`) e conta desativada (`onboarding-login-failed-*`); todo erro chega à tela por um motivo estável (`LoginError::reason`, teste `login_errors_have_reasons`), nunca pelo texto do Rust; link para criar uma conta Google no passo de entrar; "O login está demorando?" depois de 60 s, com "Gerar link de novo" e os problemas comuns (`gdl-drive/src/oauth.rs`, `onboarding.js`) |
 | Refresh token no Secret Service | FEITO | `gdl-drive/src/token_store.rs` (chaveiro do sistema) |
 | Fluxo de desconexão (contagem, 3 escolhas, confirmação, aviso off-line, progresso) | FEITO | `ui/screens/home/disconnect.js` (finish/move/discard com checkbox de confirmação, `disconnect-offline-warning`, `disconnect-progress`); `daemon.rs:logout` |
-| Política `AllowedAccountsPattern` | FEITO | `daemon.rs:781` `allowed()`; teste em `dbus_tests.rs` |
+| Política `AllowedAccountsPattern` | FEITO | `daemon.rs` `allowed()`; teste em `dbus_tests.rs` |
 | Política `DisableAddAccount` | FEITO | `begin_login` recusa `add-account-disabled` com uma conta conectada; o menu esconde "Adicionar outra conta" (`can_add_account`); teste `disable_add_account_keeps_only_the_first` |
 
 ### 6.2 Pasta do Drive: Stream e Espelho
@@ -53,18 +53,18 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
 | Stream: montagem FUSE por conta | FEITO | `gdl-fs/src/fs.rs`, uma montagem por conta (`engine_at` acha a conta pelo caminho) |
-| Local padrão e `DefaultMountPoint`, aviso/alternativo se ocupado | FEITO | `daemon/mount.rs`, `daemon.rs:834` (`mount-moved`), teste `busy_mount_point_falls_back_to_numbered_folder`. O padrão por e-mail depende de multi-conta |
-| Conteúdo da montagem | FEITO | `gdl-fs/src/layout.rs`: Meu Drive (fora dela no Espelho), Drives compartilhados, Computadores, lixeira, Lost and Found, Uploads cancelados, `.shortcut-targets-by-id` |
+| Local padrão e `DefaultMountPoint`, aviso/alternativo se ocupado | FEITO | `gdl-daemon/src/mount.rs` (`choose`), `daemon.rs` (`mount-moved`), teste `busy_mount_point_falls_back_to_numbered_folder`; a pasta de cada conta muda em Preferências › Google Drive (`SetMountPoint`, teste `mount_point_per_account`) |
+| Conteúdo da montagem | FEITO | `gdl-fs/src/layout.rs`: Meu Drive (fora dela no Espelho), Drives compartilhados (só com algum Drive, teste `shared_drives_folder_only_when_there_are_drives`), Computadores, lixeira, Lost and Found, Uploads cancelados, `.shortcut-targets-by-id` |
 | Nomes pelo idioma / `DisableLocalizedVirtualFolders` | FEITO | Nomes via i18n (`Layout::new`); com a política, `daemon.rs` usa os nomes em inglês |
-| "Locais" do Dolphin (`ShowMountPointInSidebar`) | FEITO | `gdl-daemon/src/desktop.rs`, `daemon.rs:477` |
+| "Locais" do Dolphin (`ShowMountPointInSidebar`) | FEITO | `gdl-daemon/src/desktop.rs`, `daemon.rs` `apply_sidebar` |
 | Modo Espelho (pasta real, inotify + changes.list) | FEITO | `gdl-folders` (comparação em três vias, `watch.rs` com inotify e `ItemsChanged`), `daemon/mirror.rs`; documentos Google como ponteiros e atalhos como links |
 | Drives compartilhados sempre em Stream | FEITO | Os drives ficam na montagem (`Node::SharedDrives`); não há modo Espelho para eles |
 | Troca Espelho <-> Stream com salvaguardas | FEITO | `MirrorCheck` (tamanho, espaço livre, pendências), `SetStream` recusa com envios pendentes e manda a pasta antiga para a lixeira só se pedido; aba Google Drive |
 | Sem limite de 4 GB | FEITO | Sem limite no FUSE; upload retomável (`uploads.rs`) |
 | Documentos Google como ponteiros, abrir no navegador, copiar cria atalho + aviso | FEITO | `gdl-common/src/gdocs.rs`, `gdl-engine/src/gdocs.rs`, `gdl-cli open-pointer`, `notify-shortcut-*` |
-| Atalhos do Drive como symlinks para `.shortcut-targets-by-id` | FEITO | `fs.rs:224,386` (`FileType::Symlink`, `link_target`) |
+| Atalhos do Drive como symlinks para `.shortcut-targets-by-id` | FEITO | `gdl-fs/src/fs.rs` (`FileType::Symlink`, `link_target`) |
 | `/` como `∕` e duplicados com sufixo estável | FEITO | `gdl-common/src/names.rs` (`to_local`, `to_remote`, `dedupe`) |
-| Excluir manda para a lixeira do Drive | FEITO | `gdl-fs/src/trash.rs`, `fs.rs` (lookup_trashed); teste em `write_tests.rs` |
+| Excluir manda para a lixeira do Drive | FEITO | `gdl-fs/src/trash.rs`, `fs.rs` (`trash_item`); testes `unlink_moves_to_drive_trash_never_deletes` e, para voltar, `restore_from_drive_trash_moves_it_back` |
 
 ### 6.3 Arquivos sob demanda, cache e off-line
 
@@ -72,17 +72,17 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 |---|---|---|
 | Metadados de todo o Drive em SQLite por conta | FEITO | `gdl-store/src/lib.rs`, `schema.rs`, `gdl-engine/src/indexer.rs` |
 | Leitura em blocos, tabela de intervalos, readahead sequencial | FEITO | `gdl-engine/src/cache.rs` (blocos 1 MiB, janelas 8 a 64 MiB; testes `sequential_read_uses_growing_windows`, `random_seek_downloads_only_nearby_blocks`) |
-| "Disponível off-line" em arquivos/pastas, mantém atualizado, "Somente on-line", estado misto | FEITO | `gdl-engine/src/pins.rs`; `offline.js` (`offline-state-mixed`) |
+| "Disponível off-line" em arquivos/pastas, mantém atualizado, "Somente on-line", estado misto | FEITO | `gdl-engine/src/pins.rs` ("Somente on-line" libera o espaço na hora, sem tocar no que está aberto ou sem envio: `BlockCache::release`, teste `unpin_keeps_dirty_and_open_content`); `offline.js` (`offline-state-mixed`) |
 | Gravações no cache + fila persistente, uploads retomáveis | FEITO | `uploads.rs` (`recover_on_start`), `gdl-store`, `no_data_loss_tests.rs` |
-| Cache: `ContentCachePath` com migração e progresso | FEITO | `engine.rs:95`, `daemon.rs:751` (notificação `cache-moved` moving/moved) |
+| Cache: `ContentCachePath` com migração e progresso | FEITO | `engine.rs` (`open_moving`, `move_content` com porcentagem, teste `cache_move_reports_progress`), `daemon.rs` `open_engine` (aviso `cache-moved` com a porcentagem); sem reiniciar (teste `cache_moves_without_restart`) |
 | Cache: `ContentCacheMaxKbytes` sem contar fixados/pendentes | FEITO | `cache.rs` teste `eviction_respects_limit_and_skips_pinned_and_dirty` |
-| Cache: `MinFreeDiskSpaceKBytes` (500 MB), para de gravar e avisa | FEITO | `config.rs:122` (512000 KB), `cache.rs:473 check_disk`, `notify-disk-low` |
-| Cache: remoção por uso menos recente | FEITO | `cache.rs:547 evict_if_needed`, `store.touch_access` |
+| Cache: `MinFreeDiskSpaceKBytes` (500 MB), para de gravar e avisa | FEITO | `config.rs` (512000 KB), `cache.rs` `check_disk`, `notify-disk-low` |
+| Cache: remoção por uso menos recente | FEITO | `cache.rs` `evict_if_needed`, `store.touch_access` |
 | Tela de arquivos off-line / armazenamento | FEITO | `ui/screens/offline.js` (barra segmentada, breadcrumb, remover, Limpar cache, Limpar off-line, atalho às configurações). Uso "por conta" = conta única |
 | Sem internet: acessa cache/fixados, EIO claro, notificação "Sem conexão", edições na fila | FEITO | `cache.rs` teste `offline_with_missing_block_is_offline_error_but_cached_block_still_reads`; `notify-offline-*` |
 | Pausar e retomar (bandeja e janela) | FEITO | `engine.rs set_paused`, `tray-pause`/`action-pause` |
-| Pausar em conexão limitada (NetworkManager) | FEITO | `gdl-daemon/src/metered.rs`, `daemon.rs:416 watch_metered` |
-| Salvar com sync pausada pergunta se quer retomar | FEITO | `notify-paused-*` com ação "Retomar" (`main.ftl:34-36`) |
+| Pausar em conexão limitada (NetworkManager) | FEITO | `gdl-daemon/src/metered.rs`, `daemon.rs` `watch_metered` |
+| Salvar com sync pausada pergunta se quer retomar | FEITO | `notify-paused-*` com ação "Retomar", que retoma o app inteiro (`run_action`, teste `resume_from_notification_resumes_all_accounts`) |
 
 ### 6.4 Sincronização, conflitos e recuperação
 
@@ -91,13 +91,13 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 | Envio/recebimento automáticos, progresso por item | FEITO | `gdl-engine/src/activity.rs` (`ActivityState`: fila, pausado, enviando %, enviado, cancelando, cancelado, baixando, lixeira, restaurando); com a sincronização pausada, a fila aparece como "pausado" |
 | Cancelar upload, aviso "concluiu antes", pasta "uploads cancelados" | FEITO | `uploads.rs CancelOutcome` (Canceled/TooLate/InUse), `kept.rs` |
 | Detecção de conflito por revisão-base | FEITO | `schema.rs`, `changes.rs` (teste `remote_edit_over_dirty_item_marks_conflict`) |
-| Stream: nuvem no caminho original, edição em Lost and Found, notificação com "Ver arquivos" e "Mover tudo para…" | FEITO | `uploads.rs`, `notify.rs` (`OPEN_LOST_FOUND` e `MOVE_LOST_FOUND`); "Mover tudo para…" pede a pasta na janela e chama `MoveLostAndFound` (`gdl-daemon/src/daemon/lost_found.rs`), sem sobrescrever nada |
+| Stream: nuvem no caminho original, edição em Lost and Found, notificação com "Ver arquivos" e "Mover tudo para…" | FEITO | `uploads.rs`, `notify.rs` (`OPEN_LOST_FOUND` e `MOVE_LOST_FOUND`); "Mover tudo para…" pede a pasta na janela e chama `MoveLostAndFound` (`gdl-daemon/src/daemon/lost_found.rs`), sem sobrescrever nada, nem dentro da montagem ou das pastas do app (testes `move_lost_found_refuses_inside_the_mount`, `move_lost_found_refuses_mount_behind_a_link`, `move_lost_found_reports_a_partial_move`) |
 | Envio impossível (sem permissão etc.) vai para Lost and Found | FEITO | teste `permission_denied_goes_to_lost_and_found` |
 | Excluído na nuvem com edição pendente: não recria, Lost and Found | FEITO | teste `remote_delete_during_pending_edit_goes_to_lost_and_found_and_is_not_recreated` |
 | Espelho: duas versões lado a lado com sufixo de conflito | FEITO | `gdl-folders/src/decide.rs` (` (conflito AAAA-MM-DD HHhMM)`), teste `both_edited_keeps_both_versions_everywhere` |
-| Recuperar arquivos não sincronizados | FEITO | `uploads.rs:234 recover_on_start`; Lost and Found e pendentes copiáveis no logout `--move` |
+| Recuperar arquivos não sincronizados | FEITO | `uploads.rs` `recover_on_start`; Lost and Found e pendentes copiáveis no logout `--move` |
 | Recuperação automática após falha do banco local | FEITO | `gdl-store/src/salvage.rs` (`quick_check` na abertura), `gdl-engine/src/recovery.rs`; teste `corrupt_database_keeps_pending_content` |
-| Detecção de ransomware (entropia, pausa, aviso com 3 opções) | FEITO | `gdl-engine/src/ransomware.rs` (entropia > 7,6, 20 em 60 s, formatos comprimidos fora), pausa própria e aviso com as 3 opções; testes `twenty_encrypted_files_pause`, `compressed_formats_do_not_count` |
+| Detecção de ransomware (entropia, pausa, aviso com 3 opções) | FEITO | `gdl-engine/src/ransomware.rs` (entropia > 7,6, 20 em 60 s, formatos comprimidos fora), pausa própria e aviso com as 3 opções; renomear para extensão de cifrado (`.locked`…) conta no mesmo detector; testes `twenty_encrypted_files_pause`, `compressed_formats_do_not_count`, `mass_rename_to_encrypted_pauses` |
 | Limites do Drive em mensagens claras | FEITO | Cota cheia, limite diário de upload, limite de download, pasta além de 100 níveis, pasta ou drive compartilhado no limite de 500 mil itens e sem permissão têm categoria e texto (`gdl-engine/src/errors.rs`, `gdl-drive/src/client.rs`) |
 | Lista de erros: categorias, paginação, ações por item | FEITO | `ui/screens/errors.js` + `errors/model.js` (10 por página, Abrir pasta, Tentar de novo) |
 | Lista de erros: aviso de erros em outra conta + trocar de conta | FEITO | `AccountSummary.errors`; a lista de erros mostra "Há N erros em <e-mail>" para cada outra conta, com "Trocar de conta" (`errors.js`) |
@@ -127,10 +127,10 @@ Legenda: FEITO, PARCIAL, FALTA. Caminhos relativos a `crates/`. Resumo geral: at
 | Tela "Gerenciar drives compartilhados" (ligar/desligar, salvar/cancelar) | FEITO | `ui/screens/shared-drives.js` (Preferências e menu na pasta "Drives compartilhados"); desligar com envio pendente é recusado; e2e `shared_drives_screen_saves_and_creates` |
 | Aviso de drive com alta atividade | FEITO | Mais de 1 000 mudanças numa consulta avisam `busy-shared-drive`, no máximo uma vez por dia por drive (`gdl-engine/src/changes.rs`); família que pode ser desligada |
 | Criar Drive compartilhado (tela e menu de contexto, nome único) | FEITO | `CreateSharedDrive` (nome único com " (2)"), "Novo Drive compartilhado" na tela e no menu da pasta "Drives compartilhados"; teste `new_drive_names_are_unique` |
-| "Compartilhados comigo": lista com data | FEITO | `ipc SharedItem.shared_ms`, `ui/screens/home/shared.js`, `search.rs:74` |
+| "Compartilhados comigo": lista com data | FEITO | `ipc SharedItem.shared_ms`, `ui/screens/home/shared.js`, `gdl-engine/src/search.rs` |
 | "Adicionar atalho" no local escolhido | FEITO | Tela `shortcut.js` (Meu Drive e drives que aceitam itens, descendo pelas pastas), aberta pelo menu e por "Compartilhados comigo"; teste `shortcut_goes_to_the_chosen_folder`, e2e `shortcut_screen_picks_a_folder` |
-| "Abrir na web" | FEITO | `shared.js:23` (`open_item` target `web`) |
-| Avisos ao mover entre Drives compartilhados/pastas compartilhadas (com "não mostrar de novo") | FEITO | `moved-to-shared-drive` e `moved-to-shared-folder` (pasta do Meu Drive que é de outra pessoa, pelo `ownedByMe`), as duas famílias desligáveis (`gdl-engine/src/ops.rs`) |
+| "Abrir na web" | FEITO | `home/shared.js` (`open_item` target `web`) |
+| Avisos ao mover entre Drives compartilhados/pastas compartilhadas (com "não mostrar de novo") | FEITO | `moved-to-shared-drive` e `moved-to-shared-folder` (pasta do Meu Drive que é de outra pessoa, pelo `ownedByMe`), e `moved-out-of-shared-drive` (saiu de um Drive compartilhado), todas desligáveis (`gdl-engine/src/ops.rs` `move_item`, testes `move_under_someone_elses_folder_warns`, `move_between_same_owner_folders_is_quiet`, `move_out_of_shared_drive_warns`). Variante: o aviso vem depois de mover, porque a montagem não tem como perguntar antes |
 | Mover pasta do Meu Drive para Drive compartilhado: não suportado e orienta web | FEITO | `Engine::move_item` (`FolderCrossDrive` → `EPERM`) e aviso `folder-move-unsupported`; teste `moving_a_folder_into_a_shared_drive_is_refused` |
 
 
@@ -146,7 +146,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Campo "Pesquisar no Google Drive" | FEITO | `home.js` `layout` (input `.search`, Enter abre tela `search`) |
 | Menu da conta: foto + uso de armazenamento | FEITO | `home/account.js` `accountMenu` (avatar, nome, e-mail, uso/total) |
 | Adicionar conta / trocar de conta | FEITO | `home/account.js` (lista com foto, e-mail e estado; trocar; adicionar); e2e `account_menu_switches_and_adds_accounts` |
-| Desconectar | FEITO | `home/disconnect.js` (com escolhas p/ pendências) |
+| Desconectar | FEITO | `home/disconnect.js` (com escolhas para as pendências; "Terminar de sincronizar" só diz que desconectou depois do último envio, teste e2e `disconnect_after_sync_reports_when_done`) |
 | Gerenciar armazenamento, Privacidade, Termos | FEITO | `account.js` (`openLink('storage'/'privacy'/'terms')`) |
 | Início: cartão Precisa de atenção | FEITO | `home/start.js` `attention` |
 | Início: Arquivos off-line, Compartilhados comigo, Status de sincronização, Gemini | FEITO | `home/start.js` `render` |
@@ -182,7 +182,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Tooltip "Conectado com N contas" | FEITO | `tray/model.rs` (`status.accounts.len() > 1`) |
 | Clique esquerdo abre a janela principal | FEITO | `model.rs` `click: Action::Open("home")` (sem login: onboarding) |
 | Menu direito: Abrir pasta, Abrir no navegador, Pesquisar, Pausar/Retomar | FEITO | `model.rs` `items` |
-| Menu direito: Arquivos off-line, Lista de erros (contagem), Preferências, Sobre, Sair | FEITO | `model.rs` `items` |
+| Menu direito: Arquivos off-line, Lista de erros (contagem), Preferências, Sobre, Sair | FEITO | `model.rs` `items`; com algo pendente, Sair passa pela confirmação da janela (`home:quit`, teste `quit_goes_through_the_window`) |
 | Menu direito: Enviar feedback, diagnóstico | FEITO | `model.rs` `tray-feedback`, `Action::GenerateDiagnostics` |
 | Menu direito: Gerenciar drives compartilhados, registro detalhado, Redefinir preferências, Desconectar todas | FEITO | `gdl-tray/src/model.rs`: os quatro itens; os que pedem confirmação abrem a janela (`home:reset-preferences`, `home:disconnect-all`) |
 
@@ -208,11 +208,11 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | Aba "Meu computador" (seção 6.5: pastas do computador) | FEITO | `computerTab`: pastas e dispositivos |
 | Aba Drive: modo Stream | FEITO | `driveTab` |
 | Aba Drive: modo Espelho | FEITO | `driveTab` `toMirror`/`toStream` (a troca vale ao confirmar o diálogo) |
-| Aba Drive: local da pasta do Meu Drive e abrir pasta | FEITO | `driveTab` (`form.mount`, `api.openMount`); mudar local em `DefaultMountPoint` (`settingsTab`) |
+| Aba Drive: local da pasta do Meu Drive e abrir pasta | FEITO | `driveTab` (`form.mount`, `api.openMount`, "Alterar" para a conta mostrada com `changeMount` → `SetMountPoint`); o padrão da primeira conta continua em `DefaultMountPoint` (`settingsPage`) |
 | Rodapé: Alterações pendentes, Cancelar, Salvar | FEITO | `draw`/`updateFooter`/`save`/`cancel` |
 | Aviso "exige reiniciar" + "Reiniciar agora" | FEITO | `ui.banner`, `api.call('restart')` |
 | Local do streaming + mostrar em Locais do Dolphin | FEITO | `DefaultMountPoint`, `ShowMountPointInSidebar` |
-| Pasta de cache (Alterar/Redefinir) + limite (1 até máximo) | FEITO | `folder('ContentCachePath')`, `cacheLimit` (máx. = cache + livre) |
+| Pasta de cache (Alterar/Redefinir) + limite (1 até máximo) | FEITO | `folder('ContentCachePath')` (vale ao salvar, sem reiniciar), `cacheLimit` (máx. = cache + livre) |
 | Ver armazenamento do cache | FEITO | botão `pref-cache-storage` -> tela `offline` |
 | Iniciar ao fazer login | FEITO | `AutoStartOnLogin` |
 | Proxy automático / direto / manual | FEITO | `proxy()`, `proxyMode`/`proxyPatch` |
@@ -239,7 +239,7 @@ Frontend: `crates/gdl-ui/ui/` (JS puro). Bandeja: `crates/gdl-tray/src/{model,ma
 | 6. Resumo | FEITO | Passo Resumo do primeiro uso (`summaryRows`): conta, modo, pasta e pastas escolhidas |
 | 7. Como tornar disponível off-line | FEITO | passo `offline` |
 | Botões Pular, Voltar, Continuar | FEITO | `footer`, `actions` em `onboarding/model.js` |
-| Política `DisableOnboardingDialog` | FEITO | `gdl-common/src/config.rs:119`; `onboarding.js` `loginOnly`; `stepsFor` |
+| Política `DisableOnboardingDialog` | FEITO | `gdl-common/src/config.rs`; `onboarding.js` `loginOnly`; `stepsFor` |
 
 
 Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
@@ -248,20 +248,20 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Ícones de status (KOverlayIconPlugin) | FEITO | `integrations/dolphin/gdriveoverlay.cpp` (emblemas `gdl-emblem-{cloud,offline,syncing,conflict,error}` pelo xattr `user.gdl.state`, atualizados pelo sinal D-Bus `StatesChanged`). Outros gerenciadores seguem sem ícones. |
-| Abrir com Drive web | FEITO | `Action::OpenWeb`, `crates/gdl-daemon/src/menu.rs:43`. |
+| Ícones de status (KOverlayIconPlugin) | FEITO | `integrations/dolphin/gdriveoverlay.cpp` (emblemas `gdl-emblem-{cloud,offline,syncing,conflict,error}` pelo xattr `user.gdl.state`, atualizados pelo sinal D-Bus `StatesChanged`; `error` quando o item está na lista de erros, testes `failed_upload_shows_error_state` e `error_state_clears_after_retry`). Outros gerenciadores seguem sem ícones. |
+| Abrir com Drive web | FEITO | `Action::OpenWeb` (`gdl-daemon/src/menu.rs`). |
 | Abrir com Docs / Planilhas / Apresentações | FEITO | `Action::OpenDocs/OpenSheets/OpenSlides` para arquivos do Office (`menu.rs`, `gdl-engine/src/gdocs.rs` `OfficeEditor`). |
 | Compartilhar | FEITO | `Action::Share` abre a janela `share:<id>` (`ui/screens/share.js`). |
 | Copiar link (com aviso público/domínio/restrito) | FEITO | `Action::CopyLink` + `notify_link_copied` (`daemon/sharing.rs`, textos `notify-link-*`). |
-| Acesso off-line / Somente on-line (marca mista) | FEITO | `menu.rs:44-46,103-111` (`Offline::Mixed`), plugin Dolphin `gdrivemenu.cpp:93`. |
+| Acesso off-line / Somente on-line (marca mista) | FEITO | `menu.rs` (`Offline::Mixed`, rótulo `menu-offline-mixed`), plugin Dolphin `gdrivemenu.cpp` (caixa marcada só com tudo off-line) e extensão GTK (`MARKS`, teste `test_partly_offline_is_marked_with_a_dash`). |
 | Adicionar atalho ao Google Drive | FEITO | `menu.rs` `Action::AddShortcut` (itens que não são atalhos) abre a tela `shortcut` |
-| Gerenciar versões | FEITO | `Action::Versions` abre a janela `versions:<id>` (só arquivos com versões). |
-| Ver lixeira | FEITO | `Action::Trash` (`menu.rs:51,153`). |
+| Gerenciar versões | FEITO | `Action::Versions` abre a janela `versions:<id>` (só arquivos com versões), que diz quando não há versões ou a lista não carregou, com "Tentar de novo" (`versions.js` `versionsNote`, `drawFailed`). |
+| Ver lixeira | FEITO | `Action::Trash` (`menu.rs`). |
 | Atualizar pasta | FEITO | `Action::Refresh`. |
 | Enviar ou sincronizar esta pasta (fora da montagem) | FEITO | `Action::SyncFolder` abre o configurador; emblemas nas pastas sincronizadas (`FolderStates`). |
 | Adicionar ao espelho da conta 1–4 | FALTA | Serve ao Espelho de pastas escolhidas, que não existe no Linux; registrado em "Diferenças inevitáveis". |
 | Gerenciar / Criar drive compartilhado | FEITO | `menu.rs` `NewSharedDrive`/`ManageSharedDrives` na pasta "Drives compartilhados" |
-| Criar novo documento, planilha, apresentação | FEITO | `Action::NewDocument/NewSpreadsheet/NewPresentation`, `menu.rs:47-49,67-77`. |
+| Criar novo documento, planilha, apresentação | FEITO | `Action::NewDocument/NewSpreadsheet/NewPresentation` (`menu.rs`). |
 | Perguntar ao Gemini (web) | FALTA | Nenhuma ação no menu (só cartão Gemini na janela principal). |
 | Miniaturas sem baixar (thumbnailLink) | FEITO | `crates/gdl-engine/src/thumbs/{seeder,freedesktop}.rs` (semeia o cache freedesktop com o `thumbnailLink`; não é um thumbnailer KIO próprio). |
 | Excluir montagens do Baloo no primeiro uso | FEITO | `desktop.rs` `set_baloo_exclusion` (a cada montagem, numa sessão KDE; desfeito ao desinstalar). |
@@ -276,21 +276,21 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Janela "Compartilhar": copiar link | FEITO | Pelo menu (`CopyLink`) e pelo botão da janela. |
 | Abrir a janela pela MCP (corrigir permissão de um e-mail) | FEITO | `open_acl_dialog` → D-Bus `OpenShare` abre a janela Compartilhar com o e-mail digitado; teste `acl_dialog_only_opens`. |
 | Gerenciar versões (baixar, restaurar, manter para sempre; mensagens) | FEITO | `ui/screens/versions.js`, D-Bus `version_download/restore/keep`, `gdl-engine/src/sharing.rs` (restaurar vira edição local que sobe como versão nova). |
-| Lixeira: pasta somente leitura + Restaurar | FEITO (variante) | Lixeira KIO `.Trash-<uid>` na montagem (`gdl-fs/src/trash.rs`); restaurar = `engine.untrash` (`gdl-fs/src/write.rs:417-421`); 30 dias fica por conta do Drive. Não é uma pasta virtual própria com ação "Restaurar" do app. |
-| Criar Docs/Planilhas/Apresentações na pasta e abrir no navegador | FEITO | `menu.rs:67-77` + `MenuAction`; `menu_action` em `gdl-cli/src/menu_action.rs`. |
+| Lixeira: pasta somente leitura + Restaurar | FEITO (variante) | Lixeira KIO `.Trash-<uid>` na montagem (`gdl-fs/src/trash.rs`); restaurar = `engine.untrash` (`gdl-fs/src/write.rs` `restore`); a `.Lixeira do Drive` da montagem fica só leitura e restaura arrastando o item para uma pasta do Drive (testes `restore_from_drive_trash_moves_it_back`, `restore_from_drive_trash_numbers_clashes`, `drive_trash_stays_read_only`); 30 dias fica por conta do Drive. Não há botão "Restaurar" próprio: restaurar é arrastar, como no gerenciador de arquivos. |
+| Criar Docs/Planilhas/Apresentações na pasta e abrir no navegador | FEITO | `menu.rs` (`NEW_FILES`) + `MenuAction`; `menu_action` em `gdl-cli/src/menu_action.rs`. |
 
 ### 6.14 Notificações
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
-| Notificações do sistema com ações + lista na janela | FEITO | `gdl-daemon/src/notify.rs` (`Notifier`, `org.freedesktop.Notifications`), D-Bus `Notifications/InvokeNotificationAction` (`dbus.rs:62-74`), tela em `ui/screens/home/notifications.js`. |
+| Notificações do sistema com ações + lista na janela | FEITO | `gdl-daemon/src/notify.rs` (`Notifier`, `org.freedesktop.Notifications`), D-Bus `Notifications/InvokeNotificationAction` (`dbus.rs`), tela em `ui/screens/home/notifications.js`. |
 | Erros fatais e de conta | FEITO | `Offline`, `UploadFailed`, login expirado (`NeedsSignIn`, com "Entrar") e conta bloqueada pela organização (`AccountDisabled`, 403 `domainPolicy`). |
 | Armazenamento e cota | FEITO | `QuotaFull`, `DiskLow`, `QuotaAlmostFull` (90 % e 95 %, `gdl-engine/src/health.rs`) e `LocalDiskFull` (`ENOSPC` ao gravar). |
 | Sincronização e pastas | FEITO | `LostAndFound`, `SavedWhilePaused`, `UploadCanceled`, `CopiedAsShortcut`, pastas conectadas, exclusão em massa, `ItemsRecovered`, `UploadsStuck` (3 dias) e itens movidos para a lixeira (`notify::items_trashed`). |
 | Permissões e movimentações | FEITO | `NoPermission` (criar, mover, renomear, excluir; a montagem responde `EACCES`), Drive compartilhado com muita atividade e mover para pasta de outra pessoa |
-| Dispositivos (backup?, seguro remover, backup concluído/erro) | FEITO | `notify::device_ask`/`device_done` (um aviso por dispositivo). |
+| Dispositivos (backup?, seguro remover, backup concluído/erro) | FEITO | `notify::device_ask`/`device_done` (um aviso por dispositivo, com "Sempre fazer backup" e "Ignorar" no próprio aviso, teste `device_notice_offers_always_and_ignore`). |
 | "Nova versão do app" (releases do GitHub) | FEITO | `gdl-daemon/src/updates.rs`, `daemon/releases.rs` (1 min depois da partida e a cada 24 h; cada versão avisa uma vez). |
-| "Não mostrar de novo" + tela Preferências de notificação | FEITO | `dbus.rs:78-88`, `ui/screens/notification-settings.js`. |
+| "Não mostrar de novo" + tela Preferências de notificação | FEITO | `dbus.rs` (`NotificationSettings`), `ui/screens/notification-settings.js`; o botão "Não mostrar de novo" vai no próprio aviso e na lista da janela (`notify.rs` `MUTE`, teste `mute_action_turns_the_kind_off`). |
 
 ### 6.15 Diagnóstico, feedback e Sobre
 
@@ -300,41 +300,41 @@ Legenda: FEITO / PARCIAL / FALTA. Caminhos relativos à raiz do repositório.
 | Gerar informações de diagnóstico (pacote de logs) | FEITO | `gdl-daemon/src/diagnostics.rs` (`scrub`, `.tar.gz` 0600), D-Bus `GenerateDiagnostics`, Mais opções e bandeja. |
 | Enviar feedback (issue pré-preenchida no GitHub + anexo) | FEITO | `ui/screens/feedback.js` (Problema ou Sugestão, diagnóstico opcional, issue pré-preenchida). |
 | Relatório de falhas local, enviado com consentimento | FEITO | `gdl-common/src/crash.rs` (20 mais novos, 0700/0600); com `AutomaticErrorReporting`, aviso "Enviar relatório" que abre a issue filtrada. |
-| Sobre (versão, GPL-3.0, terceiros, não oficial, links) | FEITO | `ui/screens/about.js`, `gdl-ui/src/third_party.rs`, `locales/pt-BR/ui.ftl:9-12`. |
-| Redefinir preferências com confirmação | FEITO | `dbus.rs:196` (`reset_preferences`), `ui.ftl:142-150`. |
-| Redefinir dados locais com confirmação | FEITO | D-Bus `ResetLocalData` (recusa com envios pendentes), Mais opções. |
+| Sobre (versão, GPL-3.0, terceiros, não oficial, links) | FEITO | `ui/screens/about.js`, `gdl-ui/src/third_party.rs`, `about-*` em `locales/*/ui.ftl`. |
+| Redefinir preferências com confirmação | FEITO | `dbus.rs` (`reset_preferences`), `reset-prefs-*` em `ui.ftl`. |
+| Redefinir dados locais com confirmação | FEITO | D-Bus `ResetLocalData` (recusa com envios pendentes), Mais opções; o diálogo nomeia a conta mostrada (teste e2e `reset_local_data_uses_the_shown_account`). |
 
 ### 6.16 Políticas e configuração
 
 | Item | Situação | Evidência / o que falta |
 |---|---|---|
 | TOML, três camadas e precedência (policies > preferences > defaults) | FEITO | `crates/gdl-common/src/config.rs` (macro `preferences!`, `Layer::over`, `ConfigError::Managed`). |
-| AllowedAccountsPattern | FEITO | `daemon.rs:778-784`. |
-| AutoStartOnLogin | FEITO | `daemon.rs:458-460`, `desktop.rs`. |
-| BandwidthRxKBPS | FEITO | `daemon.rs:1577`, `gdl-drive/src/throttle.rs`. |
-| BandwidthTxKBPS | FEITO | `daemon.rs:1578`. |
-| ContentCachePath | FEITO | `gdl-engine/src/engine.rs:92-108`. |
-| ContentCacheMaxKbytes | FEITO | `engine.rs:168`. |
-| DefaultMountPoint | FEITO | `daemon.rs:1032-1035`, `mount.rs`. |
-| DefaultWebBrowser | FEITO | `gdl-common/src/browser.rs`, `config.rs:204`. |
+| AllowedAccountsPattern | FEITO | `daemon.rs` `allowed()`. |
+| AutoStartOnLogin | FEITO | `daemon.rs` `apply_autostart`, `desktop.rs`. |
+| BandwidthRxKBPS | FEITO | `daemon.rs` `apply_bandwidth`, `gdl-drive/src/throttle.rs`. |
+| BandwidthTxKBPS | FEITO | `daemon.rs` `apply_bandwidth`. |
+| ContentCachePath | FEITO | `gdl-engine/src/engine.rs` (`cache_dir_of`, `open_moving`); vale sem reiniciar (`reopen_if_cache_moved`, teste `cache_moves_without_restart`). |
+| ContentCacheMaxKbytes | FEITO | `engine.rs` (`BlockCache::new`), `cache.rs` `evict_if_needed`. |
+| DefaultMountPoint | FEITO | `daemon.rs` `preferred_mount_point`, `mount.rs`; vale para a primeira conta (as outras ficam ao lado, ou na pasta escolhida para elas). |
+| DefaultWebBrowser | FEITO | `gdl-common/src/browser.rs`, `config.rs` `default_web_browser`. |
 | DisableAddAccount | FEITO | `begin_login` e `can_add_account` |
 | DisableExternalMediaSync | FEITO | `daemon/devices.rs` (`devices_refused`). |
 | DisableLocalizedVirtualFolders | FEITO | `Layout` com os nomes em inglês (`gdl-fs/src/layout.rs`). |
 | DisableMirroredMyDrive | FEITO | `daemon/mirror.rs` (`mirror_refused`). |
 | DisableMirroredFolders | FEITO | `daemon/folders.rs` (`folders_refused`). |
-| DisableOnboardingDialog | FEITO | `gdl-tray/src/main.rs:148`. |
-| MinFreeDiskSpaceKBytes | FEITO | `engine.rs:169`. |
+| DisableOnboardingDialog | FEITO | `gdl-tray/src/main.rs` (`refresh`), `onboarding.js` `stepsFor`. |
+| MinFreeDiskSpaceKBytes | FEITO | `engine.rs` (`BlockCache::new`), `cache.rs` `check_disk`. |
 | OpenOfficeFilesInDocs | FEITO | Esconde os itens "Abrir no Docs/Planilhas/Apresentações" do menu quando desligada. |
-| DirectConnection | FEITO | `daemon.rs:262-264`. |
+| DirectConnection | FEITO | `daemon.rs` `network_of`. |
 | TrustedRootCertsFile | FEITO | `gdl-drive/src/lib.rs` (`set_http`, raízes do PEM somadas às do sistema). |
 | TrustSystemRootCerts | FEITO | Desligada, valem só as raízes do `TrustedRootCertsFile`. |
 | DisableCRLCheck | FEITO | Aceita e sem efeito: o TLS do app não consulta listas de revogação (registrado no CHANGELOG). |
 | DisableSSLValidation | FEITO | Só vale vindo do `policies.toml` (`config.rs`, teste `ssl_validation_only_from_policies`); aviso no log a cada partida. |
-| SearchHotKey | FEITO | `gdl-tray/src/main.rs:193`, `hotkey.rs`. |
-| PauseSyncingOnMeteredConnection | FEITO | `daemon.rs:398,454`, `metered.rs`. |
+| SearchHotKey | FEITO | `gdl-tray/src/main.rs` (`search_trigger`), `hotkey.rs`. |
+| PauseSyncingOnMeteredConnection | FEITO | `daemon.rs` `apply_metered`, `metered.rs`. |
 | AutomaticErrorReporting | FEITO | Ligada, oferece o relatório depois de uma falha (ver 6.15). |
 | UITheme | FEITO | `ui/app.js`, `ui/screens/preferences.js`. |
-| ShowMountPointInSidebar | FEITO | `daemon.rs:477-483`, `desktop.rs`. |
+| ShowMountPointInSidebar | FEITO | `daemon.rs` `apply_sidebar`, `desktop.rs`. |
 | PromptToBackupDevices | FEITO | `daemon/devices.rs` (`devices_found`). |
 
 ### 6.17 Servidor MCP

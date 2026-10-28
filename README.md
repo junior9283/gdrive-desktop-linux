@@ -5,7 +5,7 @@
 # gdrive-desktop-linux
 
 ![Versão](https://img.shields.io/badge/vers%C3%A3o-0.11.0-blue)
-![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-pr%C3%A9via-orange)
+![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-est%C3%A1vel-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
 
@@ -105,8 +105,18 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 
 - **Atualizações vindas da nuvem:** chegam em segundos, mas não na hora. O app oficial usa um canal
   de notificação interno do Google que não está disponível para terceiros.
-- **Login:** nunca usa a identidade do app oficial. Nas versões 0.x, cada usuário cria o próprio
-  Client ID no Google Cloud, seguindo o [guia passo a passo](docs/guia-client-id.md).
+- **Login:** nunca usa a identidade do app oficial, e o projeto não tem um app OAuth próprio: cada
+  usuário cria o próprio Client ID no Google Cloud, com o guia dentro do app ou o
+  [guia passo a passo](docs/guia-client-id.md).
+- **Avisos ao mover para pastas compartilhadas:** o app oficial pergunta antes de mover; uma pasta
+  montada não tem como perguntar no meio de um `mv`, então o aviso vem logo depois, dizendo quem
+  passou a ver o item (e pode ser desligado).
+- **Versões de um arquivo:** em vez de uma pasta oculta com as versões, o menu do botão direito
+  abre a janela "Gerenciar versões" (baixar, restaurar, manter para sempre).
+- **Lixeira:** a `.Lixeira do Drive` da pasta é só leitura; para restaurar, arraste o item para uma
+  pasta do Drive (ou use a lixeira do gerenciador de arquivos, que manda para a do Drive).
+- **Relatório de falhas:** nunca sai sozinho. Com o relatório automático ligado, o app oferece o
+  envio depois de uma falha e você confere antes.
 - **Backups de pastas:** a API pública não cria a seção "Computadores" do Drive. Os backups ficam em
   `Meu Drive/Computadores/<nome-do-computador>/`, e a pasta do app mostra "Computadores" como no
   original.
@@ -125,8 +135,6 @@ A especificação completa está em
 [`docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md`](docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md).
 
 ## Como instalar
-
-É uma prévia para testes: funciona no dia a dia, mas mantenha cópia do que for importante.
 
 **1. Instalar.** Baixe da [página de releases](https://github.com/junior9283/gdrive-desktop-linux/releases/latest)
 o arquivo da sua distribuição (64 bits, x86_64):
@@ -277,8 +285,7 @@ Toda mudança é registrada no [CHANGELOG](CHANGELOG.md), e cada versão publica
 ## Como contribuir
 
 Contribuições são bem-vindas, seja em código, testes, tradução, documentação ou relatos de uso.
-A melhor forma de ajudar agora é testar a prévia e abrir uma *issue* com o que deu errado ou com
-sugestões. Antes de mandar código, veja como rodar os testes em [docs/testes](docs/testes/README.md).
+A melhor forma de ajudar é usar o app e abrir uma *issue* com o que deu errado ou com sugestões. Antes de mandar código, veja como rodar os testes em [docs/testes](docs/testes/README.md).
 
 Uma regra vale para todos: **nenhum código, texto, ícone, fonte ou outro arquivo do Google** pode
 entrar no repositório. O comportamento do app oficial pode ser estudado e descrito, mas a

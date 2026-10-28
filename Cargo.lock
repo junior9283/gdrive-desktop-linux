@@ -1793,6 +1793,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gdl-mcp"
+version = "0.9.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "gdl-store"
 version = "0.9.0"
 dependencies = [

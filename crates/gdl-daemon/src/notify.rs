@@ -17,6 +17,8 @@ pub const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 
 /// Ação da notificação do Lost and Found que abre a pasta.
 pub const OPEN_LOST_FOUND: &str = "open-lost-found";
+/// Ação do aviso de Lost and Found que pede a pasta para onde mover tudo (na janela).
+pub const MOVE_LOST_FOUND: &str = "move-lost-found";
 /// Ação do aviso de envio cancelado que abre a pasta de cancelados.
 pub const OPEN_CANCELED: &str = "open-canceled";
 /// Ação do aviso de gravação com a sincronização pausada que a retoma.
@@ -279,6 +281,7 @@ pub fn extra_actions(note: &Notification, i18n: &I18n) -> Vec<(&'static str, Str
             ),
             (RESUME, i18n.tr("notify-suspicious-allow", &[])),
         ],
+        "lost-and-found" => vec![(MOVE_LOST_FOUND, i18n.tr("notify-lost-found-move", &[]))],
         _ => vec![],
     }
 }
@@ -650,6 +653,24 @@ mod tests {
         }
         let other = for_event(&EngineEvent::QuotaFull, &I18n::new("en")).unwrap();
         assert!(extra_actions(&other, &I18n::new("en")).is_empty());
+    }
+
+    #[test]
+    fn lost_found_note_offers_move_all() {
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            let event = EngineEvent::LostAndFound {
+                path: "/x/nota.txt".into(),
+                reason: LostReason::RemoteChanged,
+            };
+            let note = for_event(&event, &i18n).unwrap();
+            let extra = extra_actions(&note, &i18n);
+            assert_eq!(
+                extra.iter().map(|(k, _)| *k).collect::<Vec<_>>(),
+                [MOVE_LOST_FOUND]
+            );
+            assert!(!extra[0].1.starts_with("notify-"), "{lang}: {extra:?}");
+        }
     }
 
     #[test]

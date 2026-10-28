@@ -244,6 +244,7 @@ impl Bridge {
             "set_preferences" => j!(s.set_preferences(&a.pairs("values")?)),
             "reset_preferences" => j!(s.reset_preferences()),
             "reset_local_data" => j!(s.reset_local_data(a.account())),
+            "move_lost_and_found" => j!(s.move_lost_and_found(a.account(), a.str("dest")?)),
             "verbose_logging" => j!(s.verbose_logging()),
             "set_verbose_logging" => j!(s.set_verbose_logging(a.bool("on")?)),
             "generate_diagnostics" => j!(s.generate_diagnostics()),

@@ -51,8 +51,9 @@ use crate::menu::{self, Action};
 use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
-    self, Notification, Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE,
-    OPTIONAL_KINDS, RECOGNIZE_ACTIVITY, RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT, SIGN_IN,
+    self, MOVE_LOST_FOUND, Notification, Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND,
+    OPEN_RELEASE, OPTIONAL_KINDS, RECOGNIZE_ACTIVITY, RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT,
+    SIGN_IN,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -136,6 +137,7 @@ struct Account {
 mod devices;
 mod diagnostics;
 mod folders;
+mod lost_found;
 mod mcp;
 mod mirror;
 mod releases;
@@ -854,6 +856,12 @@ impl Daemon {
             SIGN_IN => {
                 self.account_engine(account).await?;
                 self.open_screen(format!("onboarding:resume:{account}"));
+                return Ok(());
+            }
+            // A pasta de destino é escolhida na janela, que chama `MoveLostAndFound`.
+            MOVE_LOST_FOUND => {
+                self.account_engine(account).await?;
+                self.open_screen(format!("home:move-lost-found:{account}"));
                 return Ok(());
             }
             OPEN_FOLDERS => {

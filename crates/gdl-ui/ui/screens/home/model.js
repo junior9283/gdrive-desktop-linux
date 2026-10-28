@@ -121,3 +121,9 @@ export function sortRows(rows, key, dir) {
   const sign = dir === 'desc' ? -1 : 1;
   return [...rows].sort((a, b) => sign * compare(a, b));
 }
+
+// `home:<ação>[:<resto>]`: separa a ação do que ela recebe (a conta, por exemplo).
+export function splitArg(arg) {
+  const at = arg.indexOf(':');
+  return at < 0 ? [arg, ''] : [arg.slice(0, at), arg.slice(at + 1)];
+}

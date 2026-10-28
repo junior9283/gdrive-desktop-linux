@@ -239,6 +239,11 @@ disconnect-discard = { $count ->
    *[other] Excluir os { $count } arquivos não sincronizados
 }
 disconnect-discard-sure = Entendo que esses arquivos serão perdidos
+lost-found-pick-folder = Escolha a pasta para onde mover o Lost and Found
+lost-found-moved = { $count ->
+    [one] 1 item movido.
+   *[other] { $count } itens movidos.
+}
 disconnect-pick-folder = Escolha a pasta para os arquivos não sincronizados
 disconnect-progress = Desconectando…
 disconnect-done = Conta desconectada

@@ -276,6 +276,47 @@ async fn repeated_warnings_replace_the_previous_one() {
     assert_eq!(notes[1].replaces_id, notes[0].id, "{notes:?}");
 }
 
+/// "Mover tudo para…": as cópias do Lost and Found vão para a pasta escolhida; dentro da montagem
+/// ou do próprio Lost and Found, não.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_lost_found_refuses_inside_the_mount() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let engine = h.daemon.engine().await.unwrap();
+    let src = h.home.join("edicao.txt");
+    std::fs::write(&src, b"guardada").unwrap();
+    engine.lost_and_found().preserve(&src, "edicao.txt").unwrap();
+    let kept = engine.lost_and_found().dir().to_path_buf();
+    drop(engine);
+    let dest = h.home.join("escolhida");
+    std::fs::create_dir(&dest).unwrap();
+
+    let inside = h.drive().join("Meu Drive");
+    let refused = h
+        .proxy
+        .move_lost_and_found("", inside.to_str().unwrap())
+        .await
+        .unwrap_err();
+    let into_itself = h
+        .proxy
+        .move_lost_and_found("", kept.to_str().unwrap())
+        .await
+        .unwrap_err();
+    let relative = h.proxy.move_lost_and_found("", "escolhida").await.unwrap_err();
+    let moved = h
+        .proxy
+        .move_lost_and_found("", dest.to_str().unwrap())
+        .await
+        .unwrap();
+
+    for err in [refused, into_itself, relative] {
+        assert!(matches!(err, ServiceError::InvalidArgs(_)), "{err}");
+    }
+    assert_eq!(moved, 1);
+    assert_eq!(std::fs::read_dir(&kept).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(&dest).unwrap().count(), 1);
+}
+
 /// Bug: sair da conta sem envios na fila apagava o Lost and Found, a única cópia das edições
 /// preservadas por conflito.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

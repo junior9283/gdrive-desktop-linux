@@ -6,8 +6,7 @@ use gdl_drive::token_store::ClientCredentials;
 use gdl_ipc::{
     AccountInfo, ActivityItem, DeviceItem, FolderCheck, FolderItem, LocalFolder, MenuEntry,
     MirrorCheck, NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary, PathStatus,
-    Pref,
-    SearchResult, ServiceError, SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem,
+    Pref, SearchResult, ServiceError, SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem,
     Versions,
 };
 use zbus::object_server::SignalEmitter;
@@ -452,6 +451,12 @@ impl Service {
     /// Liga (por um dia) ou desliga o registro detalhado.
     fn set_verbose_logging(&self, on: bool) -> Result<(), ServiceError> {
         self.daemon.set_verbose_logging(on)
+    }
+
+    /// Move o Lost and Found da conta para `dest`, sem sobrescrever nada; devolve quantas
+    /// entradas moveu.
+    async fn move_lost_and_found(&self, account: &str, dest: &str) -> Result<u32, ServiceError> {
+        self.daemon.move_lost_and_found(account, dest).await
     }
 
     /// Apaga banco e cache da conta e a reindexa do zero, sem sair dela.

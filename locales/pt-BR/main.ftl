@@ -21,6 +21,7 @@ notify-title = Google Drive
 notify-account = Conta: { $email }
 notify-lost-found-title = Edição guardada em Lost and Found
 notify-lost-found-body = A sua versão de { $name } não subiu porque { $reason }. Ela foi guardada em Lost and Found.
+notify-lost-found-move = Mover tudo para…
 notify-lost-found-action = Ver arquivos
 notify-folder-action = Ver pastas
 notify-folder-missing-title = Uma pasta sincronizada sumiu

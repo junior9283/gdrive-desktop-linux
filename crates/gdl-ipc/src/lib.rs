@@ -654,6 +654,9 @@ pub trait Service {
     /// Apaga banco e cache da conta e a reindexa do zero, sem sair dela; recusa com envios
     /// pendentes (`PendingUploads`).
     fn reset_local_data(&self, account: &str) -> Result<(), ServiceError>;
+    /// Move o Lost and Found da conta para a pasta `dest` (fora das montagens), numerando nomes
+    /// repetidos; devolve quantas entradas moveu.
+    fn move_lost_and_found(&self, account: &str, dest: &str) -> Result<u32, ServiceError>;
     /// Grava o pacote de diagnóstico (`.tar.gz`) na Área de trabalho e devolve o caminho.
     fn generate_diagnostics(&self) -> Result<String, ServiceError>;
     /// Reinicia o serviço (para as preferências que pedem isso).

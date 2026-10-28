@@ -139,7 +139,7 @@ fn swap(local: &Path, target: &Path, info: guard::FolderInfo, trash: &Trash) -> 
 
 /// Copia as pastas e os arquivos comuns de `from` para a pasta `to`; links e arquivos especiais
 /// ficam de fora, como nas pastas do computador.
-fn copy_contents(from: &Path, to: &Path) -> io::Result<()> {
+pub(super) fn copy_contents(from: &Path, to: &Path) -> io::Result<()> {
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let kind = entry.file_type()?;

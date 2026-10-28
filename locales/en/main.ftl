@@ -21,6 +21,7 @@ notify-title = Google Drive
 notify-account = Account: { $email }
 notify-lost-found-title = Edit saved to Lost and Found
 notify-lost-found-body = Your version of { $name } wasn't uploaded because { $reason }. It was saved to Lost and Found.
+notify-lost-found-move = Move all to…
 notify-lost-found-action = View files
 notify-folder-action = See folders
 notify-folder-missing-title = A synced folder is missing

@@ -2,7 +2,7 @@
 
 import { attempt, confirmDialog, popupMenu, toast } from '../../components.js';
 import { disconnect, disconnectAll } from './disconnect.js';
-import { withoutAccount } from './model.js';
+import { splitArg, withoutAccount } from './model.js';
 import { currentAccount } from '../../state.js';
 import { HOME_TOUR } from '../../tour/model.js';
 import { startTour } from '../../tour/tour.js';
@@ -38,15 +38,25 @@ export async function moreMenu(anchor, ctx) {
 }
 
 // O que pedem ao abrir a janela (`home:<argumento>`): da bandeja, que não tem diálogo, as ações
-// com confirmação; do primeiro uso e das Preferências, o tour.
+// com confirmação; do primeiro uso e das Preferências, o tour; do aviso de Lost and Found, a
+// escolha da pasta para onde mover tudo.
 const ARG_ACTIONS = {
   'reset-preferences': reset,
   'disconnect-all': disconnectAll,
   tour: ({ t }) => startTour(HOME_TOUR, t),
+  'move-lost-found': moveLostAndFound,
 };
 
 export function runArg(arg, ctx) {
-  ARG_ACTIONS[arg]?.(ctx);
+  const [key, rest] = splitArg(arg);
+  ARG_ACTIONS[key]?.(ctx, rest);
+}
+
+async function moveLostAndFound({ api, t }, account) {
+  const dest = await api.pickFolder(t('lost-found-pick-folder')).catch(() => null);
+  if (!dest) return;
+  attempt(api.call('move_lost_and_found', { account, dest }), (count) =>
+    toast(t('lost-found-moved', { count })));
 }
 
 async function reset({ api, t }) {

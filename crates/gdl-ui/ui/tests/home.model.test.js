@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { I18n, parseFtl } from '../i18n.js';
 import { formatSize } from '../format.js';
-import { accountMenuFor, drivesCard, headerFor, rowActions, offlineText, paginate, shownStatus, sortRows } from '../screens/home/model.js';
+import { accountMenuFor, drivesCard, headerFor, rowActions, offlineText, paginate, shownStatus, sortRows, splitArg } from '../screens/home/model.js';
 
 const load = (lang) =>
   new I18n(
@@ -182,4 +182,11 @@ test('menu da linha da atividade: Compartilhar só depois do envio; pausado aind
 test('estado pausado tem texto nas duas línguas', () => {
   assert.equal(load('pt-BR').t('activity-upload-paused'), 'Pausado');
   assert.equal(load('en').t('activity-upload-paused'), 'Paused');
+});
+
+test('splitArg separa a ação do resto do argumento', () => {
+  assert.deepEqual(splitArg('tour'), ['tour', '']);
+  assert.deepEqual(splitArg('move-lost-found:eu@x.com'), ['move-lost-found', 'eu@x.com']);
+  assert.deepEqual(splitArg('a:b:c'), ['a', 'b:c']);
+  assert.deepEqual(splitArg(''), ['', '']);
 });

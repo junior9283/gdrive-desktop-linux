@@ -239,6 +239,11 @@ disconnect-discard = { $count ->
    *[other] Delete the { $count } unsynced files
 }
 disconnect-discard-sure = I understand these files will be lost
+lost-found-pick-folder = Choose the folder to move Lost and Found to
+lost-found-moved = { $count ->
+    [one] 1 item moved.
+   *[other] { $count } items moved.
+}
 disconnect-pick-folder = Choose the folder for the unsynced files
 disconnect-progress = Disconnecting…
 disconnect-done = Account disconnected

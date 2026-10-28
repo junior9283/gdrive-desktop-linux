@@ -9,6 +9,11 @@ export const HOME_TOUR = [
   { target: '.more-button', title: 'tour-more-title', text: 'tour-more-text' },
 ];
 
+// Se o elemento aparece na tela: um que existe mas está escondido (`hidden`) não tem caixa.
+export function onScreen(node) {
+  return !!node && node.getClientRects().length > 0;
+}
+
 // Os passos cujo alvo está na tela (`exists(seletor)`): os outros são pulados.
 export function visibleSteps(steps, exists) {
   return steps.filter((step) => exists(step.target));

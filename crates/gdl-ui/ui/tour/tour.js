@@ -2,14 +2,14 @@
 // Próximo/Concluir e Fechar; Esc fecha. Os passos e o que pular ficam em `model.js`.
 
 import { el, icon, stylesheet } from '../components.js';
-import { visibleSteps } from './model.js';
+import { onScreen, visibleSteps } from './model.js';
 
 // O tour aberto: um novo fecha o anterior.
 let closeOpen = null;
 
 export async function startTour(steps, t) {
   closeOpen?.();
-  const shown = visibleSteps(steps, (selector) => document.querySelector(selector) !== null);
+  const shown = visibleSteps(steps, (selector) => onScreen(document.querySelector(selector)));
   if (!shown.length) return;
   await stylesheet('tour/tour.css');
   let at = 0;

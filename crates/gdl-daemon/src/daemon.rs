@@ -52,7 +52,7 @@ use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
     self, Notification, Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE,
-    OPTIONAL_KINDS, RESUME, SEND_CRASH_REPORT, SIGN_IN,
+    OPTIONAL_KINDS, RECOGNIZE_ACTIVITY, RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT, SIGN_IN,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -808,7 +808,9 @@ impl Daemon {
         let Some(notifier) = self.notifier.get() else {
             return;
         };
-        if let Some(desktop_id) = notifier.send(&self.with_account_name(note).await).await {
+        let extra = notify::extra_actions(note, &self.i18n);
+        let named = self.with_account_name(note).await;
+        if let Some(desktop_id) = notifier.send(&named, &extra).await {
             self.history.set_desktop_id(id, desktop_id);
         }
     }
@@ -825,7 +827,7 @@ impl Daemon {
     }
 
     /// Botão de um aviso clicado no servidor de notificações.
-    async fn on_desktop_action(&self, desktop_id: u32, key: &str) {
+    pub(crate) async fn on_desktop_action(&self, desktop_id: u32, key: &str) {
         let id = self.history.by_desktop_id(desktop_id);
         let account = id
             .and_then(|id| self.history.get(id))
@@ -859,6 +861,15 @@ impl Daemon {
             }
             SEND_CRASH_REPORT => return self.send_crash_report(),
             OPEN_RELEASE => return self.open_release(),
+            REVIEW_ACTIVITY => {
+                self.open_screen("home".into());
+                return Ok(());
+            }
+            RECOGNIZE_ACTIVITY => {
+                let engine = self.account_engine(account).await?;
+                engine.recognize_activity(gdl_common::time::now_ms());
+                return Ok(());
+            }
             OPEN_LOST_FOUND => KeptFolder::LostAndFound,
             OPEN_CANCELED => KeptFolder::CanceledUploads,
             _ => return Err(ServiceError::InvalidArgs(key.into())),

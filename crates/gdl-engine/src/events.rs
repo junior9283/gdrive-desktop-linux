@@ -148,6 +148,8 @@ pub enum EngineEvent {
     LocalDiskFull,
     /// A organização bloqueou a conta para o Drive (`403 domainPolicy`).
     AccountDisabled,
+    /// Muitos arquivos regravados com cara de cifrados: os envios da conta foram pausados.
+    SuspiciousActivity,
 }
 
 /// O que o Drive recusou fazer (`EngineEvent::NoPermission`).

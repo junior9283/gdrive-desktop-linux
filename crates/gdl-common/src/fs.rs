@@ -1,6 +1,6 @@
 //! Gravação de arquivos de estado e preferências.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 /// Grava `bytes` num arquivo ao lado e renomeia por cima de `path`: quem lê nunca vê o arquivo
@@ -12,6 +12,15 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     tmp.write_all(bytes)?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
+}
+
+/// Os primeiros `max` bytes de `path`.
+pub fn read_head(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
+    let mut head = Vec::new();
+    std::fs::File::open(path)?
+        .take(max)
+        .read_to_end(&mut head)?;
+    Ok(head)
 }
 
 /// Apaga o arquivo; já não existir não é erro.

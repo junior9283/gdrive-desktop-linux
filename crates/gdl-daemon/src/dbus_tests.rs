@@ -2563,6 +2563,43 @@ async fn items_trashed_from_drive_warn() {
     assert!(note.body.contains("Um item"), "{note:?}");
 }
 
+/// Vinte arquivos com cara de cifrados gravados na montagem pausam os envios e avisam com os três
+/// botões; "Eu reconheço esta atividade" retoma.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn encrypted_burst_pauses_and_can_be_recognized() {
+    const SUSPICIOUS: &str = "Atividade suspeita nos arquivos";
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let drive = h.drive();
+    blocking(move || {
+        for n in 0..20u64 {
+            let mut x = n * 2 + 1;
+            let bytes: Vec<u8> = (0..8192)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    (x >> 24) as u8
+                })
+                .collect();
+            std::fs::write(drive.join(format!("doc{n}.txt")), bytes).unwrap();
+        }
+    })
+    .await;
+
+    wait_until("aviso de atividade suspeita", || {
+        h.notes().iter().any(|n| n.summary == SUSPICIOUS)
+    })
+    .await;
+    let note = h.notes().into_iter().find(|n| n.summary == SUSPICIOUS).unwrap();
+    let keys: Vec<_> = note.actions.iter().step_by(2).map(String::as_str).collect();
+    assert_eq!(keys, ["review-activity", "recognize-activity", "resume"]);
+    assert!(h.proxy.status("").await.unwrap().paused);
+
+    h.daemon.on_desktop_action(note.id, "recognize-activity").await;
+    assert!(!h.proxy.status("").await.unwrap().paused);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn other_computers_show_in_the_mount() {
     let h = Harness::new().await;

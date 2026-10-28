@@ -37,6 +37,8 @@ pub enum SyncError {
     NoParent,
     #[error("o caminho passa por um link simbólico")]
     Symlink,
+    #[error("envio segurado: atividade suspeita nos arquivos")]
+    Held,
 }
 
 pub type Result<T> = std::result::Result<T, SyncError>;
@@ -64,6 +66,10 @@ pub struct Links {
     /// `<montagem>/.shortcut-targets-by-id`.
     pub shortcut_targets: PathBuf,
 }
+
+/// Confere cada arquivo antes de ele subir (`nome`, caminho): `false` segura o envio até a
+/// próxima comparação (a vigia de atividade suspeita do motor, `Engine::screen_write`).
+pub type Screen = Arc<dyn Fn(&str, &Path) -> bool + Send + Sync>;
 
 /// O `md5` da base de um ponteiro ou link gravado pelo app: ele nunca sobe, e vai para a lixeira
 /// quando o item sai do Drive.
@@ -93,6 +99,7 @@ pub struct FolderSync {
     links: Option<Links>,
     /// A raiz é um ponto de montagem agora (injetável nos testes).
     is_mount_point: fn(&Path) -> bool,
+    screen: Option<Screen>,
 }
 
 impl FolderSync {
@@ -118,12 +125,19 @@ impl FolderSync {
             synced_notify: tokio::sync::Notify::new(),
             links: None,
             is_mount_point: guard::is_mount_point,
+            screen: None,
         }
     }
 
     /// Troca a conferência de ponto de montagem (os testes não montam discos).
     pub fn with_mount_check(mut self, check: fn(&Path) -> bool) -> FolderSync {
         self.is_mount_point = check;
+        self
+    }
+
+    /// Confere cada arquivo antes de ele subir (`Screen`).
+    pub fn with_screen(mut self, screen: Screen) -> FolderSync {
+        self.screen = Some(screen);
         self
     }
 
@@ -540,6 +554,13 @@ impl FolderSync {
         name: String,
     ) -> Result<(RemoteFile, Local)> {
         let path = self.path(rel);
+        if self
+            .screen
+            .as_ref()
+            .is_some_and(|screen| !screen(last(rel), &path))
+        {
+            return Err(SyncError::Held);
+        }
         let sent = Local::existing(&path)?;
         let session = KvSession {
             store: &self.store,
@@ -1330,6 +1351,39 @@ mod tests {
             "passada sem lixeira, sem aviso"
         );
         assert!(w.store.synced_of(w.pair.id).unwrap().is_empty());
+    }
+
+    /// Com a atividade suspeita (o motor pausou os envios), nada sobe; quando a vigia libera, o
+    /// arquivo sobe na comparação seguinte.
+    #[tokio::test]
+    async fn screened_write_waits_for_the_guard() {
+        let w = World::new().await;
+        w.write("a.txt", b"um");
+        let allowed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let screened = Arc::new(Mutex::new(vec![]));
+        let screen = {
+            let (allowed, screened) = (allowed.clone(), screened.clone());
+            move |name: &str, path: &Path| {
+                screened
+                    .lock()
+                    .unwrap()
+                    .push((name.to_owned(), path.exists()));
+                allowed.load(std::sync::atomic::Ordering::SeqCst)
+            }
+        };
+        let sync = w.sync_with(8).with_screen(Arc::new(screen));
+
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+        assert!(
+            w.fake.find_live("a.txt").is_empty(),
+            "a vigia segurou o envio"
+        );
+        assert_eq!(*screened.lock().unwrap(), [("a.txt".to_owned(), true)]);
+
+        allowed.store(true, std::sync::atomic::Ordering::SeqCst);
+        sync.reconcile().await.unwrap();
+        assert_eq!(w.fake.find_live("a.txt").len(), 1);
     }
 
     #[tokio::test]

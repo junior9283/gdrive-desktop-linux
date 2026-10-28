@@ -149,7 +149,17 @@ impl Daemon {
                 shortcut_targets: mount.join(&self.layout.shortcut_targets),
             });
         }
-        let sync = Arc::new(sync);
+        // A vigia de atividade suspeita da conta confere cada arquivo antes de ele subir.
+        let screen = {
+            let engine = Arc::downgrade(engine);
+            move |name: &str, path: &Path| {
+                let now = gdl_common::time::now_ms();
+                engine
+                    .upgrade()
+                    .is_none_or(|e| e.screen_write(name, path, now))
+            }
+        };
+        let sync = Arc::new(sync.with_screen(Arc::new(screen)));
         let stop = shutdown.child_token();
         tokio::spawn({
             let (sync, stop, events) = (sync.clone(), stop.clone(), engine.subscribe());

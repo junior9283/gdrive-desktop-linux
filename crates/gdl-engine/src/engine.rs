@@ -18,7 +18,6 @@ use gdl_store::Store;
 use tokio::sync::{Notify, broadcast, watch};
 use tokio_util::sync::CancellationToken;
 
-use crate::Result;
 use crate::activity::{Activity, ActivityLog, ActivityRow, ActivityState, MAX_ROWS};
 use crate::cache::{BlockCache, CONTENT_DIR};
 use crate::changes::ChangePoller;
@@ -27,8 +26,11 @@ use crate::events::{EngineEvent, SyncSummary};
 use crate::indexer::{ACCOUNT_EMAIL, START_PAGE_TOKEN, initial_index};
 use crate::kept::{Kept, KeptCopies, KeptFolder};
 use crate::pins::PinManager;
+use crate::ransomware::{Detector, MIN_ENTROPY, SAMPLE_BYTES, entropy, is_compressed};
 use crate::thumbs::seeder::ThumbSeeder;
 use crate::uploads::{CancelOutcome, UploadOutcome, UploadWorker, recover_on_start};
+use crate::{Result, lock};
+use gdl_common::fs::read_head;
 
 /// De quanto em quanto tempo cada laço do serviço roda.
 #[derive(Debug, Clone, Copy)]
@@ -71,6 +73,7 @@ pub struct Engine {
     signed_out: watch::Receiver<bool>,
     /// Por que está pausado; `paused` é a soma dos motivos.
     pause_reasons: std::sync::Mutex<PauseReasons>,
+    ransomware: std::sync::Mutex<Detector>,
     /// Já avisou desta pausa que uma gravação espera a sincronização voltar.
     saved_while_paused: AtomicBool,
     pub(crate) activity: Arc<ActivityLog>,
@@ -83,6 +86,8 @@ struct PauseReasons {
     user: bool,
     /// `PauseSyncingOnMeteredConnection` numa conexão limitada.
     metered: bool,
+    /// Atividade suspeita (`ransomware`), até o usuário decidir.
+    suspicious: bool,
 }
 
 /// Arquivo (na pasta de dados da conta) com a pasta de cache da última abertura, para saber se
@@ -212,6 +217,7 @@ impl Engine {
             paused: watch::Sender::new(false),
             signed_out,
             pause_reasons: Default::default(),
+            ransomware: Default::default(),
             saved_while_paused: AtomicBool::new(false),
         })
     }
@@ -358,16 +364,42 @@ impl Engine {
         self.update_pause(|r| *r = PauseReasons::default());
     }
 
+    /// Confere uma gravação fechada (`name`, conteúdo em `path`): `ransomware::THRESHOLD`
+    /// arquivos com cara de cifrados na janela pausam os envios e avisam (`SuspiciousActivity`).
+    /// Devolve se os envios podem seguir. Só lê o arquivo quando a conferência pode contar.
+    pub fn screen_write(&self, name: &str, path: &Path, now: i64) -> bool {
+        if lock(&self.pause_reasons).suspicious {
+            return false;
+        }
+        if is_compressed(name) || lock(&self.ransomware).is_quiet(now) {
+            return true;
+        }
+        let head = read_head(path, SAMPLE_BYTES);
+        if head.is_ok_and(|head| entropy(&head) > MIN_ENTROPY)
+            && lock(&self.ransomware).observe(now)
+        {
+            self.update_pause(|r| r.suspicious = true);
+            let _ = self.events.send(EngineEvent::SuspiciousActivity);
+        }
+        !lock(&self.pause_reasons).suspicious
+    }
+
+    /// "Eu reconheço esta atividade": retoma e não avisa de novo por `ransomware::QUIET_MS`.
+    pub fn recognize_activity(&self, now: i64) {
+        lock(&self.ransomware).quiet(now);
+        self.resume();
+    }
+
     /// Pausa (ou desfaz) pela conexão limitada; desfazer não retoma uma pausa do usuário.
     pub fn set_metered_pause(&self, on: bool) {
         self.update_pause(|r| r.metered = on);
     }
 
     fn update_pause(&self, change: impl FnOnce(&mut PauseReasons)) {
-        let mut reasons = self.pause_reasons.lock().unwrap_or_else(|e| e.into_inner());
+        let mut reasons = lock(&self.pause_reasons);
         change(&mut reasons);
         // Ainda com a trava: duas mudanças seguidas não publicam fora de ordem.
-        self.set_paused(reasons.user || reasons.metered);
+        self.set_paused(reasons.user || reasons.metered || reasons.suspicious);
     }
 
     pub fn is_paused(&self) -> bool {

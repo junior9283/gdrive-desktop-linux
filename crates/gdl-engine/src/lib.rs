@@ -14,6 +14,7 @@ pub mod indexer;
 pub mod kept;
 pub mod ops;
 pub mod pins;
+pub mod ransomware;
 pub mod search;
 pub mod sharing;
 #[cfg(test)]
@@ -25,6 +26,11 @@ use gdl_drive::client::DriveError;
 use gdl_store::StoreError;
 
 use crate::cache::CacheError;
+
+/// Uma trava envenenada (pânico com ela tomada) continua usável: o conjunto segue consistente.
+pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {

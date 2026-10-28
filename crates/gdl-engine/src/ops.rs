@@ -2,9 +2,9 @@
 //! trazer de volta do `Lost and Found`. As que mexem só em metadados vão direto ao Drive e a
 //! resposta entra no banco pelo mesmo caminho das mudanças.
 
-use std::io::Read;
 use std::path::Path;
 
+use gdl_common::fs::read_head;
 use gdl_common::names::{split_ext, to_remote};
 use gdl_common::temp_files::is_local_only;
 use gdl_common::time::now_ms;
@@ -110,6 +110,8 @@ impl Engine {
                 }
             }
         }
+        // A pausa por atividade suspeita segura os envios da montagem; o retorno é das pastas.
+        self.screen_write(&item.local_name, &self.cache.local_path(id), now_ms());
         if self.commit_write(id, size, modified_ms, upload)? {
             self.note_saved_while_paused(&item.local_name);
         }
@@ -137,12 +139,7 @@ impl Engine {
         if !is_local_id(&item.id) || !is_pointer_extension(ext.trim_start_matches('.')) {
             return None;
         }
-        let mut json = Vec::new();
-        std::fs::File::open(self.cache.local_path(&item.id))
-            .ok()?
-            .take(POINTER_MAX_BYTES)
-            .read_to_end(&mut json)
-            .ok()?;
+        let json = read_head(&self.cache.local_path(&item.id), POINTER_MAX_BYTES).ok()?;
         pointer_doc_id(&json).map(ItemId)
     }
 

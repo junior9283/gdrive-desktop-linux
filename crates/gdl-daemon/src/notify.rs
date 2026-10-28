@@ -25,6 +25,10 @@ pub const RESUME: &str = "resume";
 pub const OPEN_FOLDERS: &str = "open-folders";
 /// Ação do aviso de conta sem login que abre a janela no login dela.
 pub const SIGN_IN: &str = "sign-in";
+/// Ação do aviso de atividade suspeita que abre a janela na Atividade (os envios seguem pausados).
+pub const REVIEW_ACTIVITY: &str = "review-activity";
+/// "Eu reconheço esta atividade": retoma e não avisa de novo por 1 h.
+pub const RECOGNIZE_ACTIVITY: &str = "recognize-activity";
 /// Ação do aviso de nova versão que abre a página da release.
 pub const OPEN_RELEASE: &str = "open-release";
 /// Ação do aviso de falha que abre a *issue* com o relatório; fechar é "Não enviar".
@@ -236,6 +240,14 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
             "notify-local-disk-full-title",
             i18n.tr("notify-local-disk-full-body", &[]),
         ),
+        EngineEvent::SuspiciousActivity => Notification {
+            action: Some((REVIEW_ACTIVITY, i18n.tr("notify-suspicious-action", &[]))),
+            ..state(
+                "suspicious-activity",
+                "notify-suspicious-title",
+                i18n.tr("notify-suspicious-body", &[]),
+            )
+        },
         EngineEvent::AccountDisabled => state(
             "account-disabled",
             "notify-account-disabled-title",
@@ -246,6 +258,21 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
         | EngineEvent::SyncStateChanged(_)
         | EngineEvent::ItemsChanged { .. } => return None,
     })
+}
+
+/// Os botões a mais que o aviso mostra na área de trabalho (o histórico guarda só o principal).
+pub fn extra_actions(note: &Notification, i18n: &I18n) -> Vec<(&'static str, String)> {
+    match note.kind_id {
+        // "Permitir sincronização" é o retomar de sempre, com a vigia ainda ligada.
+        "suspicious-activity" => vec![
+            (
+                RECOGNIZE_ACTIVITY,
+                i18n.tr("notify-suspicious-recognize", &[]),
+            ),
+            (RESUME, i18n.tr("notify-suspicious-allow", &[])),
+        ],
+        _ => vec![],
+    }
 }
 
 /// O aviso de uma pasta do computador (o par `pair`, chamado `name`) que parou ou espera
@@ -400,15 +427,14 @@ impl Notifier {
 
     /// Mostra o aviso (no lugar do anterior do mesmo tipo) e devolve o ID que o servidor deu.
     /// Sem servidor de notificações, só registra no log.
-    pub async fn send(&self, note: &Notification) -> Option<u32> {
+    /// Mostra `note` com o botão dele e os de `extra` (`extra_actions`).
+    pub async fn send(&self, note: &Notification, extra: &[(&'static str, String)]) -> Option<u32> {
         let slot = note.slot();
         let replaces = slot
             .as_ref()
             .and_then(|slot| self.shown().get(slot).copied())
             .unwrap_or(0);
-        let actions: Vec<&str> = note
-            .action
-            .iter()
+        let actions: Vec<&str> = (note.action.iter().chain(extra))
             .flat_map(|(key, label)| [*key, label.as_str()])
             .collect();
         let markup = self
@@ -594,6 +620,23 @@ mod tests {
         ] {
             assert!(OPTIONAL_KINDS.contains(&kind), "{kind} pode ser desligado");
         }
+    }
+
+    #[test]
+    fn suspicious_activity_offers_the_three_choices() {
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            let note = for_event(&EngineEvent::SuspiciousActivity, &i18n).unwrap();
+            assert_eq!(note.kind_id, "suspicious-activity");
+            assert!(!note.body.starts_with("notify-"), "{lang}: {note:?}");
+            assert_eq!(note.action.as_ref().map(|a| a.0), Some(REVIEW_ACTIVITY));
+            let extra = extra_actions(&note, &i18n);
+            let keys: Vec<_> = extra.iter().map(|(k, _)| *k).collect();
+            assert_eq!(keys, [RECOGNIZE_ACTIVITY, RESUME], "{lang}");
+            assert!(extra.iter().all(|(_, label)| !label.starts_with("notify-")));
+        }
+        let other = for_event(&EngineEvent::QuotaFull, &I18n::new("en")).unwrap();
+        assert!(extra_actions(&other, &I18n::new("en")).is_empty());
     }
 
     #[test]

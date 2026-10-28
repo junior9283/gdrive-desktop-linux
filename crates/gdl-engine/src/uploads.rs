@@ -24,6 +24,7 @@ use crate::events::{EngineEvent, LostReason};
 use crate::ids::IdPool;
 use crate::indexer::{ACCOUNT_EMAIL, item_from_remote};
 use crate::kept::{Kept, KeptFolder};
+use crate::lock;
 use crate::{EngineError, Result};
 
 /// Prefixo dos IDs de itens criados no computador que ainda não existem no Drive.
@@ -324,11 +325,6 @@ impl Drop for WritingMark {
             }
         }
     }
-}
-
-/// Uma trava envenenada (pânico com ela tomada) continua usável: o conjunto segue consistente.
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl UploadWorker {

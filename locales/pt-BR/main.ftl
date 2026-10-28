@@ -102,6 +102,11 @@ notify-kind-no-permission = Ações recusadas por falta de permissão
 notify-new-version-title = Nova versão disponível
 notify-new-version-body = A versão { $version } do app foi publicada.
 notify-new-version-action = Ver novidades
+notify-suspicious-title = Atividade suspeita nos arquivos
+notify-suspicious-body = Muitos arquivos foram alterados de um jeito que lembra um vírus que cifra arquivos. Os envios desta conta foram pausados; as versões anteriores continuam no Drive.
+notify-suspicious-action = Verificar
+notify-suspicious-recognize = Eu reconheço esta atividade
+notify-suspicious-allow = Permitir sincronização
 
 # Login e saída da conta
 login-rejected = A conta { $email } não é permitida neste computador.

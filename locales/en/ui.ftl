@@ -112,6 +112,7 @@ card-gemini-text = Chat about your Drive files with Gemini, on the web.
 card-gemini-open = Open Gemini
 
 activity-empty = No sync activity yet.
+activity-upload-paused = Paused
 activity-upload-queued = Waiting to upload
 activity-uploading = Uploading
 activity-uploading-percent = Uploading ({ $percent }%)
@@ -135,6 +136,7 @@ page-next = Next page
 row-menu = Item actions
 row-open-folder = Open in file manager
 row-open-web = Open on the web
+row-share = Share
 row-copy-link = Copy link
 row-cancel-upload = Cancel upload
 link-copied = Link copied

@@ -1331,3 +1331,22 @@ async fn shared_drives_view_lists_the_fake_drives() {
     session.find(".manage-shared-drives").await;
     assert!(list.contains("Equipe"), "{list}");
 }
+
+// "Compartilhar" no menu de uma linha enviada abre a janela Compartilhar daquele item.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn activity_share_opens_the_share_window() {
+    let session = Session::open("home").await;
+    session.click("[data-view='activity']").await;
+    session
+        .wait_text(".activity-table tbody", "enviado-pelo-teste.txt")
+        .await;
+    session
+        .click(".activity-table tbody tr:has(td[title$='enviado-pelo-teste.txt']) .row-menu")
+        .await;
+    session.click("[data-action='share']").await;
+    let share = session.new_window().await;
+    session.post("window", json!({ "handle": share })).await;
+    let title = session.wait_text(".share", "Compartilhar").await;
+    assert!(title.contains("enviado-pelo-teste.txt"), "{title}");
+}

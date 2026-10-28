@@ -14,6 +14,8 @@ pub const MAX_ROWS: usize = 500;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityState {
     UploadQueued,
+    /// Na fila com o envio pausado: só na listagem, a fila não muda.
+    UploadPaused,
     Uploading,
     Uploaded,
     UploadCanceling,
@@ -31,6 +33,7 @@ impl ActivityState {
     pub fn as_str(self) -> &'static str {
         match self {
             ActivityState::UploadQueued => "upload-queued",
+            ActivityState::UploadPaused => "upload-paused",
             ActivityState::Uploading => "uploading",
             ActivityState::Uploaded => "uploaded",
             ActivityState::UploadCanceling => "upload-canceling",
@@ -134,7 +137,8 @@ impl ActivityLog {
         self.bump();
     }
 
-    fn bump(&self) {
+    /// Avisa quem mostra a lista sem registro novo (a listagem mudou por fora, como ao pausar).
+    pub fn bump(&self) {
         self.version.send_modify(|v| *v += 1);
     }
 

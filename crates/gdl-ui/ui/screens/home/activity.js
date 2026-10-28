@@ -2,11 +2,10 @@
 
 import { attempt, el, menuButton, pager, toast } from '../../components.js';
 import { formatAgo, formatSize } from '../../format.js';
-import { paginate, sortRows } from './model.js';
+import { currentAccount } from '../../state.js';
+import { paginate, rowActions, sortRows } from './model.js';
 
 const SIZES = [10, 25, 50];
-// Os envios que ainda dá para cancelar.
-const CANCELABLE = new Set(['upload-queued', 'uploading']);
 // O aviso de cada resultado do cancelamento além de `canceled`.
 const CANCEL_TOASTS = { 'too-late': 'upload-finished-first', 'in-use': 'upload-in-use' };
 
@@ -86,17 +85,20 @@ function content(ctx, rows, draw) {
 // Os itens do menu de uma linha.
 function rowMenu(row, { api, t }) {
   const id = row.item_id;
+  const can = rowActions(row);
   return [
-    { id: 'open-folder', label: t('row-open-folder'), disabled: !id,
+    { id: 'open-folder', label: t('row-open-folder'), disabled: !can.open,
       action: () => attempt(api.call('open_item', { item_id: id, target: 'folder' })) },
-    { id: 'open-web', label: t('row-open-web'), disabled: !id,
+    { id: 'open-web', label: t('row-open-web'), disabled: !can.open,
       action: () => attempt(api.call('open_item', { item_id: id, target: 'web' })) },
-    { id: 'copy-link', label: t('row-copy-link'), disabled: !id,
+    { id: 'share', label: t('row-share'), disabled: !can.share,
+      action: () => api.openScreen('share', `${currentAccount()}/${id}`) },
+    { id: 'copy-link', label: t('row-copy-link'), disabled: !can.open,
       action: () => attempt(
         api.call('web_link', { item_id: id }).then((url) => api.copy(url)),
         () => toast(t('link-copied')),
       ) },
-    { id: 'cancel-upload', label: t('row-cancel-upload'), disabled: !CANCELABLE.has(row.state),
+    { id: 'cancel-upload', label: t('row-cancel-upload'), disabled: !can.cancel,
       action: () => attempt(api.call('cancel_upload', { item_id: id }), (result) =>
         toast(t(CANCEL_TOASTS[result] ?? 'upload-canceled'))) },
   ];

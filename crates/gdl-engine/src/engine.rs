@@ -341,7 +341,8 @@ impl Engine {
     }
 
     /// A atividade de sincronização, a mais recente primeiro. O que está na fila e ainda não
-    /// começou aparece como `UploadQueued`, no topo.
+    /// começou aparece como `UploadQueued`, no topo, ou `UploadPaused` com o envio pausado (por
+    /// qualquer motivo).
     pub fn activity(&self) -> Result<Vec<ActivityRow>> {
         let mut rows = self.activity.rows();
         let next_seq = rows.first().map_or(1, |r| r.seq + 1);
@@ -359,6 +360,13 @@ impl Engine {
             })
             .collect();
         rows.splice(0..0, queued);
+        if self.is_paused() {
+            for row in &mut rows {
+                if row.activity.state == ActivityState::UploadQueued {
+                    row.activity.state = ActivityState::UploadPaused;
+                }
+            }
+        }
         Ok(rows)
     }
 
@@ -438,6 +446,8 @@ impl Engine {
             return;
         }
         self.saved_while_paused.store(false, Ordering::Relaxed);
+        // Os envios na fila aparecem como pausados (ou voltam à fila) na atividade.
+        self.activity.bump();
         if let Ok(summary) = self.summary() {
             let _ = self.events.send(EngineEvent::SyncStateChanged(summary));
         }
@@ -663,6 +673,26 @@ mod tests {
             eviction: Duration::from_millis(50),
             ..Intervals::default()
         }
+    }
+
+    /// Pausar e retomar mudam a listagem (envios na fila viram "pausado"): quem mostra a
+    /// atividade é avisado, seja qual for o motivo da pausa.
+    #[tokio::test]
+    async fn pausing_changes_the_activity() {
+        let fake = gdl_fake_drive::FakeDrive::start().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_test(tmp.path());
+        let (prefs, _) = load_preferences(&paths).unwrap();
+        let engine =
+            Engine::open(&paths, &prefs, "teste@example.com", fast_client(&fake, 3)).unwrap();
+        let mut changes = engine.activity_changes();
+        changes.mark_unchanged();
+
+        engine.pause();
+        assert!(changes.has_changed().unwrap(), "pausar avisa");
+        changes.mark_unchanged();
+        engine.resume();
+        assert!(changes.has_changed().unwrap(), "retomar avisa");
     }
 
     /// Bug: banco, cache e Lost and Found eram criados com o modo padrão (0755/0644), legíveis

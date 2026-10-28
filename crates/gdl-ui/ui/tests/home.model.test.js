@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { I18n, parseFtl } from '../i18n.js';
 import { formatSize } from '../format.js';
-import { accountMenuFor, drivesCard, headerFor, offlineText, paginate, shownStatus, sortRows } from '../screens/home/model.js';
+import { accountMenuFor, drivesCard, headerFor, rowActions, offlineText, paginate, shownStatus, sortRows } from '../screens/home/model.js';
 
 const load = (lang) =>
   new I18n(
@@ -168,4 +168,18 @@ test('cartão dos Drives compartilhados conta os drives e diz quantos estão des
   assert.equal(pt.t(...drivesCard(drives)), '2 drives compartilhados (1 desligado)');
   assert.equal(pt.t(...drivesCard([drives[0]])), '1 drive compartilhado');
   assert.equal(pt.t(...drivesCard([])), 'Você não participa de nenhum drive compartilhado.');
+});
+
+test('menu da linha da atividade: Compartilhar só depois do envio; pausado ainda se cancela', () => {
+  const row = (state, item_id = 'abc') => ({ state, item_id });
+  assert.deepEqual(rowActions(row('uploaded')), { open: true, share: true, cancel: false });
+  assert.deepEqual(rowActions(row('uploading')), { open: true, share: false, cancel: true });
+  assert.deepEqual(rowActions(row('upload-paused')), { open: true, share: false, cancel: true });
+  assert.deepEqual(rowActions(row('downloaded')), { open: true, share: false, cancel: false });
+  assert.deepEqual(rowActions(row('uploaded', '')), { open: false, share: false, cancel: false });
+});
+
+test('estado pausado tem texto nas duas línguas', () => {
+  assert.equal(load('pt-BR').t('activity-upload-paused'), 'Pausado');
+  assert.equal(load('en').t('activity-upload-paused'), 'Paused');
 });

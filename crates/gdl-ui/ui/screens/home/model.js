@@ -76,6 +76,16 @@ export function drivesCard(drives) {
   return off ? ['card-drives-off', { count: drives.length, off }] : ['card-drives-text', { count: drives.length }];
 }
 
+// Os envios que ainda dá para cancelar.
+const CANCELABLE = new Set(['upload-queued', 'upload-paused', 'uploading']);
+
+// O que o menu de uma linha da atividade permite: abrir (pasta, web, link) com o ID do item,
+// Compartilhar só depois do envio e cancelar o envio que ainda não terminou.
+export function rowActions(row) {
+  const open = Boolean(row.item_id);
+  return { open, share: open && row.state === 'uploaded', cancel: open && CANCELABLE.has(row.state) };
+}
+
 // "N itens off-line (tamanho)" do `OfflineSummary`.
 export function offlineText(summary, locale) {
   return ['card-offline-text', { count: summary.pinned_count, size: formatSize(summary.pinned_bytes, locale) }];

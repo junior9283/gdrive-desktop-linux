@@ -383,6 +383,28 @@ async fn activity_over_dbus() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn paused_queue_shows_as_paused() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.proxy.pause().await.unwrap();
+    let path = h.drive().join("parado.txt");
+    blocking(move || std::fs::write(path, b"esperando").unwrap()).await;
+    status_until(&h, "envio na fila", |s| s.pending_uploads > 0).await;
+
+    // Pausado, o envio aparece como pausado, sem sumir da lista.
+    let state = |rows: Vec<gdl_ipc::ActivityItem>| {
+        rows.into_iter().find(|r| r.name == "parado.txt").map(|r| r.state)
+    };
+    let paused = state(h.proxy.activity("").await.unwrap());
+    h.proxy.resume().await.unwrap();
+    let resumed = state(h.proxy.activity("").await.unwrap());
+
+    assert_eq!(paused.as_deref(), Some("upload-paused"));
+    assert_ne!(resumed.as_deref(), Some("upload-paused"));
+    assert!(resumed.is_some(), "a linha continua depois de retomar");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn upload_progress_reaches_activity() {
     const MIB: usize = 1024 * 1024;
     let h = Harness::new().await;

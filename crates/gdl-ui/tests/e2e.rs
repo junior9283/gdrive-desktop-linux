@@ -781,6 +781,52 @@ async fn errors_list_groups_and_retries() {
     assert!(!empty.contains("sem-espaco.txt"), "{empty}");
 }
 
+/// Mostrando outra conta, a lista de erros aponta os erros da primeira numa faixa, e "Trocar de
+/// conta" passa a mostrá-los.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "precisa do scripts/e2e.sh"]
+async fn errors_screen_points_to_the_other_account() {
+    let service = service().await;
+    let _cleanup = SecondAccount;
+    let url = service
+        .begin_login("id-de-teste", "segredo", "")
+        .await
+        .unwrap();
+    reqwest::get(url).await.unwrap();
+    status_until(&service, "a segunda conta", |s| s.accounts.len() == 2).await;
+    let _quota = QuotaFull::start().await;
+    let first = service.status("").await.unwrap();
+    let file = std::path::Path::new(&first.mount_point).join("Meu Drive/sem-espaco.txt");
+    tokio::task::spawn_blocking(move || std::fs::write(file, b"cheio"))
+        .await
+        .unwrap()
+        .unwrap();
+    status_until(&service, "erro de cota na primeira", |s| {
+        s.accounts.iter().any(|a| a.email == first.account && a.errors >= 1)
+    })
+    .await;
+    let session = Session::open("errors").await;
+    session
+        .eval(&format!("localStorage.setItem('account', '{ANA}'); location.reload(); return null"))
+        .await;
+
+    let banner = session.wait_text(".other-account", &first.account).await;
+    session.click(".other-account .switch-account").await;
+    let group = session
+        .wait_text(".error-group[data-category='quota']", "sem-espaco.txt")
+        .await;
+    let banners = session
+        .eval("return document.querySelectorAll('.other-account').length")
+        .await;
+    session
+        .eval("localStorage.removeItem('account'); return null")
+        .await;
+
+    assert!(banner.contains("Trocar de conta"), "{banner}");
+    assert!(group.contains("Armazenamento"), "{group}");
+    assert_eq!(banners, json!(0), "a conta mostrada não aponta para si");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "precisa do scripts/e2e.sh"]
 async fn offline_screen_removes_offline_access() {

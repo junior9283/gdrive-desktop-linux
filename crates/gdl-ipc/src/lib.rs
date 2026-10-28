@@ -93,6 +93,8 @@ pub struct AccountSummary {
     pub state: String,
     /// Envios na fila desta conta (o que a desconexão precisa saber).
     pub pending_uploads: u32,
+    /// Erros desta conta (a lista de erros aponta os das outras).
+    pub errors: u32,
 }
 
 /// Resposta de `Status`; sem conta conectada, tudo vazio. Os campos são os da conta pedida

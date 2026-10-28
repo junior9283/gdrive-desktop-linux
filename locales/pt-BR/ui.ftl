@@ -460,6 +460,11 @@ search-failed = A pesquisa não deu certo: { $error }
 # Lista de erros
 errors-title = Erros de sincronização
 errors-empty = Nenhum erro de sincronização.
+errors-other-account = { $count ->
+    [one] Há 1 erro em { $email }
+   *[other] Há { $count } erros em { $email }
+}
+errors-switch-account = Trocar de conta
 errors-done = Concluído
 errors-count = { $count ->
     [one] 1 item

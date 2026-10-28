@@ -131,7 +131,7 @@ function draw() {
   }, icon('settings'));
   ui.content = el('main', { class: 'tab-content', role: 'tabpanel' });
   ui.footer = saveFooter(t, { onSave: save, onCancel: cancel });
-  ui.banner = el('div', { class: 'banner restart-banner', role: 'status', hidden: !form.restartDue },
+  ui.banner = el('div', { class: 'banner info restart-banner', role: 'status', hidden: !form.restartDue },
     el('span', {}, t('pref-restart-needed')),
     el('button', { onclick: () => attempt(api.call('restart')) }, t('pref-restart-now')));
   screen.root.replaceChildren(

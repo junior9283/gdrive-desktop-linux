@@ -24,3 +24,7 @@
 .error-group > p {
   margin: 0 0 8px;
 }
+
+.other-account {
+  border-radius: var(--md-shape-medium);
+}

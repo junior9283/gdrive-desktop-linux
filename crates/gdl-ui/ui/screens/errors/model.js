@@ -12,3 +12,10 @@ export function groupErrors(errors) {
   for (const error of errors) (groups.get(error.category) ?? groups.get('unknown')).push(error);
   return [...groups].filter(([, items]) => items.length).map(([category, items]) => ({ category, items }));
 }
+
+// As outras contas (não `current`) que têm erros, para a faixa "Há N erros em <e-mail>".
+export function otherAccountErrors(accounts = [], current) {
+  return accounts
+    .filter((a) => a.email !== current && a.errors > 0)
+    .map(({ email, errors }) => ({ email, errors }));
+}

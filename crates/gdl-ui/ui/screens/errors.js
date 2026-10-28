@@ -1,10 +1,12 @@
-// Lista de erros: os erros de sincronização agrupados por categoria (cada grupo com a explicação e
-// 10 itens por página), o menu de cada item (Abrir pasta, Tentar de novo) e Concluído. A lógica
-// fica em `errors/model.js`.
+// Lista de erros: os erros de sincronização da conta mostrada agrupados por categoria (cada grupo
+// com a explicação e 10 itens por página), o menu de cada item (Abrir pasta, Tentar de novo), uma
+// faixa para cada outra conta com erros (Trocar de conta) e Concluído. A lógica fica em
+// `errors/model.js`.
 
 import { attempt, el, menuButton, pager, stylesheet } from '../components.js';
 import { paginate } from './home/model.js';
-import { groupErrors } from './errors/model.js';
+import { groupErrors, otherAccountErrors } from './errors/model.js';
+import { onAccountChange, setCurrentAccount } from '../state.js';
 
 const PAGE_SIZE = 10;
 // Os erros mudam com o status; no máximo uma releitura a cada meio segundo.
@@ -29,6 +31,10 @@ export async function render(root, ctx) {
       }, SETTLE_MS);
     };
     api.on('status-changed', reload);
+    onAccountChange(() => {
+      screen.pages = {};
+      load(true).catch(() => {});
+    });
     document.addEventListener('visibilitychange', reload);
   }
   const loaded = load(true);
@@ -47,15 +53,25 @@ export async function render(root, ctx) {
 
 // Relê os erros e redesenha, se mudaram (redesenhar fecharia o menu aberto de um item).
 async function load(force = false) {
-  const errors = await screen.ctx.api.call('errors');
-  const shown = JSON.stringify(errors);
+  const { api, t } = screen.ctx;
+  const [errors, status] = await Promise.all([api.call('errors'), api.call('status')]);
+  const others = otherAccountErrors(status.accounts, status.account);
+  const shown = JSON.stringify([errors, others]);
   if (!force && shown === screen.shown) return;
   screen.shown = shown;
   const groups = groupErrors(errors);
-  const { t } = screen.ctx;
   screen.main.replaceChildren(
+    ...others.map(otherAccount),
     ...(groups.length ? groups.map(group) : [el('p', { class: 'empty' }, t('errors-empty'))]),
   );
+}
+
+// "Há N erros em <e-mail>", com Trocar de conta (passa a mostrar os erros dela).
+function otherAccount({ email, errors }) {
+  const { t } = screen.ctx;
+  return el('div', { class: 'banner info other-account', role: 'status' },
+    el('span', {}, t('errors-other-account', { count: errors, email })),
+    el('button', { class: 'text switch-account', onclick: () => setCurrentAccount(email) }, t('errors-switch-account')));
 }
 
 function group({ category, items }) {

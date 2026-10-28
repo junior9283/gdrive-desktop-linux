@@ -1458,6 +1458,7 @@ impl Daemon {
                 mount_point: mount_point.display().to_string(),
                 state: summary.state().as_str().into(),
                 pending_uploads: summary.pending_uploads,
+                errors: summary.errors,
             });
             summaries.push(summary);
         }

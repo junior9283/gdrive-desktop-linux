@@ -161,6 +161,12 @@ button.filled:disabled {
   color: var(--md-on-surface-variant);
 }
 
+/* Faixa informativa (não de erro). */
+.banner.info {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+
 .banner button {
   margin-left: auto;
   color: inherit;

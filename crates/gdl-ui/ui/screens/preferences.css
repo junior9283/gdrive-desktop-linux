@@ -112,11 +112,6 @@
   font: var(--md-label-large);
 }
 
-.restart-banner {
-  background: var(--md-secondary-container);
-  color: var(--md-on-secondary-container);
-}
-
 .folder-config {
   display: flex;
   flex-direction: column;

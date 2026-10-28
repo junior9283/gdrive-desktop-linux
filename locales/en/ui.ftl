@@ -460,6 +460,11 @@ search-failed = The search didn't work: { $error }
 # Error list
 errors-title = Sync errors
 errors-empty = No sync errors.
+errors-other-account = { $count ->
+    [one] There is 1 error in { $email }
+   *[other] There are { $count } errors in { $email }
+}
+errors-switch-account = Switch account
 errors-done = Done
 errors-count = { $count ->
     [one] 1 item

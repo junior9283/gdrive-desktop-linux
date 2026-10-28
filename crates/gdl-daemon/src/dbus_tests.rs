@@ -2080,6 +2080,26 @@ async fn status_of_every_account_adds_the_counts_up() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_lists_errors_per_account() {
+    let h = Harness::new().await;
+    h.two_accounts(ANA).await;
+    let engine = h.daemon.engine().await.unwrap();
+    let src = h.home.join("edicao.txt");
+    std::fs::write(&src, b"guardada").unwrap();
+    engine.lost_and_found().preserve(&src, "edicao.txt").unwrap();
+    drop(engine);
+
+    let status = h.proxy.status(ANA).await.unwrap();
+
+    let errors = |email: &str| {
+        let account = status.accounts.iter().find(|a| a.email == email);
+        account.unwrap().errors
+    };
+    assert_eq!(errors(&h.fake.email()), 1);
+    assert_eq!(errors(ANA), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn signing_in_again_resumes_the_queue() {
     let h = Harness::new().await;
     let ana = h.fake.add_account(ANA);

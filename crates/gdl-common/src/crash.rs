@@ -2,11 +2,12 @@
 //! e o *backtrace* vão para `<dir>/<programa>-<data>.txt`, guardando os 20 mais novos. O serviço
 //! oferece enviar os que ainda não viu e os marca como vistos (`.visto.txt`).
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::names::create_numbered;
-use crate::paths::{Paths, crashes_dir};
+use crate::paths::{Paths, crashes_dir, create_private_dir};
 use crate::time::{local_stamp, now_ms};
 
 /// Quantos relatórios ficam guardados.
@@ -36,9 +37,11 @@ fn install_in(program: &'static str, dir: PathBuf) {
 }
 
 fn save(dir: &Path, program: &str, text: &str) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
+    // O relatório pode ter caminhos e nomes de arquivo: só para o usuário.
+    create_private_dir(dir)?;
     let stem = format!("{program}-{}", local_stamp(now_ms()).replace(' ', "-"));
     let (_, mut file) = create_numbered(dir, &stem, ".txt")?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     std::io::Write::write_all(&mut file, text.as_bytes())?;
     for old in reports(dir).iter().rev().skip(KEEP) {
         let _ = std::fs::remove_file(old);
@@ -110,6 +113,9 @@ mod tests {
         let newest = all.last().unwrap();
         let name = newest.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.starts_with("programa-de-teste-"), "{name}");
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700, "a pasta é só do usuário");
+        assert_eq!(mode(newest), 0o600, "o relatório é só do usuário");
         let text = std::fs::read_to_string(newest).unwrap();
         assert!(text.starts_with(&format!("programa-de-teste {}", env!("CARGO_PKG_VERSION"))));
         assert!(text.contains("falha de propósito"), "{text}");

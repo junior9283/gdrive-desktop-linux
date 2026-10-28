@@ -902,6 +902,12 @@ impl Daemon {
         note
     }
 
+    /// Segura a reabertura das contas, como `restart_accounts` faz enquanto reabre.
+    #[cfg(test)]
+    pub(crate) async fn hold_reopening(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.reopening.lock().await
+    }
+
     /// Se o aviso mostrado como `desktop_id` já está no histórico (o servidor de notificações
     /// recebe o aviso antes de o serviço guardar o ID que ele deu).
     #[cfg(test)]
@@ -1529,7 +1535,8 @@ impl Daemon {
     }
 
     /// Tira a conta `email` da lista e a desmonta, sem mexer nas outras nem em `accounts`.
-    /// Devolve o motor (já parado) e a pasta onde ela estava montada.
+    /// Devolve o motor (já parado) e a pasta onde ela estava montada. Quem chama segura
+    /// `reopening`: senão, uma reabertura em andamento monta a conta de novo.
     async fn remove_account(&self, email: &str) -> Option<(Arc<Engine>, PathBuf)> {
         let account = {
             let mut accounts = self.accounts.lock().await;
@@ -2322,6 +2329,8 @@ impl Daemon {
             ));
         }
         let pairs = engine.store().pairs().map_err(failed)?;
+        // Da saída à volta da conta, sem a reabertura das contas no meio.
+        let reopening = self.reopening.lock().await;
         let (engine, _) = self
             .remove_account(&email)
             .await
@@ -2330,6 +2339,7 @@ impl Daemon {
         let (mounted, moved) = self.mount_account(&email, access, beside).await?;
         let engine = mounted.engine.clone();
         self.register_account(mounted, moved).await;
+        drop(reopening);
         // Os de dispositivo não voltam: a escolha de cada dispositivo fica no banco apagado, e ele
         // pergunta de novo na próxima vez que for conectado.
         for pair in pairs.iter().filter(|p| p.kind != PairKind::Device) {
@@ -2362,6 +2372,8 @@ impl Daemon {
     /// Desmonta, esquece os tokens e apaga os dados locais da conta (banco e cache). As cópias
     /// guardadas (Lost and Found e Uploads cancelados) ficam: são a única cópia dessas versões.
     pub(crate) async fn sign_out(&self, email: &str) -> Result<(), ServiceError> {
+        // Sem isso, a reabertura das contas em andamento montava de novo a que acabou de sair.
+        let _reopening = self.reopening.lock().await;
         let (engine, mount_point) = self
             .remove_account(email)
             .await

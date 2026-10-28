@@ -2762,6 +2762,23 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
     assert!(!h.proxy.status("").await.unwrap().paused);
 }
 
+/// Sair da conta espera a reabertura das contas terminar: senão, a conta que acabou de sair
+/// voltava montada pela reabertura.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_waits_for_the_reopening() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let reopening = h.daemon.hold_reopening().await;
+    let daemon = h.daemon.clone();
+    let mut logout = tokio::spawn(async move { daemon.logout("", "discard", "").await });
+    let early = tokio::time::timeout(std::time::Duration::from_millis(300), &mut logout).await;
+    assert!(early.is_err(), "sair esperou a reabertura");
+
+    drop(reopening);
+    logout.await.unwrap().unwrap();
+    assert!(h.saved_accounts().is_empty());
+}
+
 /// Vinte arquivos com cara de cifrados (bytes pseudoaleatórios) em `dir`.
 async fn write_encrypted_burst(dir: PathBuf) {
     blocking(move || {

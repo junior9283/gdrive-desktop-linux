@@ -537,7 +537,9 @@ async fn offline_engine_does_not_wait_for_thumbnails() {
 }
 
 /// Regressão da 0.6.0: 8 saltos num vídeo (o player procurando a cena), 256 KiB lidos em cada
-/// um, baixavam 62 MiB; cada salto deve baixar só os blocos que lê.
+/// um, baixavam 62 MiB; cada salto deve baixar só os blocos que lê. O limite (24 MiB) tem folga
+/// para o read-ahead do kernel, que varia de uma máquina para outra (o runner do GitHub já
+/// baixou 19 MiB onde aqui são menos); a regressão real passava dos 32 MiB.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn seeks_download_little_more_than_what_is_read() {
     use std::io::{Read, Seek, SeekFrom};
@@ -561,7 +563,7 @@ async fn seeks_download_little_more_than_what_is_read() {
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     let mib = m.fake.downloaded_bytes() / MIB as u64;
-    assert!(mib <= 16, "{mib} MiB baixados em 8 saltos");
+    assert!(mib <= 24, "{mib} MiB baixados em 8 saltos");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

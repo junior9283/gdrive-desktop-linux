@@ -114,6 +114,12 @@ o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$G
   botão (ex.: `.generate-link` só vale depois de o serviço devolver o link de login) antes do
   `click`. Uma vez só, sem reproduzir em 45 rodadas, o primeiro uso apareceu em "Entrar na conta"
   antes do clique no guia; se voltar, instrumente os eventos do `dispatch` (`window.__eventos`).
+- **Limite de bytes do teste de saltos depende do kernel:** `seeks_download_little_more_than_what_is_read`
+  conta o que o kernel adianta na leitura (read-ahead), que varia entre máquinas. O limite era 16
+  MiB e o CI da tag `v1.2.2` baixou 19 MiB uma vez (o mesmo código passou na `main` e aqui, 12 de 12);
+  subiu para 24 MiB, que ainda pega a regressão de verdade (32 e 62 MiB), mas deixa passar uma
+  entre 16 e 24 MiB. Se aparecer um teste que precise de menos folga, meça em algumas execuções do
+  CI em vez de apertar o número, ou conte requisições ao Drive, que dependem menos do kernel.
 - **FUSE na CI:** é preciso instalar `fuse3` e liberar `/dev/fuse` (`chmod 666`) antes dos testes.
 - **Montagens órfãs:** um teste que entra em pânico pode deixar uma montagem `gdrive-desktop-*`
   em pasta temporária. Confira com `mount | grep -c gdrive-desktop`, que deve dar 0. Para limpar

@@ -3246,6 +3246,46 @@ async fn relocation_gives_up_when_the_old_pass_never_ends() {
     h.fake.clear_faults();
 }
 
+/// A conta parar (aqui, a reabertura das contas) no meio da espera pela passada antiga encerra a
+/// troca: o par continua no lugar antigo, sem laço novo de uma conta que já saiu.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relocation_stops_when_the_account_shuts_down() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    let id = h
+        .proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+    let first = local_folder(&h, "Primeira");
+    h.fake.inject(gdl_fake_drive::Fault::DelayUploads(
+        std::time::Duration::from_secs(30),
+    ));
+    std::fs::write(docs.join("b.txt"), b"dois").unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    h.proxy
+        .relocate_local_folder("", id, first.to_str().unwrap())
+        .await
+        .unwrap();
+
+    h.daemon.restart_accounts().await;
+    h.fake.clear_faults();
+
+    let engine = h.daemon.engine().await.unwrap();
+    let pair = engine
+        .store()
+        .pairs()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap();
+    assert_eq!(pair.local, docs, "a pasta continua no lugar antigo");
+    assert!(!first.join("a.txt").exists());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn second_relocation_waits_for_the_first() {
     let h = Harness::new().await;

@@ -133,6 +133,16 @@ const MIGRATIONS: &[&str] = &[
     -- A `version` do Drive na última mudança aplicada (0: ainda nenhuma com o campo).
     ALTER TABLE items ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
 ",
+    "
+    -- Mudanças de lugar já aplicadas aqui e ainda não confirmadas pelo Drive (`PendingMove`).
+    CREATE TABLE pending_moves (
+        item_id      TEXT PRIMARY KEY,
+        parent       TEXT NOT NULL,
+        remote_name  TEXT NOT NULL,
+        drive_parent TEXT,
+        drive_name   TEXT NOT NULL
+    ) WITHOUT ROWID;
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.

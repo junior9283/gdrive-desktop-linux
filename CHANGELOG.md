@@ -8,6 +8,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 ## [Não lançado]
 
 ### Corrigido
+- Mover ou renomear muitos arquivos de uma vez (um `mv` em lote, de outro programa) não trava mais
+  as pastas no Dolphin: o lugar novo aparece na hora e o Google Drive é avisado em segundo plano,
+  com os pedidos guardados no banco até ele confirmar (uma queda do serviço não os perde). Se o
+  Drive recusar, o item volta ao lugar de antes e aparece um aviso.
 - O ícone da bandeja não fica mais animado ("sincronizando") depois de terminar o último envio ou
   download: o serviço agora avisa a bandeja quando o resumo do estado muda.
 

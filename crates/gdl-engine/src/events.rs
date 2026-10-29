@@ -151,6 +151,10 @@ pub enum EngineEvent {
         action: DeniedAction,
         name: String,
     },
+    /// O Drive não aceitou uma mudança de lugar já mostrada aqui: `name` voltou ao lugar de antes.
+    MoveFailed {
+        name: String,
+    },
     /// O armazenamento da conta subiu para a faixa de `percent` (90 ou 95).
     QuotaAlmostFull {
         percent: u8,

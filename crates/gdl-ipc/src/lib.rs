@@ -129,8 +129,8 @@ pub struct NotificationItem {
     pub id: u64,
     /// Família do aviso: `lost-and-found`, `offline`, `disk-low`, `quota-full`, `upload-failed`,
     /// `copied-as-shortcut`, `moved-to-shared-drive`, `moved-out-of-shared-drive`,
-    /// `moved-to-shared-folder`, `busy-shared-drive`, `folder-move-unsupported`, `mount-moved`,
-    /// `resume-syncing` ou `upload-canceled`.
+    /// `moved-to-shared-folder`, `busy-shared-drive`, `folder-move-unsupported`, `move-failed`,
+    /// `mount-moved`, `resume-syncing` ou `upload-canceled`.
     pub kind: String,
     pub title: String,
     pub body: String,

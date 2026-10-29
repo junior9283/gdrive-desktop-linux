@@ -35,6 +35,21 @@ pub enum Upload {
 }
 
 /// Nunca chegou ao Drive: ID temporário ou trava/temporário de editor.
+/// Avisa (`NoPermission`) quando `e` é a recusa do Drive por falta de permissão; `true` se avisou.
+pub(crate) fn notify_denied(
+    events: &tokio::sync::broadcast::Sender<EngineEvent>,
+    action: DeniedAction,
+    name: &str,
+    e: &DriveError,
+) -> bool {
+    let denied = matches!(e, DriveError::PermissionDenied);
+    if denied {
+        let name = name.to_owned();
+        let _ = events.send(EngineEvent::NoPermission { action, name });
+    }
+    denied
+}
+
 pub(crate) fn never_uploaded(item: &Item) -> bool {
     is_local_id(&item.id) || item.local_state == LocalState::LocalOnly
 }
@@ -203,9 +218,8 @@ impl Engine {
 
     /// Avisa (`NoPermission`) quando o erro é a recusa do Drive por falta de permissão.
     fn denied(&self, action: DeniedAction, name: &str, e: EngineError) -> EngineError {
-        if let EngineError::Drive(DriveError::PermissionDenied) = e {
-            let name = name.to_owned();
-            let _ = self.events.send(EngineEvent::NoPermission { action, name });
+        if let EngineError::Drive(drive) = &e {
+            notify_denied(&self.events, action, name, drive);
         }
         e
     }
@@ -284,8 +298,14 @@ impl Engine {
             }
             None => None,
         };
-        let moved = (self.relocate(item, id, parent, name).await)
-            .map_err(|e| self.denied(action, &old_name, e))?;
+        let remote_name = to_remote(name);
+        // Com aviso de quem passa a ver o item, espera o Drive (o aviso é de uma mudança feita).
+        let moved = if exposure.is_none() && self.moves_in_background(&item, parent, &remote_name) {
+            self.move_in_background(item, parent, remote_name)?
+        } else {
+            (self.relocate(item, id, parent, name).await)
+                .map_err(|e| self.denied(action, &old_name, e))?
+        };
         self.screen_rename(&old_name, name, now_ms());
         if let Some(exposure) = exposure {
             let name = moved.local_name.clone();

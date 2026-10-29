@@ -12,6 +12,7 @@ pub mod health;
 pub mod ids;
 pub mod indexer;
 pub mod kept;
+mod moves;
 pub mod ops;
 pub mod pins;
 pub mod ransomware;

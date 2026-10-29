@@ -129,7 +129,7 @@ fn apply(store: &Store, changes: Vec<Change>, only_known: bool) -> Result<(usize
         let mut pending: BTreeMap<ItemId, (Item, bool)> = BTreeMap::new();
         let mut applied = 0;
         for change in changes {
-            let (id, new) = match change {
+            let (id, mut new) = match change {
                 // Item de Drive desligado (ou que foi para um): sai do banco, se estava nele.
                 Change::Upsert(r)
                     if r.drive_id
@@ -164,6 +164,15 @@ fn apply(store: &Store, changes: Vec<Change>, only_known: bool) -> Result<(usize
                     old => (old, false),
                 },
             };
+            // Uma mudança de lugar pedida aqui e ainda não confirmada pelo Drive vale mais que a
+            // resposta dele (que ainda traz o lugar de antes).
+            if let (Some(n), Some(o)) = (new.as_mut(), old.as_ref())
+                && batch.has_pending_move(&id)?
+            {
+                n.parent = o.parent.clone();
+                n.remote_name = o.remote_name.clone();
+                n.local_name = o.local_name.clone();
+            }
             // Apagado de vez sem edição local: sai do banco (e da lixeira daqui).
             if new.is_none()
                 && let Some(gone) = old.as_ref().filter(|o| o.local_state == LocalState::Clean)

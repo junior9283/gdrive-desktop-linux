@@ -200,22 +200,87 @@ async fn rename_and_move_between_folders() {
         m.drive().join("A/relatorio.txt"),
     )
     .unwrap();
-    assert_eq!(m.fake.meta(&id)["name"], "relatorio.txt");
+    // O Drive é avisado em segundo plano.
+    wait_until("o nome novo no Drive", || {
+        m.fake.meta(&id)["name"] == "relatorio.txt"
+    });
     std::fs::rename(
         m.drive().join("A/relatorio.txt"),
         m.drive().join("B/final.txt"),
     )
     .unwrap();
 
-    let meta = m.fake.meta(&id);
-    assert_eq!(meta["name"], "final.txt");
-    assert_eq!(meta["parents"], serde_json::json!([b]));
+    wait_until("o lugar novo no Drive", || {
+        let meta = m.fake.meta(&id);
+        meta["name"] == "final.txt" && meta["parents"] == serde_json::json!([b])
+    });
     assert!(names(&m.drive().join("A")).is_empty());
     assert_eq!(names(&m.drive().join("B")), ["final.txt"]);
     assert_eq!(std::fs::read(m.drive().join("B/final.txt")).unwrap(), b"r");
     // Para fora do Meu Drive não dá.
     let err = std::fs::rename(m.drive().join("B/final.txt"), m.mnt.join("final.txt")).unwrap_err();
     assert_eq!(err.raw_os_error(), Some(libc::EXDEV));
+}
+
+/// Um lote de movimentações com o Drive lento (cada alteração leva 400 ms) não deixa as pastas
+/// envolvidas sem responder: o kernel segura as duas pastas enquanto cada `rename` não volta, e
+/// o Dolphin as via vazias ou ilegíveis (o cadeado). Cada `rename` agora volta sem esperar o Drive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_batch_of_moves_does_not_stall_the_folders() {
+    const FILES: usize = 16;
+    let fake = FakeDrive::start().await;
+    let root = fake.root_id();
+    let (from, to) = (
+        fake.add_folder(&root, "Origem"),
+        fake.add_folder(&root, "Destino"),
+    );
+    let ids: Vec<String> = (0..FILES)
+        .map(|n| fake.add_file(&from, &format!("arquivo{n:02}.txt"), b"x".to_vec()))
+        .collect();
+    let m = Mounted::new(fake).await;
+    m.fake.inject(gdl_fake_drive::Fault::DelayUpdates(
+        std::time::Duration::from_millis(400),
+    ));
+    let (origin, target) = (m.drive().join("Origem"), m.drive().join("Destino"));
+
+    let started = std::time::Instant::now();
+    let movers: Vec<_> = (0..FILES)
+        .map(|n| {
+            let (a, b) = (origin.clone(), target.clone());
+            std::thread::spawn(move || {
+                let name = format!("arquivo{n:02}.txt");
+                std::fs::rename(a.join(&name), b.join(&name)).unwrap();
+            })
+        })
+        .collect();
+    // Como o Dolphin, lista as duas pastas enquanto o lote anda.
+    let mut slowest = std::time::Duration::ZERO;
+    while movers.iter().any(|t| !t.is_finished()) {
+        for dir in [&origin, &target] {
+            let listed = std::time::Instant::now();
+            let _ = std::fs::read_dir(dir).map(|d| d.count());
+            slowest = slowest.max(listed.elapsed());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    movers.into_iter().for_each(|t| t.join().unwrap());
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "o lote esperou o Drive: {:?}",
+        started.elapsed()
+    );
+    assert!(
+        slowest < std::time::Duration::from_millis(500),
+        "pasta travada: {slowest:?}"
+    );
+    assert_eq!(names(&target).len(), FILES);
+    assert!(names(&origin).is_empty());
+    // O Drive recebe tudo depois.
+    wait_until("o lote no Drive", || {
+        ids.iter()
+            .all(|id| m.fake.meta(id)["parents"] == serde_json::json!([to]))
+    });
 }
 
 /// Os avisos já emitidos pelo motor (sem os eventos de estado).
@@ -366,7 +431,9 @@ async fn move_between_same_owner_folders_is_quiet() {
     )
     .unwrap();
 
-    assert_eq!(m.fake.meta(&file)["parents"], serde_json::json!([two]));
+    wait_until("o lugar novo no Drive", || {
+        m.fake.meta(&file)["parents"] == serde_json::json!([two])
+    });
     assert!(warnings(&mut events).is_empty());
 }
 
@@ -405,7 +472,9 @@ async fn move_into_own_folder_is_quiet() {
 
     std::fs::rename(m.drive().join("Pasta/a.txt"), m.drive().join("Minha/a.txt")).unwrap();
 
-    assert_eq!(m.fake.meta(&file)["parents"], serde_json::json!([mine]));
+    wait_until("o lugar novo no Drive", || {
+        m.fake.meta(&file)["parents"] == serde_json::json!([mine])
+    });
     assert!(warnings(&mut events).is_empty());
 }
 
@@ -727,8 +796,10 @@ async fn restore_from_drive_trash_moves_it_back() {
 
     std::fs::rename(trash.join("lixo.txt"), m.drive().join("Destino/lixo.txt")).unwrap();
 
+    wait_until("o lugar novo no Drive", || {
+        m.fake.meta(&id)["parents"][0] == folder.as_str()
+    });
     assert_eq!(m.fake.meta(&id)["trashed"], false);
-    assert_eq!(m.fake.meta(&id)["parents"][0], folder.as_str());
     assert!(names(&trash).is_empty());
     assert_eq!(names(&m.drive().join("Destino")), ["lixo.txt"]);
     assert_eq!(

@@ -1,5 +1,6 @@
 //! Banco SQLite por conta: metadados do Drive, intervalos em cache, fila de envios.
 
+mod pending_moves;
 pub mod salvage;
 mod schema;
 pub mod types;
@@ -14,6 +15,7 @@ use rusqlite::{
     Connection, OptionalExtension, Row, TransactionBehavior, named_params, params, params_from_iter,
 };
 
+pub use pending_moves::PendingMove;
 pub use types::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -1283,6 +1285,7 @@ fn purge_rows(tx: &Connection, id: &ItemId) -> Result<()> {
         "DELETE FROM ranges WHERE item_id = ?1",
         "DELETE FROM access WHERE item_id = ?1",
         "DELETE FROM upload_queue WHERE item_id = ?1",
+        "DELETE FROM pending_moves WHERE item_id = ?1",
     ] {
         tx.execute(sql, [&id.0])?;
     }

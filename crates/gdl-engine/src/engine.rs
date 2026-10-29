@@ -83,6 +83,11 @@ pub struct Engine {
     pub(crate) recovered: usize,
     pub(crate) activity: Arc<ActivityLog>,
     pub(crate) thumbs: Arc<ThumbSeeder>,
+    /// Para as confirmações de mudança de lugar em segundo plano (`moves`) quando o motor cai.
+    pub(crate) moves_stop: CancellationToken,
+    /// Quantas confirmações de mudança de lugar falam com o Drive ao mesmo tempo.
+    pub(crate) moves_gate: Arc<tokio::sync::Semaphore>,
+    _moves_guard: tokio_util::sync::DropGuard,
 }
 
 /// Motivos da pausa da sincronização.
@@ -226,6 +231,7 @@ impl Engine {
         recover_on_start(&store, &cache)?;
         let activity = Arc::new(ActivityLog::default());
         let suspicious = store.kv_get(SUSPICIOUS_PAUSE)?.as_deref() == Some("1");
+        let moves_stop = CancellationToken::new();
         Ok(Engine {
             pins: PinManager::new(store.clone(), cache.clone()).with_activity(activity.clone()),
             uploads: UploadWorker::new(
@@ -259,6 +265,9 @@ impl Engine {
             ransomware: Default::default(),
             saved_while_paused: AtomicBool::new(false),
             recovered,
+            moves_gate: Arc::new(tokio::sync::Semaphore::new(crate::moves::MOVES_AT_ONCE)),
+            moves_stop: moves_stop.clone(),
+            _moves_guard: moves_stop.drop_guard(),
         })
     }
 
@@ -553,6 +562,7 @@ impl Engine {
 
     /// Roda os laços do serviço até `shutdown` ser cancelado.
     pub async fn run(&self, shutdown: CancellationToken) {
+        self.resume_pending_moves();
         if self.recovered > 0 {
             // Sem ninguém ouvindo, o aviso pode se perder.
             let _ = self.events.send(EngineEvent::ItemsRecovered {

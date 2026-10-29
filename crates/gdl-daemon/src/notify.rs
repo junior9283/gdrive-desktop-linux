@@ -232,6 +232,11 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
                 i18n.tr("notify-busy-drive-body", &[("name", name)]),
             )
         },
+        EngineEvent::MoveFailed { name } => note(
+            "move-failed",
+            "notify-move-failed-title",
+            i18n.tr("notify-move-failed-body", &[("name", name)]),
+        ),
         EngineEvent::FolderMoveUnsupported { name } => note(
             "folder-move-unsupported",
             "notify-folder-move-title",

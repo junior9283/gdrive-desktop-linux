@@ -303,6 +303,9 @@ impl Engine {
         let moved = if exposure.is_none() && self.moves_in_background(&item, parent, &remote_name) {
             self.move_in_background(item, parent, remote_name)?
         } else {
+            // Um pedido anterior ainda não confirmado mudaria o lugar de partida: espera e relê.
+            self.settle_pending_move(id).await?;
+            let item = self.item(id)?;
             (self.relocate(item, id, parent, name).await)
                 .map_err(|e| self.denied(action, &old_name, e))?
         };

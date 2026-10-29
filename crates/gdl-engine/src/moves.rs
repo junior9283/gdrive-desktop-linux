@@ -28,6 +28,10 @@ const PASSING_RETRY: Duration = if cfg!(test) {
     Duration::from_secs(5)
 };
 
+/// Quanto uma mudança de lugar que fala com o Drive na hora espera um pedido anterior do mesmo
+/// item.
+const PENDING_WAIT: Duration = Duration::from_secs(60);
+
 /// Quantas confirmações falam com o Drive ao mesmo tempo.
 pub(crate) const MOVES_AT_ONCE: usize = 4;
 
@@ -80,6 +84,20 @@ impl Engine {
             self.confirm_in_background(id.clone());
         }
         self.item(&id)
+    }
+
+    /// Espera o pedido de `id` ser confirmado (a confirmação roda sozinha). Os caminhos que falam
+    /// com o Drive na hora partem do lugar que ele tem; com um pedido de pé, esse lugar é outro, e
+    /// o pedido velho, mandado depois, desfaria o novo.
+    pub(crate) async fn settle_pending_move(&self, id: &ItemId) -> Result<()> {
+        let deadline = tokio::time::Instant::now() + PENDING_WAIT;
+        while self.store.pending_move(id)?.is_some() {
+            if tokio::time::Instant::now() > deadline {
+                return Err(EngineError::Drive(DriveError::Offline));
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        Ok(())
     }
 
     /// Retoma os pedidos que a partida anterior deixou sem confirmar.
@@ -309,6 +327,24 @@ mod tests {
         .await;
         assert_eq!(parents(&fake, &file), [from]);
         assert_eq!(fake.meta(&file.0)["name"], "b.txt");
+    }
+
+    /// Uma mudança de lugar que fala com o Drive na hora espera o pedido anterior do mesmo item,
+    /// em vez de partir de um lugar que o Drive ainda não tem.
+    #[tokio::test]
+    async fn a_synchronous_path_waits_for_the_pending_move() {
+        let (fake, engine, _tmp, file, to, _from) = slow_drive().await;
+        engine.move_item(&file, &to, "a.txt").await.unwrap();
+        assert!(engine.store().pending_move(&file).unwrap().is_some());
+
+        engine.settle_pending_move(&file).await.unwrap();
+
+        assert!(engine.store().pending_move(&file).unwrap().is_none());
+        assert_eq!(
+            parents(&fake, &file),
+            [to.0.clone()],
+            "o Drive já tem o lugar"
+        );
     }
 
     /// Um erro passageiro do Drive (aqui, 503 além das tentativas do cliente) não desfaz o que a

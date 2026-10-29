@@ -327,6 +327,38 @@ async fn moving_a_folder_into_a_shared_drive_is_refused() {
     assert_eq!(m.fake.meta(&file)["name"], "a.txt");
 }
 
+/// Um movimento que o Drive ainda não confirmou, seguido de outro que avisa exposição (e fala com
+/// o Drive na hora): o segundo parte do lugar que o Drive tem e o pedido velho não o desfaz.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_move_with_a_warning_after_a_pending_move_is_not_undone() {
+    let fake = FakeDrive::start().await;
+    let (drive, file) = drive_and_my_files(&fake);
+    fake.add_folder(&fake.root_id(), "Minha");
+    let m = Mounted::new(fake).await;
+    let mut events = m.engine.subscribe();
+    m.fake.inject(gdl_fake_drive::Fault::DelayUpdates(
+        std::time::Duration::from_millis(600),
+    ));
+    let target = m.mnt.join("Drives compartilhados/Equipe");
+
+    std::fs::rename(m.drive().join("Pasta/a.txt"), m.drive().join("Minha/a.txt")).unwrap();
+    std::fs::rename(m.drive().join("Minha/a.txt"), target.join("a.txt")).unwrap();
+
+    wait_until("o Drive no drive compartilhado", || {
+        m.fake.meta(&file)["parents"] == serde_json::json!([drive])
+    });
+    // O pedido velho (para `Minha`) não chega depois para desfazer.
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    assert_eq!(m.fake.meta(&file)["parents"], serde_json::json!([drive]));
+    assert_eq!(names(&target), ["a.txt"]);
+    assert_eq!(
+        warnings(&mut events),
+        [EngineEvent::MovedToSharedDrive {
+            name: "a.txt".into()
+        }]
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn moving_a_file_into_a_shared_drive_moves_it_and_warns() {
     let fake = FakeDrive::start().await;

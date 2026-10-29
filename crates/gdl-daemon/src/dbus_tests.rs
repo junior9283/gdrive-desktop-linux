@@ -1075,7 +1075,7 @@ async fn cache_change_waits_for_open_files() {
 /// A reabertura das contas (o cache mudou de lugar) espera a montagem antiga largar o arquivo
 /// que ficou aberto nela: o que o editor grava até fechar ainda chega ao Drive.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn restart_waits_for_the_old_session() {
+async fn restart_waits_for_open_files() {
     use std::io::Write;
     let h = Harness::new().await;
     h.fake
@@ -1107,6 +1107,31 @@ async fn restart_waits_for_the_old_session() {
             .is_some_and(|id| h.fake.content(id) == b"antes depois")
     })
     .await;
+}
+
+/// Um terminal parado dentro da montagem (sem arquivo aberto) segura a montagem antiga desfeita
+/// (e o motor que ela usa), mas não a reabertura: as contas voltam depois do prazo dos motores
+/// antigos (`ENGINE_STOP_LIMIT`, 10 s).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restart_does_not_wait_for_a_shell_inside_the_mount() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let mut shell = std::process::Command::new("sleep")
+        .arg("30")
+        .current_dir(h.drive())
+        .spawn()
+        .unwrap();
+
+    let restarted = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        h.daemon.restart_accounts(),
+    )
+    .await;
+    let _ = shell.kill();
+    let _ = shell.wait();
+
+    assert!(restarted.is_ok(), "a reabertura esperou o terminal");
+    assert!(h.daemon.engine().await.is_some(), "a conta voltou");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2796,7 +2821,12 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
     let keys: Vec<_> = note.actions.iter().step_by(2).map(String::as_str).collect();
     assert_eq!(
         keys,
-        ["default", "review-activity", "recognize-activity", "resume"]
+        [
+            "default",
+            "review-activity",
+            "recognize-activity",
+            "allow-sync"
+        ]
     );
     assert!(h.proxy.status("").await.unwrap().paused);
 
@@ -2868,6 +2898,25 @@ async fn resume_on_one_account_keeps_the_other_suspicious() {
         h.proxy.status(OTHER).await.unwrap().paused,
         "a suspeita continua"
     );
+}
+
+/// "Retomar" do aviso "salvo durante a pausa" não desfaz a pausa por atividade suspeita da
+/// própria conta (os arquivos cifrados subiriam): só "Permitir sincronização", no aviso dela.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resume_from_another_note_keeps_the_suspicious_pause() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    write_encrypted_burst(h.drive()).await;
+    poll_until("conta pausada", || h.proxy.status(""), |s| s.paused).await;
+
+    h.daemon.run_action("", "resume").await.unwrap();
+    assert!(
+        h.proxy.status("").await.unwrap().paused,
+        "a suspeita continua"
+    );
+
+    h.daemon.run_action("", "allow-sync").await.unwrap();
+    assert!(!h.proxy.status("").await.unwrap().paused);
 }
 
 /// Os avisos que dá para desligar trazem "Não mostrar de novo", que desliga a família.
@@ -3298,7 +3347,9 @@ async fn folder_failures_are_listed_in_errors() {
     let item = errors.iter().find(|e| e.path == x).unwrap();
     assert_eq!(item.category, "quota", "{item:?}");
     assert_eq!(item.name, "x.txt");
-    assert!(h.proxy.status("").await.unwrap().errors >= 1);
+    let status = h.proxy.status("").await.unwrap();
+    assert!(status.errors >= 1);
+    assert_eq!(status.state, "error", "{status:?}");
 
     h.proxy
         .open_item("", &item.item_id, "folder")
@@ -3306,6 +3357,13 @@ async fn folder_failures_are_listed_in_errors() {
         .unwrap();
     let folder = docs.display().to_string();
     wait_until("a pasta do arquivo aberta", || h.opened().contains(&folder)).await;
+    // Um ID forjado não abre nada fora da lista de falhas do par.
+    let (pair, _) = item.item_id.rsplit_once(':').unwrap();
+    for rel in ["../../segredo", "/etc"] {
+        let forged = format!("{pair}:{rel}");
+        let err = h.proxy.open_item("", &forged, "file").await.unwrap_err();
+        assert_eq!(err.short_name(), "NotFound", "{forged}: {err}");
+    }
 
     h.fake.clear_faults();
     h.proxy.retry("", &item.item_id).await.unwrap();

@@ -1465,7 +1465,12 @@ async fn screenshots_for_the_readme() {
             "arquivos-off-line",
         ),
         ("preferences", "p.path", "Google Drive", "preferencias"),
-        ("about", ".about-version", "0.", "sobre"),
+        (
+            "about",
+            ".about-version",
+            env!("CARGO_PKG_VERSION"),
+            "sobre",
+        ),
         ("uninstall", ".uninstall", "", "desinstalar"),
         ("feedback", ".feedback", "", "feedback"),
         (

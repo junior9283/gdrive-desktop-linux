@@ -302,7 +302,7 @@ impl FolderSync {
                     self.set_state(PairState::Stopped(StopReason::NoPermission))?;
                     report.failed.push(Failure {
                         rel: String::new(),
-                        category: ErrorCategory::NoPermission,
+                        category: folder_category(ErrorCategory::NoPermission),
                         message: e.to_string(),
                     });
                     break;
@@ -368,11 +368,11 @@ impl FolderSync {
 
     fn failed(&self, report: &mut Report, rel: String, e: SyncError) {
         tracing::warn!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
-        let category = match &e {
+        let category = folder_category(match &e {
             SyncError::Drive(e) => ErrorCategory::of(e),
             SyncError::Engine(e) => ErrorCategory::of_engine(e),
             _ => ErrorCategory::Unknown,
-        };
+        });
         report.failed.push(Failure {
             rel,
             category,
@@ -1129,6 +1129,16 @@ fn under<'a, V>(
     let prefix = format!("{dir}/");
     map.range(prefix.clone()..)
         .take_while(move |(p, _)| p.starts_with(&prefix))
+}
+
+/// A categoria que a janela de erros mostra para uma falha das pastas do computador: o texto de
+/// "sem permissão" fala da cópia no Lost and Found, que elas não fazem (o arquivo continua na
+/// pasta).
+fn folder_category(category: ErrorCategory) -> ErrorCategory {
+    match category {
+        ErrorCategory::NoPermission | ErrorCategory::LostAndFound => ErrorCategory::Unknown,
+        category => category,
+    }
 }
 
 #[cfg(test)]

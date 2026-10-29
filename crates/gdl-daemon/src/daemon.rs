@@ -51,7 +51,7 @@ use crate::menu::{self, Action};
 use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
-    self, DEVICE_ALWAYS, DEVICE_IGNORE, MOVE_LOST_FOUND, MUTE, Notification, Notifier,
+    self, ALLOW_SYNC, DEVICE_ALWAYS, DEVICE_IGNORE, MOVE_LOST_FOUND, MUTE, Notification, Notifier,
     OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE, OPEN_WINDOW, OPTIONAL_KINDS,
     RECOGNIZE_ACTIVITY, RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT, SIGN_IN,
 };
@@ -136,7 +136,8 @@ struct Account {
     folders: Arc<folders::Runners>,
     /// Os arquivos abertos na montagem, que continua atendendo-os depois de desmontada.
     open_files: gdl_fs::OpenFiles,
-    session: fuser::BackgroundSession,
+    /// Só existe para cair: largá-la desmonta (veja a ordem em `unmount`).
+    _session: fuser::BackgroundSession,
     _stop: DropGuard,
 }
 
@@ -586,8 +587,9 @@ impl Daemon {
 
     /// Para todas as contas e as reabre com as preferências de agora, sem reiniciar o serviço;
     /// uma reabertura espera a outra terminar, e um login espera a reabertura. Antes de reabrir,
-    /// espera as sessões FUSE desfeitas terminarem (fecha o que ficou aberto nelas) e as tarefas
-    /// dos motores antigos (com limite: uma que não termina vai para o log).
+    /// espera fechar o que ficou aberto nas montagens desfeitas e as tarefas dos motores antigos
+    /// terminarem (com limite: uma que não termina vai para o log). Não espera a sessão FUSE
+    /// antiga acabar: um terminal parado dentro da montagem a segura sem ter arquivo aberto.
     pub(crate) async fn restart_accounts(self: &Arc<Self>) {
         let _reopening = self.reopening.lock().await;
         self.resuming.store(true, Ordering::Relaxed);
@@ -596,23 +598,21 @@ impl Daemon {
             .lock()
             .await
             .iter()
-            .map(|a| Arc::downgrade(&a.engine))
+            .map(|a| (a.open_files.clone(), Arc::downgrade(&a.engine)))
             .collect();
-        let sessions = self.stop_all_accounts().await;
+        self.stop_all_accounts().await;
+        let open = || old.iter().any(|(files, _)| files.count() > 0);
+        if open() {
+            tracing::info!("esperando fechar os arquivos abertos nas montagens antigas");
+        }
         // Sem limite de propósito: reabrir com um arquivo aberto na montagem antiga perderia o
         // que for gravado nele (quem chama já recusa quando há arquivo aberto; aqui só sobra
-        // um aberto no meio-tempo, e o editor fechá-lo libera a espera). Olha de tempos em
-        // tempos em vez de esperar numa thread: assim o encerramento do serviço não fica preso.
-        while sessions.iter().any(|session| !session.is_finished()) {
+        // um aberto no meio-tempo, e o editor fechá-lo libera a espera).
+        while open() {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        for session in sessions {
-            if !matches!(session.join(), Ok(Ok(()))) {
-                tracing::warn!("uma montagem antiga terminou com erro");
-            }
-        }
         let deadline = tokio::time::Instant::now() + ENGINE_STOP_LIMIT;
-        while old.iter().any(|engine| engine.strong_count() > 0) {
+        while old.iter().any(|(_, engine)| engine.strong_count() > 0) {
             if tokio::time::Instant::now() > deadline {
                 tracing::warn!("um motor antigo não terminou; reabrindo assim mesmo");
                 break;
@@ -951,11 +951,15 @@ impl Daemon {
     /// A ação `key` de um aviso, na conta `account` dele.
     pub(crate) async fn run_action(&self, account: &str, key: &str) -> Result<(), ServiceError> {
         let folder = match key {
-            // O aviso de atividade suspeita libera a conta dele; a pausa do usuário é do app
-            // inteiro, como "Retomar" no menu, e não desfaz a suspeita das outras contas.
-            RESUME => {
+            // Só o aviso de atividade suspeita libera a suspeita da conta dele; a pausa do usuário
+            // é do app inteiro, como "Retomar" no menu, e não desfaz a suspeita de nenhuma conta.
+            RESUME | ALLOW_SYNC => {
                 let engine = self.account_engine(account).await?;
-                engine.resume();
+                if key == ALLOW_SYNC {
+                    engine.resume();
+                } else {
+                    engine.resume_keeping_suspicious();
+                }
                 if self.paused.swap(false, Ordering::SeqCst) {
                     for other in self.accounts.lock().await.iter() {
                         other.engine.resume_keeping_suspicious();
@@ -1396,7 +1400,7 @@ impl Daemon {
             _stop: shutdown.clone().drop_guard(),
             shutdown,
             open_files,
-            session,
+            _session: session,
         };
         Ok((account, moved))
     }
@@ -1535,9 +1539,9 @@ impl Daemon {
 
     /// Desmonta e para todas as contas, sem mexer na lista guardada (o serviço vai voltar a
     /// elas); quem sai de uma conta é `sign_out`, que atualiza a lista.
-    async fn stop_all_accounts(&self) -> Vec<FuseThread> {
+    async fn stop_all_accounts(&self) {
         let accounts = std::mem::take(&mut *self.accounts.lock().await);
-        unmount(accounts).await
+        unmount(accounts).await;
     }
 
     /// Tira a conta `email` da lista e a desmonta, sem mexer nas outras nem em `accounts`.
@@ -1973,6 +1977,10 @@ impl Daemon {
             let account = self.folder_account(account).await?;
             let not_found = || ServiceError::NotFound(item_id.into());
             let sync = account.runners.get(pair).ok_or_else(not_found)?;
+            // Só um caminho da lista de falhas do par: nada fora da pasta dele.
+            if !sync.has_failed(rel) {
+                return Err(not_found());
+            }
             let path = sync.pair().local.join(rel);
             match target {
                 "file" => self.open_local(&path),
@@ -2500,9 +2508,6 @@ impl Daemon {
     }
 }
 
-/// A thread de uma sessão FUSE desmontada: termina quando fecha o último arquivo aberto nela.
-type FuseThread = std::thread::JoinHandle<std::io::Result<()>>;
-
 /// Começo do `item_id` de um erro de pasta do computador: `folder:<par>:<caminho relativo>`.
 const FOLDER_ERROR: &str = "folder:";
 
@@ -2517,17 +2522,9 @@ fn folder_error(item_id: &str) -> Option<(i64, &str)> {
     Some((pair.parse().ok()?, rel))
 }
 
-/// Desmonta e depois para as contas; devolve as threads das montagens desfeitas.
-async fn unmount(accounts: Vec<Account>) -> Vec<FuseThread> {
-    let detach = move || {
-        accounts
-            .into_iter()
-            .map(|account| gdl_fs::detach(account.session))
-            .collect()
-    };
-    tokio::task::spawn_blocking(detach)
-        .await
-        .unwrap_or_default()
+/// Desmonta e para as contas (os campos de `Account` caem nessa ordem).
+async fn unmount(accounts: Vec<Account>) {
+    let _ = tokio::task::spawn_blocking(move || drop(accounts)).await;
 }
 
 /// A pasta de uma conta que não é a primeira: `<preferida> (<e-mail>)`.

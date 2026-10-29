@@ -396,6 +396,10 @@ impl Daemon {
             if let Some(old) = old {
                 let _ = old.await;
             }
+            // A conta parou durante a espera: o laço novo seria de uma conta que já saiu.
+            if account.shutdown.is_cancelled() {
+                return;
+            }
             let moved = async {
                 // A política pode ter mudado durante a espera.
                 daemon.folders_refused()?;

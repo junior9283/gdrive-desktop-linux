@@ -28,6 +28,8 @@ pub const DEVICE_IGNORE: &str = "device-ignore";
 pub const MUTE: &str = "mute";
 /// Ação do aviso de gravação com a sincronização pausada que a retoma.
 pub const RESUME: &str = "resume";
+/// "Permitir sincronização" no aviso de atividade suspeita: o único "retomar" que desfaz a suspeita.
+pub const ALLOW_SYNC: &str = "allow-sync";
 /// Ação dos avisos de pasta do computador e de dispositivo que abre Preferências > Meu computador.
 pub const OPEN_FOLDERS: &str = "open-folders";
 /// Ação do aviso de conta sem login que abre a janela no login dela.
@@ -304,13 +306,13 @@ pub fn for_event(event: &EngineEvent, i18n: &I18n) -> Option<Notification> {
 /// Os botões a mais que o aviso mostra na área de trabalho (o histórico guarda só o principal).
 pub fn extra_actions(note: &Notification, i18n: &I18n) -> Vec<(&'static str, String)> {
     let mut actions = match note.kind_id {
-        // "Permitir sincronização" é o retomar de sempre, com a vigia ainda ligada.
+        // "Permitir sincronização" retoma a conta, com a vigia ainda ligada.
         "suspicious-activity" => vec![
             (
                 RECOGNIZE_ACTIVITY,
                 i18n.tr("notify-suspicious-recognize", &[]),
             ),
-            (RESUME, i18n.tr("notify-suspicious-allow", &[])),
+            (ALLOW_SYNC, i18n.tr("notify-suspicious-allow", &[])),
         ],
         "lost-and-found" => vec![(MOVE_LOST_FOUND, i18n.tr("notify-lost-found-move", &[]))],
         "device-ask" => vec![
@@ -703,7 +705,7 @@ mod tests {
             assert_eq!(note.action.as_ref().map(|a| a.0), Some(REVIEW_ACTIVITY));
             let extra = extra_actions(&note, &i18n);
             let keys: Vec<_> = extra.iter().map(|(k, _)| *k).collect();
-            assert_eq!(keys, [RECOGNIZE_ACTIVITY, RESUME], "{lang}");
+            assert_eq!(keys, [RECOGNIZE_ACTIVITY, ALLOW_SYNC], "{lang}");
             assert!(extra.iter().all(|(_, label)| !label.starts_with("notify-")));
         }
         let other = for_event(&EngineEvent::QuotaFull, &I18n::new("en")).unwrap();

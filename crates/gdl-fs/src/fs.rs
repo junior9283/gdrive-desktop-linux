@@ -1156,13 +1156,6 @@ pub fn mount(fs: DriveFs, at: &Path) -> std::io::Result<BackgroundSession> {
     fuser::spawn_mount(fs, at, &config)
 }
 
-/// Desmonta a sessão (lazy: o que está aberto continua atendido) e devolve a thread dela, que
-/// termina quando o último arquivo aberto na montagem fecha.
-pub fn detach(session: BackgroundSession) -> std::thread::JoinHandle<std::io::Result<()>> {
-    let BackgroundSession { guard, .. } = session;
-    guard
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;

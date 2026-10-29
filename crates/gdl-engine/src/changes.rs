@@ -100,6 +100,17 @@ fn resolve(
 /// feita pela montagem). Devolve quantas mudaram o banco e os itens que saíram dele (apagados de
 /// vez no Drive, sem edição local), cujo conteúdo em cache quem chamou descarta.
 pub fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usize, Vec<ItemId>)> {
+    apply(store, changes, false)
+}
+
+/// Como `apply_changes`, para a resposta de uma operação sobre um item que o banco já conhecia
+/// (renomear, mover, lixeira): se o item já não está no banco, foi apagado no meio-tempo, e a
+/// resposta, lida antes da remoção, não o recria.
+pub(crate) fn apply_known(store: &Store, changes: Vec<Change>) -> Result<(usize, Vec<ItemId>)> {
+    apply(store, changes, true)
+}
+
+fn apply(store: &Store, changes: Vec<Change>, only_known: bool) -> Result<(usize, Vec<ItemId>)> {
     let email = store.kv_get(ACCOUNT_EMAIL)?.unwrap_or_default();
     let enabled_drives: BTreeSet<String> = store
         .shared_drives()?
@@ -149,6 +160,7 @@ pub fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usize, Vec<
                 Some((item, clear)) => (Some(item), clear),
                 None => match batch.get(&id)? {
                     Some(item) if stale(&item) => continue,
+                    None if only_known && new.is_some() => continue,
                     old => (old, false),
                 },
             };
@@ -587,6 +599,48 @@ mod tests {
         apply_changes(&env.store, vec![Change::Upsert(Box::new(stale))]).unwrap();
 
         assert!(env.item(&id).trashed, "a resposta antiga tirou da lixeira");
+    }
+
+    /// A resposta de uma operação da montagem, lida antes de o Drive apagar o item e aplicada
+    /// depois, não o recria; a consulta periódica (`apply_changes`) continua criando o que é novo.
+    #[tokio::test]
+    async fn operation_response_does_not_recreate_a_removed_item() {
+        let (env, poller) = indexed().await;
+        let root = env.fake.root_id();
+        let id = env.fake.add_file(&root, "apagado.txt", b"x".to_vec());
+        initial_index(&env.store, &env.client).await.unwrap();
+        let response = env.client.get(&id).await.unwrap();
+        env.fake.delete_remote(&id);
+        poller.run_once().await.unwrap();
+        assert!(env.store.get(&ItemId(id.clone())).unwrap().is_none());
+
+        apply_known(&env.store, vec![Change::Upsert(Box::new(response.clone()))]).unwrap();
+        assert!(
+            env.store.get(&ItemId(id.clone())).unwrap().is_none(),
+            "a resposta da operação recriou o item apagado"
+        );
+
+        apply_changes(&env.store, vec![Change::Upsert(Box::new(response))]).unwrap();
+        assert!(
+            env.store.get(&ItemId(id)).unwrap().is_some(),
+            "a mudança do Drive tem de criar o item"
+        );
+    }
+
+    /// Num item que o banco conhece, a resposta da operação atualiza como sempre.
+    #[tokio::test]
+    async fn operation_response_updates_a_known_item() {
+        let (env, _poller) = indexed().await;
+        let id = env
+            .fake
+            .add_file(&env.fake.root_id(), "antigo.txt", b"x".to_vec());
+        initial_index(&env.store, &env.client).await.unwrap();
+        let mut response = env.client.get(&id).await.unwrap();
+        response.name = "novo.txt".into();
+
+        apply_known(&env.store, vec![Change::Upsert(Box::new(response))]).unwrap();
+
+        assert_eq!(env.item(&id).remote_name, "novo.txt");
     }
 
     #[tokio::test]

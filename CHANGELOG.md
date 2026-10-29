@@ -7,6 +7,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Corrigido
+- Um arquivo apagado no Google Drive não reaparece mais na pasta quando uma operação sua (renomear,
+  mover, lixeira) termina depois de o Drive tê-lo removido.
+
 ## [1.2.0] - 2026-10-29
 
 Robustez: nada de espera sem fim ao desmontar, e avisos e erros que dizem o que aconteceu.

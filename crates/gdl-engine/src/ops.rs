@@ -13,7 +13,7 @@ use gdl_drive::model::RemoteFile;
 use gdl_store::{DriveRoot, Item, ItemId, ItemKind, LocalState};
 
 use crate::activity::ActivityState;
-use crate::changes::apply_changes;
+use crate::changes::{apply_changes, apply_known};
 use crate::engine::Engine;
 use crate::events::{DeniedAction, EngineEvent};
 use crate::gdocs::{is_pointer_extension, pointer_doc_id};
@@ -56,6 +56,14 @@ impl Engine {
     fn applied(&self, remote: RemoteFile) -> Result<Item> {
         let id = ItemId(remote.id.clone());
         apply_changes(&self.store, vec![Change::Upsert(Box::new(remote))])?;
+        self.item(&id)
+    }
+
+    /// Como `applied`, para uma operação sobre um item que já estava no banco: se ele foi apagado
+    /// no meio-tempo, a resposta não o recria (`NotFound`).
+    fn applied_known(&self, remote: RemoteFile) -> Result<Item> {
+        let id = ItemId(remote.id.clone());
+        apply_known(&self.store, vec![Change::Upsert(Box::new(remote))])?;
         self.item(&id)
     }
 
@@ -174,7 +182,7 @@ impl Engine {
         self.note(&item, ActivityState::Trashing);
         let trashed = (self.client.set_trashed(&id.0, true).await)
             .map_err(|e| self.denied(DeniedAction::Delete, &item.local_name, e.into()))?;
-        self.applied(trashed)?;
+        self.applied_known(trashed)?;
         self.note(&item, ActivityState::Trashed);
         Ok(())
     }
@@ -188,7 +196,7 @@ impl Engine {
         if let Ok(item) = self.item(id) {
             self.note(&item, ActivityState::Restoring);
         }
-        let restored = self.applied(self.client.set_trashed(&id.0, false).await?)?;
+        let restored = self.applied_known(self.client.set_trashed(&id.0, false).await?)?;
         self.note(&restored, ActivityState::Restored);
         Ok(restored)
     }
@@ -351,7 +359,7 @@ impl Engine {
             .client
             .rename_move(&id.0, new_name, add, old_parent.map(|p| p.0.as_str()))
             .await?;
-        self.applied(remote)
+        self.applied_known(remote)
     }
 
     /// Atalho do Drive para `target` dentro de `parent`.
@@ -393,7 +401,7 @@ impl Engine {
             })?;
             return self.item(id);
         }
-        self.applied(self.client.set_modified_time(&id.0, modified_ms).await?)
+        self.applied_known(self.client.set_modified_time(&id.0, modified_ms).await?)
     }
 
     /// Salvar por `rename` por cima: `dst` mantém o ID do Drive e recebe o conteúdo e o inode de

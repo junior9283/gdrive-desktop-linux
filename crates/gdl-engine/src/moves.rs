@@ -342,7 +342,7 @@ mod tests {
         assert!(engine.store().pending_move(&file).unwrap().is_none());
         assert_eq!(
             parents(&fake, &file),
-            [to.0.clone()],
+            std::slice::from_ref(&to.0),
             "o Drive já tem o lugar"
         );
     }

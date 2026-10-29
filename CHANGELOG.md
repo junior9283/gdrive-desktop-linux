@@ -7,6 +7,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.2.1] - 2026-10-29
+
+Correção: item apagado no Drive não volta mais por uma operação atrasada.
+
 ### Corrigido
 - Um arquivo apagado no Google Drive não reaparece mais na pasta quando uma operação sua (renomear,
   mover, lixeira) termina depois de o Drive tê-lo removido.
@@ -609,7 +613,8 @@ está feito, ou registrado em "Diferenças inevitáveis" no README.
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.11.0...v1.0.0

@@ -1584,7 +1584,10 @@ impl Daemon {
             .lock()
             .await
             .iter()
-            .map(|a| (a.email.clone(), a.mount_point.clone(), a.engine.clone()))
+            .map(|a| {
+                let (email, mount_point) = (a.email.clone(), a.mount_point.clone());
+                (email, mount_point, a.engine.clone(), a.folders.clone())
+            })
             .collect();
         let can_add_account = self.add_account_refusal(listed.len()).is_none();
         if listed.is_empty() {
@@ -1602,8 +1605,9 @@ impl Daemon {
         }
         let mut summaries = Vec::with_capacity(listed.len());
         let mut accounts = Vec::with_capacity(listed.len());
-        for (email, mount_point, engine) in listed {
-            let summary = engine.summary().map_err(failed)?;
+        for (email, mount_point, engine, folders) in listed {
+            let mut summary = engine.summary().map_err(failed)?;
+            summary.errors += folders.failure_count();
             accounts.push(AccountSummary {
                 email,
                 mount_point: mount_point.display().to_string(),
@@ -1688,16 +1692,29 @@ impl Daemon {
     }
 
     pub async fn errors(&self, account: &str) -> Result<Vec<SyncErrorItem>, ServiceError> {
-        let (engine, mount_point) = self.engine_and_mount(account).await?;
+        let account = self.folder_account(account).await?;
+        let mount_point = &account.mount;
         // As cópias aparecem na montagem, na pasta oculta do Lost and Found.
         let lost_found = mount_point.join(&self.layout.lost_found);
-        let errors = engine.errors().map_err(failed)?;
+        let errors = account.engine.errors().map_err(failed)?;
+        // O que não subiu das pastas do computador (onde o emblema de erro aponta).
+        let folders = account
+            .runners
+            .failures()
+            .into_iter()
+            .map(|(pair, path, f)| SyncErrorItem {
+                item_id: folder_error_id(pair, &f.rel),
+                name: crate::file_name(&path),
+                path: path.display().to_string(),
+                category: f.category.as_str().into(),
+                message: f.message,
+            });
         Ok(errors
             .into_iter()
             .map(|e| {
                 let (item_id, path) = match e.source {
                     ErrorSource::Item { id, path } => {
-                        (id.0, self.layout.mounted(&mount_point, &path))
+                        (id.0, self.layout.mounted(mount_point, &path))
                     }
                     ErrorSource::Kept(copy) => (
                         String::new(),
@@ -1712,6 +1729,7 @@ impl Daemon {
                     message: e.message,
                 }
             })
+            .chain(folders)
             .collect())
     }
 
@@ -1719,6 +1737,16 @@ impl Daemon {
     pub async fn retry(&self, account: &str, item_id: &str) -> Result<(), ServiceError> {
         if item_id.is_empty() {
             return Err(ServiceError::InvalidArgs("item sem envio".into()));
+        }
+        if let Some((pair, _)) = folder_error(item_id) {
+            let account = self.folder_account(account).await?;
+            if !account.runners.retry(pair) {
+                return Err(ServiceError::InvalidArgs(
+                    "pasta que não está rodando".into(),
+                ));
+            }
+            self.emit_status_changed().await;
+            return Ok(());
         }
         let engine = self.account_engine(account).await?;
         engine.retry(&ItemId(item_id.into())).map_err(failed)?;
@@ -1939,6 +1967,19 @@ impl Daemon {
     ) -> Result<(), ServiceError> {
         if !matches!(target, "file" | "folder" | "web") {
             return Err(ServiceError::InvalidArgs(target.into()));
+        }
+        // Um erro de pasta do computador: o arquivo está no disco, não na montagem.
+        if let Some((pair, rel)) = folder_error(item_id) {
+            let account = self.folder_account(account).await?;
+            let not_found = || ServiceError::NotFound(item_id.into());
+            let sync = account.runners.get(pair).ok_or_else(not_found)?;
+            let path = sync.pair().local.join(rel);
+            match target {
+                "file" => self.open_local(&path),
+                "folder" => self.open_local(path.parent().unwrap_or(&path)),
+                _ => return Err(ServiceError::InvalidArgs(target.into())),
+            }
+            return Ok(());
         }
         let (engine, mount) = self.engine_and_mount(account).await?;
         let item = live_item(&engine, item_id)?;
@@ -2461,6 +2502,20 @@ impl Daemon {
 
 /// A thread de uma sessão FUSE desmontada: termina quando fecha o último arquivo aberto nela.
 type FuseThread = std::thread::JoinHandle<std::io::Result<()>>;
+
+/// Começo do `item_id` de um erro de pasta do computador: `folder:<par>:<caminho relativo>`.
+const FOLDER_ERROR: &str = "folder:";
+
+/// O `item_id` do erro no caminho `rel` do par `pair`.
+fn folder_error_id(pair: i64, rel: &str) -> String {
+    format!("{FOLDER_ERROR}{pair}:{rel}")
+}
+
+/// O par e o caminho relativo de um `item_id` de erro de pasta do computador.
+fn folder_error(item_id: &str) -> Option<(i64, &str)> {
+    let (pair, rel) = item_id.strip_prefix(FOLDER_ERROR)?.split_once(':')?;
+    Some((pair.parse().ok()?, rel))
+}
 
 /// Desmonta e depois para as contas; devolve as threads das montagens desfeitas.
 async fn unmount(accounts: Vec<Account>) -> Vec<FuseThread> {

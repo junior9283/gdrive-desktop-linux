@@ -1,7 +1,7 @@
 //! Um par em ação: lê o computador, o Drive (pelo banco que o motor da conta mantém em dia) e o
 //! último estado sincronizado, decide cada caminho (`decide`) e aplica.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,7 @@ use gdl_common::names::{fit, split_ext, to_remote};
 use gdl_common::temp_files::is_local_only;
 use gdl_drive::client::{DriveClient, RemoteFile, SessionSlot};
 use gdl_drive::model::Change;
+use gdl_engine::errors::ErrorCategory;
 use gdl_store::folders::{Pair, PairKind, PairState, StopReason, Synced};
 use gdl_store::{Item, ItemId, ItemKind, Store};
 use md5::{Digest, Md5};
@@ -54,9 +55,18 @@ pub struct Report {
     /// Ações aplicadas (sem contar "nada a fazer").
     pub applied: usize,
     /// Caminhos que falharam na última passada, com o erro; os outros seguem.
-    pub failed: Vec<(String, String)>,
+    pub failed: Vec<Failure>,
     /// Itens locais que foram para a lixeira do sistema porque saíram do Drive.
     pub trashed: usize,
+}
+
+/// Um caminho do par que não sincronizou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    /// Relativo à pasta do par (vazio: a própria pasta).
+    pub rel: String,
+    pub category: ErrorCategory,
+    pub message: String,
 }
 
 /// O que o Espelho grava além dos arquivos: o ponteiro de cada documento Google (com o e-mail da
@@ -95,8 +105,8 @@ pub struct FolderSync {
     /// entraram ou saíram da lista de falhas (para os emblemas;
     /// um caminho que some ou muda de nome o gerenciador de arquivos já redesenha sozinho).
     newly_synced: Mutex<Vec<String>>,
-    /// Os caminhos relativos que falharam na última comparação (emblema de erro).
-    failed: Mutex<HashSet<String>>,
+    /// Os caminhos que falharam na última comparação (emblema de erro e lista de erros).
+    failed: Mutex<BTreeMap<String, Failure>>,
     /// Avisa que `newly_synced` deixou de estar vazio.
     synced_notify: tokio::sync::Notify,
     links: Option<Links>,
@@ -202,21 +212,41 @@ impl FolderSync {
 
     /// `rel` falhou na última comparação.
     pub fn has_failed(&self, rel: &str) -> bool {
-        self.failed.lock().unwrap().contains(rel)
+        self.failed.lock().unwrap().contains_key(rel)
+    }
+
+    /// Os caminhos que falharam na última comparação, em ordem.
+    pub fn failures(&self) -> Vec<Failure> {
+        self.failed.lock().unwrap().values().cloned().collect()
+    }
+
+    /// Quantos caminhos falharam na última comparação.
+    pub fn failure_count(&self) -> usize {
+        self.failed.lock().unwrap().len()
+    }
+
+    /// "Tentar de novo": compara agora, sem esperar a próxima mudança.
+    pub fn retry(&self) {
+        self.wake.notify_one();
     }
 
     /// Guarda os caminhos que falharam agora; os que entraram ou saíram da lista mudam de emblema.
     fn remember_failed(&self, report: &Report) {
         // A raiz (`""`) tem emblema próprio, pelo estado do par.
-        let now: HashSet<String> = report
+        let now: BTreeMap<String, Failure> = report
             .failed
             .iter()
-            .filter(|(rel, _)| !rel.is_empty())
-            .map(|(rel, _)| rel.clone())
+            .filter(|f| !f.rel.is_empty())
+            .map(|f| (f.rel.clone(), f.clone()))
             .collect();
         let changed: Vec<String> = {
             let mut failed = self.failed.lock().unwrap();
-            let changed = failed.symmetric_difference(&now).cloned().collect();
+            let changed = failed
+                .keys()
+                .filter(|rel| !now.contains_key(*rel))
+                .chain(now.keys().filter(|rel| !failed.contains_key(*rel)))
+                .cloned()
+                .collect();
             *failed = now;
             changed
         };
@@ -270,7 +300,11 @@ impl FolderSync {
                 Err(SyncError::Io(e)) if e.kind() == io::ErrorKind::PermissionDenied => {
                     tracing::warn!(pair = self.pair.id, "pasta ilegível no par: {e}");
                     self.set_state(PairState::Stopped(StopReason::NoPermission))?;
-                    report.failed.push((String::new(), e.to_string()));
+                    report.failed.push(Failure {
+                        rel: String::new(),
+                        category: ErrorCategory::NoPermission,
+                        message: e.to_string(),
+                    });
                     break;
                 }
                 Err(e) => return Err(e),
@@ -334,7 +368,16 @@ impl FolderSync {
 
     fn failed(&self, report: &mut Report, rel: String, e: SyncError) {
         tracing::warn!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
-        report.failed.push((rel, e.to_string()));
+        let category = match &e {
+            SyncError::Drive(e) => ErrorCategory::of(e),
+            SyncError::Engine(e) => ErrorCategory::of_engine(e),
+            _ => ErrorCategory::Unknown,
+        };
+        report.failed.push(Failure {
+            rel,
+            category,
+            message: e.to_string(),
+        });
     }
 
     async fn view(&self) -> Result<View> {
@@ -1491,10 +1534,7 @@ mod tests {
             .inject(gdl_fake_drive::Fault::QuotaExceeded { times: 1000 });
 
         let report = sync.reconcile().await.unwrap();
-        assert!(
-            report.failed.iter().any(|(rel, _)| rel == "x.txt"),
-            "{report:?}"
-        );
+        assert!(report.failed.iter().any(|f| f.rel == "x.txt"), "{report:?}");
         assert!(sync.has_failed("x.txt"));
         assert!(!sync.has_failed("outro.txt"));
 
@@ -1524,7 +1564,7 @@ mod tests {
             "o temporário não segue link"
         );
         assert!(
-            report.failed.iter().any(|(rel, _)| rel == "sub/x.txt"),
+            report.failed.iter().any(|f| f.rel == "sub/x.txt"),
             "{report:?}"
         );
         assert_eq!(w.read("y.txt"), b"nuvem");

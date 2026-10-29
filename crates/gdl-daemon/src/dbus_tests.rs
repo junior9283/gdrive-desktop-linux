@@ -3268,6 +3268,56 @@ async fn folder_states_show_errors_inside_a_pair() {
     .await;
 }
 
+/// O arquivo de uma pasta do computador que não subiu aparece na janela de erros (é para onde o
+/// emblema de erro aponta), e "Tentar de novo" acorda a pasta.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn folder_failures_are_listed_in_errors() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    h.proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("pasta no Drive", || {
+        h.fake.find_live("Documentos").len() == 1
+    })
+    .await;
+    h.fake
+        .inject(gdl_fake_drive::Fault::QuotaExceeded { times: 100_000 });
+    std::fs::write(docs.join("x.txt"), b"um").unwrap();
+    let x = docs.join("x.txt").display().to_string();
+
+    poll_until(
+        "x.txt na lista de erros",
+        || h.proxy.errors(""),
+        |e| e.iter().any(|e| e.path == x),
+    )
+    .await;
+    let errors = h.proxy.errors("").await.unwrap();
+    let item = errors.iter().find(|e| e.path == x).unwrap();
+    assert_eq!(item.category, "quota", "{item:?}");
+    assert_eq!(item.name, "x.txt");
+    assert!(h.proxy.status("").await.unwrap().errors >= 1);
+
+    h.proxy
+        .open_item("", &item.item_id, "folder")
+        .await
+        .unwrap();
+    let folder = docs.display().to_string();
+    wait_until("a pasta do arquivo aberta", || h.opened().contains(&folder)).await;
+
+    h.fake.clear_faults();
+    h.proxy.retry("", &item.item_id).await.unwrap();
+    poll_until(
+        "x.txt fora da lista",
+        || h.proxy.errors(""),
+        |e| e.iter().all(|e| e.path != x),
+    )
+    .await;
+    assert!(!h.fake.find_live("x.txt").is_empty());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn states_inside_a_pair() {
     use futures_util::StreamExt;

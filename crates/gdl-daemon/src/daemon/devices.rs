@@ -274,7 +274,7 @@ impl Daemon {
                     .failed
                     .into_iter()
                     .next()
-                    .map(|(path, e)| format!("{path}: {e}")),
+                    .map(|f| format!("{}: {}", f.rel, f.message)),
                 Err(e) => Some(e.to_string()),
             };
             let stopped = *sync.state_changes().borrow() != PairState::Active;

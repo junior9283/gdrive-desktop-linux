@@ -8,6 +8,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 ## [Não lançado]
 
 ### Corrigido
+- O arquivo de uma pasta do computador que não sincronizou (com o emblema de erro) agora aparece
+  na janela de erros, com o motivo; "Tentar de novo" compara a pasta na hora e "Abrir pasta"
+  mostra o arquivo. O contador de erros da bandeja também o conta.
 - Trocar de lugar uma pasta do computador às vezes deixava de baixar os arquivos dela na pasta
   nova: a troca agora espera a comparação em andamento terminar.
 - Um item recém-enviado para a lixeira pela pasta do Google Drive podia voltar por um instante

@@ -156,7 +156,8 @@ pub struct NotificationSetting {
 /// Uma linha de `Errors`.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SyncErrorItem {
-    /// Vazio nas cópias do Lost and Found.
+    /// Vazio nas cópias do Lost and Found; `folder:<par>:<caminho>` nas pastas do computador
+    /// (o prefixo `folder:` é reservado: nenhum ID do Drive começa assim).
     pub item_id: String,
     pub name: String,
     /// Caminho completo na montagem (a cópia, no caso do Lost and Found).

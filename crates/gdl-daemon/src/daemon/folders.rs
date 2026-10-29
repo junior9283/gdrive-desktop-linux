@@ -9,7 +9,7 @@ use gdl_drive::client::RemoteFile;
 use gdl_drive::model::Change;
 use gdl_engine::engine::Engine;
 use gdl_folders::guard::{self, Refusal};
-use gdl_folders::sync::{FolderSync, Links};
+use gdl_folders::sync::{Failure, FolderSync, Links};
 use gdl_folders::trash::Trash;
 use gdl_ipc::{FolderCheck, LocalFolder, ServiceError};
 use gdl_store::ItemId;
@@ -131,6 +131,38 @@ impl Runners {
 
     pub(super) fn get(&self, id: i64) -> Option<Arc<FolderSync>> {
         self.lock().get(&id).map(|(sync, ..)| sync.clone())
+    }
+
+    /// O que não sincronizou nos pares que rodam (também o Espelho, que tem emblema de erro como
+    /// as pastas do computador): o par, o caminho completo e a falha.
+    pub(super) fn failures(&self) -> Vec<(i64, PathBuf, Failure)> {
+        let syncs: Vec<_> = self
+            .lock()
+            .iter()
+            .map(|(id, (sync, ..))| (*id, sync.clone()))
+            .collect();
+        syncs
+            .into_iter()
+            .flat_map(|(id, sync)| {
+                let root = sync.pair().local.clone();
+                sync.failures()
+                    .into_iter()
+                    .map(move |f| (id, root.join(&f.rel), f))
+            })
+            .collect()
+    }
+
+    /// Quantos caminhos não sincronizaram nos pares que rodam.
+    pub(super) fn failure_count(&self) -> u32 {
+        self.lock()
+            .values()
+            .map(|(sync, ..)| sync.failure_count() as u32)
+            .sum()
+    }
+
+    /// "Tentar de novo" num caminho do par `id`: o laço compara agora; falso sem o laço.
+    pub(super) fn retry(&self, id: i64) -> bool {
+        self.get(id).inspect(|sync| sync.retry()).is_some()
     }
 }
 

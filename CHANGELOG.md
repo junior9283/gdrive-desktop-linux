@@ -7,6 +7,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.2.3] - 2026-10-29
+
+Correção: clicar numa notificação de outro programa não abre mais o app.
+
+### Corrigido
+- O servidor de notificações avisa todos os programas de cada clique; o serviço tratava o clique
+  em qualquer notificação como se fosse dele e abria a janela (ou executava a ação do botão, como
+  retomar a sincronização). Agora só vale o clique em aviso que o próprio serviço mostrou.
+
 ## [1.2.2] - 2026-10-29
 
 Correções: pastas que não travam com movimentações em lote e ícone da bandeja que acompanha o estado.
@@ -625,7 +634,8 @@ está feito, ou registrado em "Diferenças inevitáveis" no README.
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.2...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.1.0...v1.2.0

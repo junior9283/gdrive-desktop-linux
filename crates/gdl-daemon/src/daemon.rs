@@ -23,7 +23,7 @@ use gdl_drive::{Network, Tls};
 use gdl_engine::EngineError;
 use gdl_engine::engine::{Engine, Intervals, pending_cache_move};
 use gdl_engine::errors::ErrorSource;
-use gdl_engine::events::{EngineEvent, SyncState};
+use gdl_engine::events::{EngineEvent, SyncState, SyncSummary};
 use gdl_engine::gdocs::{OfficeEditor, web_url};
 use gdl_engine::kept::{Kept, KeptFolder};
 use gdl_fs::{DriveFs, Layout};
@@ -248,6 +248,16 @@ impl<'a> DrivePaths<'a> {
 
 /// Os caminhos na montagem dos itens que mudaram de estado desde a última vez (os que foram para
 /// a lixeira não aparecem mais lá).
+/// O resumo sem o que muda sozinho a cada consulta (a hora da última sincronização e a
+/// estimativa), para comparar só o que a bandeja mostra.
+fn shown_summary(summary: SyncSummary) -> SyncSummary {
+    SyncSummary {
+        last_sync_ms: None,
+        remaining_secs: None,
+        ..summary
+    }
+}
+
 fn changed_paths(engine: &Engine, mount: &Path, layout: &Layout) -> Vec<String> {
     let items = engine.store().take_state_changes().unwrap_or_default();
     let mut paths = DrivePaths::new(engine, mount, layout);
@@ -1476,6 +1486,7 @@ impl Daemon {
     ) {
         let daemon = Arc::downgrade(self);
         tokio::spawn(async move {
+            let mut shown = engine.summary().ok().map(shown_summary);
             loop {
                 tokio::select! {
                     () = shutdown.cancelled() => break,
@@ -1484,16 +1495,25 @@ impl Daemon {
                 let Some(daemon) = daemon.upgrade() else {
                     break;
                 };
-                let paths = {
+                let (paths, summary) = {
                     let (engine, mount) = (engine.clone(), mount.clone());
                     let daemon = daemon.clone();
                     tokio::task::spawn_blocking(move || {
-                        changed_paths(&engine, &mount, &daemon.layout)
+                        (
+                            changed_paths(&engine, &mount, &daemon.layout),
+                            engine.summary().ok().map(shown_summary),
+                        )
                     })
                     .await
                     .unwrap_or_default()
                 };
                 daemon.emit_states_changed(&paths).await;
+                // A bandeja só relê o estado com `StatusChanged`: o fim de um envio ou de um
+                // download não passa por um evento do motor, e o ícone ficaria "sincronizando".
+                if summary.is_some() && summary != shown {
+                    shown = summary;
+                    daemon.emit_status_changed().await;
+                }
             }
         });
     }

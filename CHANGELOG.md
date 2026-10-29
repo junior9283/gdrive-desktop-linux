@@ -7,6 +7,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Corrigido
+- O ícone da bandeja não fica mais animado ("sincronizando") depois de terminar o último envio ou
+  download: o serviço agora avisa a bandeja quando o resumo do estado muda.
+
 ## [1.2.1] - 2026-10-29
 
 Correção: item apagado no Drive não volta mais por uma operação atrasada.

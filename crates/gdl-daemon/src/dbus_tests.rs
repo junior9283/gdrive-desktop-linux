@@ -4166,3 +4166,42 @@ async fn signing_out_unmounts_the_drive_folder() {
     h.daemon.sign_out(&h.fake.email()).await.unwrap();
     wait_until("a pasta desmontar", || !mounted(&drive)).await;
 }
+
+/// A bandeja só relê o estado quando recebe `StatusChanged`: quando o último envio termina, o
+/// serviço tem de avisar, senão o ícone fica "sincronizando" para sempre.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_changed_is_signaled_when_the_last_upload_ends() {
+    use futures_util::StreamExt;
+    let h = Harness::new().await;
+    h.logged_in().await;
+    h.fake.inject(gdl_fake_drive::Fault::DelayUploads(
+        std::time::Duration::from_secs(2),
+    ));
+    let path = h.drive().join("subindo.txt");
+    blocking(move || std::fs::write(path, b"conteudo").unwrap()).await;
+    status_until(&h, "o envio na fila", |s| s.syncing > 0).await;
+
+    // A bandeja de verdade: lê o estado ao abrir e depois só quando o serviço avisa.
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(h.proxy.status("").await.unwrap()));
+    let mut changed = h.proxy.receive_status_changed().await.unwrap();
+    let (proxy, shared) = (h.proxy.clone(), seen.clone());
+    let tray = tokio::spawn(async move {
+        while changed.next().await.is_some() {
+            *shared.lock().unwrap() = proxy.status("").await.unwrap();
+        }
+    });
+    assert!(
+        seen.lock().unwrap().syncing > 0,
+        "a bandeja abriu com o envio na fila"
+    );
+
+    wait_until("o arquivo no Drive", || {
+        h.fake.find_live("subindo.txt").len() == 1
+    })
+    .await;
+    wait_until("a bandeja ver o fim do envio", || {
+        seen.lock().unwrap().syncing == 0
+    })
+    .await;
+    tray.abort();
+}

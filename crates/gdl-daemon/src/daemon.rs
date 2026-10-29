@@ -62,8 +62,11 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 /// ao lado da pasta preferida (`<preferida> (<e-mail>)`) leva `\tbeside` depois do e-mail.
 const ACCOUNTS: &str = "accounts";
 const BESIDE: &str = "beside";
-/// Quanto a reabertura das contas espera as tarefas dos motores antigos terminarem.
-const ENGINE_STOP_LIMIT: Duration = Duration::from_secs(10);
+/// Quanto se espera, ao todo, uma montagem desfeita largar os arquivos abertos e os motores
+/// antigos terminarem (`Config::unmount_limit`).
+pub const UNMOUNT_LIMIT: Duration = Duration::from_secs(60);
+/// O mesmo prazo quando o serviço está saindo: o encerramento da sessão não espera mais que isso.
+const SHUTDOWN_LIMIT: Duration = Duration::from_secs(5);
 /// Chave no banco da conta com a pasta da montagem escolhida em "Alterar" (vazia: o padrão).
 const MOUNT_POINT: &str = "mount-point";
 /// Quantas contas ficam conectadas ao mesmo tempo.
@@ -119,6 +122,8 @@ pub struct Config {
     /// Este computador no Drive ("Computadores/<nome>").
     pub computer: Computer,
     pub folder_timing: gdl_folders::watch::Timing,
+    /// O prazo único de `settle` depois de desmontar uma conta.
+    pub unmount_limit: Duration,
     pub updates: crate::updates::UpdateCheck,
 }
 
@@ -587,38 +592,13 @@ impl Daemon {
 
     /// Para todas as contas e as reabre com as preferências de agora, sem reiniciar o serviço;
     /// uma reabertura espera a outra terminar, e um login espera a reabertura. Antes de reabrir,
-    /// espera fechar o que ficou aberto nas montagens desfeitas e as tarefas dos motores antigos
-    /// terminarem (com limite: uma que não termina vai para o log). Não espera a sessão FUSE
-    /// antiga acabar: um terminal parado dentro da montagem a segura sem ter arquivo aberto.
+    /// espera (`settle`) fechar o que ficou aberto nas montagens desfeitas e as tarefas dos
+    /// motores antigos terminarem. Não espera a sessão FUSE antiga acabar: um terminal parado
+    /// dentro da montagem a segura sem ter arquivo aberto.
     pub(crate) async fn restart_accounts(self: &Arc<Self>) {
         let _reopening = self.reopening.lock().await;
         self.resuming.store(true, Ordering::Relaxed);
-        let old: Vec<_> = self
-            .accounts
-            .lock()
-            .await
-            .iter()
-            .map(|a| (a.open_files.clone(), Arc::downgrade(&a.engine)))
-            .collect();
-        self.stop_all_accounts().await;
-        let open = || old.iter().any(|(files, _)| files.count() > 0);
-        if open() {
-            tracing::info!("esperando fechar os arquivos abertos nas montagens antigas");
-        }
-        // Sem limite de propósito: reabrir com um arquivo aberto na montagem antiga perderia o
-        // que for gravado nele (quem chama já recusa quando há arquivo aberto; aqui só sobra
-        // um aberto no meio-tempo, e o editor fechá-lo libera a espera).
-        while open() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        let deadline = tokio::time::Instant::now() + ENGINE_STOP_LIMIT;
-        while old.iter().any(|(_, engine)| engine.strong_count() > 0) {
-            if tokio::time::Instant::now() > deadline {
-                tracing::warn!("um motor antigo não terminou; reabrindo assim mesmo");
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        self.stop_all_accounts(self.config.unmount_limit).await;
         self.not_started().clear();
         if let Err(e) = self.resume_saved_accounts().await {
             tracing::warn!(erro = %e, "não deu para reabrir as contas");
@@ -847,7 +827,7 @@ impl Daemon {
 
     /// Desmonta e para o motor (o serviço está saindo).
     pub async fn shutdown(&self) {
-        self.stop_all_accounts().await;
+        self.stop_all_accounts(SHUTDOWN_LIMIT).await;
     }
 
     /// Mostra a tela `request` (`tela` ou `tela:argumento`) na janela, abrindo-a se preciso.
@@ -1537,16 +1517,20 @@ impl Daemon {
         }
     }
 
-    /// Desmonta e para todas as contas, sem mexer na lista guardada (o serviço vai voltar a
-    /// elas); quem sai de uma conta é `sign_out`, que atualiza a lista.
-    async fn stop_all_accounts(&self) {
+    /// Desmonta e para todas as contas e espera (`settle`, até `limit`) o que elas deixam para
+    /// trás, sem mexer na lista guardada (o serviço vai voltar a elas); quem sai de uma conta é
+    /// `sign_out`, que atualiza a lista.
+    async fn stop_all_accounts(&self, limit: Duration) {
         let accounts = std::mem::take(&mut *self.accounts.lock().await);
+        let old = old_of(&accounts);
         unmount(accounts).await;
+        settle(&old, limit).await;
     }
 
     /// Tira a conta `email` da lista e a desmonta, sem mexer nas outras nem em `accounts`.
-    /// Devolve o motor (já parado) e a pasta onde ela estava montada. Quem chama segura
-    /// `reopening`: senão, uma reabertura em andamento monta a conta de novo.
+    /// Espera os arquivos abertos nela fecharem (até `unmount_limit`), para quem chama não apagar
+    /// o cache debaixo deles. Devolve o motor (já parado) e a pasta onde ela estava montada. Quem
+    /// chama segura `reopening`: senão, uma reabertura em andamento monta a conta de novo.
     async fn remove_account(&self, email: &str) -> Option<(Arc<Engine>, PathBuf)> {
         let account = {
             let mut accounts = self.accounts.lock().await;
@@ -1554,7 +1538,13 @@ impl Daemon {
             accounts.remove(index)
         };
         let removed = (account.engine.clone(), account.mount_point.clone());
+        // O motor volta para quem chama (que o usa para apagar os dados): só os arquivos contam.
+        let old = [Old {
+            files: account.open_files.clone(),
+            engine: std::sync::Weak::new(),
+        }];
         unmount(vec![account]).await;
+        settle(&old, self.config.unmount_limit).await;
         Some(removed)
     }
 
@@ -2483,7 +2473,7 @@ impl Daemon {
         if mount_points.is_empty() {
             mount_points.push(self.preferred_mount_point(&self.prefs()));
         }
-        self.stop_all_accounts().await;
+        self.stop_all_accounts(self.config.unmount_limit).await;
         let paths = self.config.paths.clone();
         tokio::task::spawn_blocking(move || {
             desktop::remove_autostart(&paths.config_home)?;
@@ -2520,6 +2510,47 @@ fn folder_error_id(pair: i64, rel: &str) -> String {
 fn folder_error(item_id: &str) -> Option<(i64, &str)> {
     let (pair, rel) = item_id.strip_prefix(FOLDER_ERROR)?.split_once(':')?;
     Some((pair.parse().ok()?, rel))
+}
+
+/// O que sobra de uma conta depois de desmontada: os arquivos que ainda estão abertos na
+/// montagem (que segue atendendo-os) e o motor, que só some quando as tarefas dele terminam.
+struct Old {
+    files: gdl_fs::OpenFiles,
+    engine: std::sync::Weak<Engine>,
+}
+
+/// As partes de `accounts` que `settle` espera, para pegar antes de desmontá-las.
+fn old_of(accounts: &[Account]) -> Vec<Old> {
+    accounts
+        .iter()
+        .map(|a| Old {
+            files: a.open_files.clone(),
+            engine: Arc::downgrade(&a.engine),
+        })
+        .collect()
+}
+
+/// Espera, com um prazo só, fechar os arquivos abertos nas montagens desfeitas (reabrir antes
+/// perderia o que se grava neles) e os motores antigos terminarem. Passado o prazo, segue e
+/// deixa no log o que ficou: um programa preso numa montagem não pode travar a conta para sempre.
+async fn settle(old: &[Old], limit: Duration) {
+    let deadline = tokio::time::Instant::now() + limit;
+    let files_open = || old.iter().any(|o| o.files.count() > 0);
+    let engines_alive = || old.iter().any(|o| o.engine.strong_count() > 0);
+    if files_open() {
+        tracing::info!("esperando fechar os arquivos abertos nas montagens antigas");
+    }
+    while files_open() || engines_alive() {
+        if tokio::time::Instant::now() > deadline {
+            tracing::warn!(
+                arquivos_abertos = files_open(),
+                motor_vivo = engines_alive(),
+                "a montagem antiga não largou tudo no prazo; seguindo assim mesmo"
+            );
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// Desmonta e para as contas (os campos de `Account` caem nessa ordem).

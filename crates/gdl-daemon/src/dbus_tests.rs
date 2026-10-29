@@ -1110,8 +1110,67 @@ async fn restart_waits_for_open_files() {
 }
 
 /// Um terminal parado dentro da montagem (sem arquivo aberto) segura a montagem antiga desfeita
-/// (e o motor que ela usa), mas não a reabertura: as contas voltam depois do prazo dos motores
-/// antigos (`ENGINE_STOP_LIMIT`, 10 s).
+/// (e o motor que ela usa), mas não a reabertura: as contas voltam depois do prazo da
+/// desmontagem (`Config::unmount_limit`).
+/// Um programa preso com um arquivo aberto na montagem antiga não trava a reabertura para sempre:
+/// passado o prazo da desmontagem, as contas voltam e o arquivo segue aberto na montagem antiga.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restart_gives_up_waiting_after_the_limit() {
+    let h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "preso.txt", b"x".to_vec());
+    h.logged_in().await;
+    let path = h.drive().join("preso.txt");
+    let open = blocking(move || std::fs::File::open(path).unwrap()).await;
+
+    let restarted = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        h.daemon.restart_accounts(),
+    )
+    .await;
+    assert!(restarted.is_ok(), "a reabertura esperou para sempre");
+    assert!(h.daemon.engine().await.is_some(), "a conta voltou");
+    drop(open);
+}
+
+/// Sair da conta com um arquivo aberto na montagem não apaga o cache debaixo dele: espera fechar
+/// (até o prazo da desmontagem); preso além do prazo, sai assim mesmo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sign_out_waits_for_open_files_then_gives_up() {
+    let h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "aberto.txt", b"x".to_vec());
+    h.logged_in().await;
+    let path = h.drive().join("aberto.txt");
+    let open = blocking(move || std::fs::File::open(path).unwrap()).await;
+
+    let daemon = h.daemon.clone();
+    let email = h.fake.email();
+    let started = std::time::Instant::now();
+    let sign_out = tokio::spawn(async move { daemon.sign_out(&email).await });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(!sign_out.is_finished(), "sair esperou o arquivo fechar");
+
+    // Preso além do prazo (2 s no harness): sai mesmo assim.
+    tokio::time::timeout(std::time::Duration::from_secs(10), sign_out)
+        .await
+        .expect("sair esperou para sempre")
+        .unwrap()
+        .unwrap();
+    assert!(started.elapsed() >= std::time::Duration::from_secs(2));
+    assert!(h.daemon.engine().await.is_none(), "a conta saiu");
+    drop(open);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sign_out_does_not_wait_when_nothing_is_open() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let started = std::time::Instant::now();
+    h.daemon.sign_out(&h.fake.email()).await.unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn restart_does_not_wait_for_a_shell_inside_the_mount() {
     let h = Harness::new().await;
@@ -1123,7 +1182,7 @@ async fn restart_does_not_wait_for_a_shell_inside_the_mount() {
         .unwrap();
 
     let restarted = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
+        std::time::Duration::from_secs(10),
         h.daemon.restart_accounts(),
     )
     .await;

@@ -86,6 +86,7 @@ async fn main() -> Result<(), Error> {
             name: "Computador e2e".into(),
         },
         folder_timing: Default::default(),
+        unmount_limit: gdl_daemon::daemon::UNMOUNT_LIMIT,
         // O e2e não pergunta nada ao GitHub: o servidor falso responde, e só depois de uma hora.
         updates: gdl_daemon::updates::UpdateCheck {
             url: fake.releases_url(),

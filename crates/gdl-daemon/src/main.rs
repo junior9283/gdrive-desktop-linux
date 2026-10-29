@@ -82,6 +82,7 @@ async fn run(log: &logging::LogHandle) -> Result<Exit, Box<dyn std::error::Error
         intervals: Intervals::default(),
         computer: gdl_daemon::daemon::Computer::detect().await,
         folder_timing: Default::default(),
+        unmount_limit: gdl_daemon::daemon::UNMOUNT_LIMIT,
         updates: gdl_daemon::updates::UpdateCheck::github(),
     };
     let daemon = Daemon::new(config)?;

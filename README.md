@@ -4,7 +4,7 @@
 
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-1.0.0-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-1.1.0-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-est%C3%A1vel-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
@@ -274,7 +274,8 @@ Cada etapa sai funcionando antes da próxima.
 | 0.9 | Backup de pastas, pastas conectadas, modo espelho e dispositivos |
 | 0.10 | Diagnóstico e feedback, notificações restantes, servidor MCP, políticas restantes, ransomware e recuperação do banco |
 | 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria |
-| 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) ← **estamos aqui** |
+| 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) |
+| 1.1 | Pendências da 1.0: corridas raras corrigidas e emblema de erro nas pastas do computador ← **estamos aqui** |
 
 ## Versionamento
 

@@ -7,12 +7,29 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.1.0] - 2026-10-28
+
+Pendências da 1.0: correções de corridas raras e o emblema de erro nas pastas do computador.
+
+### Adicionado
+- Pastas do computador: o arquivo que não sincronizou ganha o emblema de erro no gerenciador de
+  arquivos, como na pasta do Google Drive.
+- O arquivo de uma pasta do computador que não sincronizou aparece na janela de erros, com o
+  motivo; "Tentar de novo" compara a pasta na hora e "Abrir pasta" mostra o arquivo. O contador
+  de erros da bandeja também o conta.
+
 ### Corrigido
-- O arquivo de uma pasta do computador que não sincronizou (com o emblema de erro) agora aparece
-  na janela de erros, com o motivo; "Tentar de novo" compara a pasta na hora e "Abrir pasta"
-  mostra o arquivo. O contador de erros da bandeja também o conta.
 - Trocar de lugar uma pasta do computador às vezes deixava de baixar os arquivos dela na pasta
-  nova: a troca agora espera a comparação em andamento terminar.
+  nova: a troca agora espera a comparação em andamento terminar. Uma segunda troca da mesma pasta
+  antes de a primeira acabar é recusada ("Esta pasta ainda está mudando de lugar").
+- "Retomar" numa conta desfazia a pausa por atividade suspeita das outras contas; agora só a
+  confirmação nelas a desfaz.
+- O emblema de um arquivo novo podia ficar parado em "sincronizando" depois do envio.
+- Sair da conta ou redefinir os dados locais durante a reabertura das contas podia montar a conta
+  de novo; agora esperam a reabertura terminar.
+- Clicar num aviso logo que ele aparece às vezes não fazia nada.
+- O "Retomar" do aviso "salvo durante a pausa" desfazia a pausa por atividade suspeita da própria
+  conta; agora só "Permitir sincronização", no aviso da atividade suspeita, a desfaz.
 - Um item recém-enviado para a lixeira pela pasta do Google Drive podia voltar por um instante
   (e `rm -r` falhar com "diretório não vazio"), quando uma consulta ao Drive feita antes chegava
   depois: o app agora usa a versão de cada item no Drive e descarta a resposta mais antiga.
@@ -570,7 +587,8 @@ está feito, ou registrado em "Diferenças inevitáveis" no README.
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.0.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.11.0...v1.0.0
 [0.11.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.9.0...v0.10.0

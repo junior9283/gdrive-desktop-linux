@@ -187,6 +187,7 @@ pub fn create_local_item(
             LocalState::Dirty
         },
         pin: PinState::None,
+        version: 0,
     })?;
     store.recompute_local_names([parent])?;
     store.get(&id)?.ok_or(EngineError::NotFound)
@@ -567,6 +568,8 @@ impl UploadWorker {
             item.head_revision = remote.head_revision.clone();
             item.base_revision = remote.head_revision;
             item.modified_ms = remote.modified_ms;
+            // Uma consulta de mudanças lida antes do fim do envio não volta a revisão.
+            item.version = remote.version;
             // Gravado de novo durante o envio: continua pendente (outro envio já está na fila).
             if item.local_state == LocalState::Uploading {
                 item.local_state = LocalState::Clean;

@@ -57,6 +57,7 @@ pub(crate) fn item_from_remote(r: RemoteFile, email: &str) -> Item {
         owned_by_me: r.owned_by_me,
         local_state: LocalState::Clean,
         pin: PinState::None,
+        version: r.version,
     }
 }
 

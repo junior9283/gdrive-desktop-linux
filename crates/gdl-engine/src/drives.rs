@@ -42,6 +42,7 @@ fn root_item(drive: &SharedDrive) -> Item {
         owned_by_me: true,
         local_state: LocalState::Clean,
         pin: PinState::None,
+        version: 0,
     }
 }
 

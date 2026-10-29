@@ -135,9 +135,22 @@ pub fn apply_changes(store: &Store, changes: Vec<Change>) -> Result<(usize, Vec<
                 // A lista de Drives já foi consultada antes (`register_new_drives`).
                 Change::Drive(_) => continue,
             };
+            // Uma resposta mais antiga que a já aplicada (lida antes de uma operação da montagem
+            // e chegada depois) não a desfaz.
+            let stale = |old: &Item| {
+                new.as_ref()
+                    .is_some_and(|n| n.version > 0 && n.version < old.version)
+            };
             let (old, cleared) = match pending.remove(&id) {
+                Some((item, clear)) if stale(&item) => {
+                    pending.insert(id, (item, clear));
+                    continue;
+                }
                 Some((item, clear)) => (Some(item), clear),
-                None => (batch.get(&id)?, false),
+                None => match batch.get(&id)? {
+                    Some(item) if stale(&item) => continue,
+                    old => (old, false),
+                },
             };
             // Apagado de vez sem edição local: sai do banco (e da lixeira daqui).
             if new.is_none()
@@ -558,6 +571,24 @@ mod tests {
         );
     }
 
+    /// Uma resposta do Drive lida antes de o item ir para a lixeira e aplicada depois não o tira
+    /// de lá.
+    #[tokio::test]
+    async fn stale_upsert_does_not_untrash() {
+        let (env, poller) = indexed().await;
+        let id = env
+            .fake
+            .add_file(&env.fake.root_id(), "velho.txt", b"x".to_vec());
+        initial_index(&env.store, &env.client).await.unwrap();
+        let stale = env.client.get(&id).await.unwrap();
+        env.fake.trash_remote(&id);
+        poller.run_once().await.unwrap();
+
+        apply_changes(&env.store, vec![Change::Upsert(Box::new(stale))]).unwrap();
+
+        assert!(env.item(&id).trashed, "a resposta antiga tirou da lixeira");
+    }
+
     #[tokio::test]
     async fn remote_trash_marks_item_trashed() {
         let (env, poller) = indexed().await;
@@ -724,6 +755,7 @@ mod tests {
             shortcut_target: None,
             web_view_link: None,
             drive_id: None,
+            version: 0,
         }
     }
 

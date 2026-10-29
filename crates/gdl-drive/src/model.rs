@@ -8,7 +8,7 @@ pub const SHORTCUT_MIME: &str = "application/vnd.google-apps.shortcut";
 
 /// Campos pedidos à API para cada arquivo (sempre os mesmos, para o banco ficar completo).
 pub const FILE_FIELDS: &str = "id,name,mimeType,parents,size,md5Checksum,headRevisionId,modifiedTime,\
-                               createdTime,trashed,capabilities/canEdit,shortcutDetails,webViewLink,driveId,ownedByMe";
+                               createdTime,trashed,capabilities/canEdit,shortcutDetails,webViewLink,driveId,ownedByMe,version";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(from = "RawFile")]
@@ -33,6 +33,9 @@ pub struct RemoteFile {
     pub web_view_link: Option<String>,
     /// O Drive compartilhado onde o item está; `None` no Meu Drive e nos compartilhados comigo.
     pub drive_id: Option<String>,
+    /// Cresce a cada mudança do item no Drive: ordena respostas que chegam fora de ordem (0 sem
+    /// o campo).
+    pub version: u64,
 }
 
 /// Um Drive compartilhado de que a conta é membro (`drives.list`).
@@ -225,6 +228,7 @@ struct RawFile {
     web_view_link: Option<String>,
     drive_id: Option<String>,
     owned_by_me: Option<bool>,
+    version: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -278,6 +282,7 @@ impl From<RawFile> for RemoteFile {
     fn from(raw: RawFile) -> RemoteFile {
         RemoteFile {
             size: parse_u64(raw.size.as_deref()),
+            version: parse_u64(raw.version.as_deref()).unwrap_or(0),
             modified_ms: parse_ms(raw.modified_time.as_deref()),
             created_ms: parse_ms(raw.created_time.as_deref()),
             can_edit: raw.capabilities.is_some_and(|c| c.can_edit),

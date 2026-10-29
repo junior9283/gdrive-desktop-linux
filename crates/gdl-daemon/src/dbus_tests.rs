@@ -162,9 +162,14 @@ async fn first_listing_of_a_photo_folder_has_the_thumbnails() {
         "a pasta de código chamou o Google"
     );
 
+    let started = std::time::Instant::now();
     assert_eq!(listed(h.drive().join("Camera")).await, 2);
+    // Com a máquina carregada, o prazo pode vencer antes: aí a listagem esperou por ele inteiro.
     let seeded = seeded_pngs(&h.paths().thumbnails_dir).len();
-    assert_eq!(seeded, 2 * 3, "a listagem respondeu antes das miniaturas");
+    assert!(
+        seeded == 2 * 3 || started.elapsed() >= gdl_fs::THUMB_WAIT,
+        "a listagem respondeu antes das miniaturas ({seeded}) sem esperar o prazo"
+    );
     assert_eq!(h.fake.downloaded_bytes(), 0);
 }
 

@@ -618,6 +618,8 @@ impl State {
             "modifiedTime": rfc3339(f.modified_ms),
             "capabilities": { "canEdit": f.can_edit },
             "webViewLink": format!("https://drive.google.com/open?id={}", f.id),
+            // A última mudança do item.
+            "version": self.changes.iter().rev().find(|(_, id)| *id == f.id).map_or(0, |(seq, _)| *seq).to_string(),
         });
         if !f.app_properties.is_empty() {
             v["appProperties"] = json!(f.app_properties);

@@ -129,6 +129,10 @@ const MIGRATIONS: &[&str] = &[
     -- até a próxima mudança deles.
     ALTER TABLE items ADD COLUMN owned_by_me INTEGER NOT NULL DEFAULT 1;
 ",
+    "
+    -- A `version` do Drive na última mudança aplicada (0: ainda nenhuma com o campo).
+    ALTER TABLE items ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.

@@ -130,6 +130,9 @@ pub struct Item {
     pub owned_by_me: bool,
     pub local_state: LocalState,
     pub pin: PinState,
+    /// A `version` do Drive da última mudança aplicada (0 se ainda nenhuma): ordena respostas
+    /// que chegam fora de ordem. Só cresce ao gravar.
+    pub version: u64,
 }
 
 stored_enum! {

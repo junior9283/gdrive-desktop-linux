@@ -10,6 +10,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 ### Corrigido
 - Trocar de lugar uma pasta do computador às vezes deixava de baixar os arquivos dela na pasta
   nova: a troca agora espera a comparação em andamento terminar.
+- Um item recém-enviado para a lixeira pela pasta do Google Drive podia voltar por um instante
+  (e `rm -r` falhar com "diretório não vazio"), quando uma consulta ao Drive feita antes chegava
+  depois: o app agora usa a versão de cada item no Drive e descarta a resposta mais antiga.
 
 ## [1.0.0] - 2026-10-28
 

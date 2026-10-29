@@ -22,6 +22,8 @@ pub enum ErrorCategory {
     /// Pasta ou drive compartilhado no limite de itens.
     SharedDriveFull,
     NoPermission,
+    /// O app não consegue ler um arquivo de uma pasta do computador (o Drive não entra).
+    LocalNoPermission,
     TooLarge,
     /// A pasta (ou o arquivo) sumiu da nuvem.
     CloudMissing,
@@ -41,6 +43,7 @@ impl ErrorCategory {
             ErrorCategory::FolderTooDeep => "folder-too-deep",
             ErrorCategory::SharedDriveFull => "shared-drive-full",
             ErrorCategory::NoPermission => "no-permission",
+            ErrorCategory::LocalNoPermission => "local-no-permission",
             ErrorCategory::TooLarge => "too-large",
             ErrorCategory::CloudMissing => "cloud-missing",
             ErrorCategory::LocalMissing => "local-missing",
@@ -59,6 +62,7 @@ impl ErrorCategory {
             FolderTooDeep,
             SharedDriveFull,
             NoPermission,
+            LocalNoPermission,
             TooLarge,
             CloudMissing,
             LocalMissing,
@@ -177,6 +181,10 @@ mod tests {
             assert_eq!(ErrorCategory::parse(category.as_str()), category);
         }
         assert_eq!(ErrorCategory::LostAndFound.as_str(), "lost-and-found");
+        assert_eq!(
+            ErrorCategory::parse("local-no-permission"),
+            ErrorCategory::LocalNoPermission
+        );
         assert_eq!(ErrorCategory::DownloadLimit.as_str(), "download-limit");
         assert_eq!(ErrorCategory::FolderTooDeep.as_str(), "folder-too-deep");
         assert_eq!(ErrorCategory::SharedDriveFull.as_str(), "shared-drive-full");

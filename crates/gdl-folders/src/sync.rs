@@ -1133,10 +1133,11 @@ fn under<'a, V>(
 
 /// A categoria que a janela de erros mostra para uma falha das pastas do computador: o texto de
 /// "sem permissão" fala da cópia no Lost and Found, que elas não fazem (o arquivo continua na
-/// pasta).
+/// pasta), então a permissão negada tem categoria própria.
 fn folder_category(category: ErrorCategory) -> ErrorCategory {
     match category {
-        ErrorCategory::NoPermission | ErrorCategory::LostAndFound => ErrorCategory::Unknown,
+        ErrorCategory::NoPermission => ErrorCategory::LocalNoPermission,
+        ErrorCategory::LostAndFound => ErrorCategory::Unknown,
         category => category,
     }
 }
@@ -1535,6 +1536,19 @@ mod tests {
     }
 
     /// O caminho que falhou na última comparação fica marcado (emblema de erro) até sincronizar.
+    #[test]
+    fn folder_failures_never_speak_of_lost_and_found() {
+        assert_eq!(
+            folder_category(ErrorCategory::NoPermission),
+            ErrorCategory::LocalNoPermission
+        );
+        assert_eq!(
+            folder_category(ErrorCategory::LostAndFound),
+            ErrorCategory::Unknown
+        );
+        assert_eq!(folder_category(ErrorCategory::Quota), ErrorCategory::Quota);
+    }
+
     #[tokio::test]
     async fn failed_path_is_remembered_until_it_syncs() {
         let w = World::new().await;

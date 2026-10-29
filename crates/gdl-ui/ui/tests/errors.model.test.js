@@ -18,6 +18,12 @@ test('agrupa por categoria, na ordem fixa, sem grupos vazios', () => {
   assert.deepEqual(groups[2].items.map((i) => i.name), ['a', 'c']);
 });
 
+test('permissão negada numa pasta do computador é um grupo à parte da do Drive', () => {
+  const groups = groupErrors([item('a', 'local-no-permission'), item('b', 'no-permission')]);
+
+  assert.deepEqual(groups.map((g) => g.category), ['no-permission', 'local-no-permission']);
+});
+
 test('categoria que a tela não conhece vai para "unknown"', () => {
   const groups = groupErrors([item('x', 'nova-categoria'), item('y', 'unknown')]);
 

@@ -2895,6 +2895,30 @@ async fn encrypted_burst_pauses_and_can_be_recognized() {
     assert!(!h.proxy.status("").await.unwrap().paused);
 }
 
+/// O sinal `ActionInvoked` chega a todos os clientes D-Bus: o clique num aviso de outro app (ID que
+/// o serviço não mostrou) não pode disparar ação nenhuma, nem abrir a janela.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn click_on_another_apps_notification_does_nothing() {
+    const SUSPICIOUS: &str = "Atividade suspeita nos arquivos";
+    let h = Harness::new().await;
+    h.logged_in().await;
+    write_encrypted_burst(h.drive()).await;
+    wait_until("aviso de atividade suspeita", || {
+        h.notes().iter().any(|n| n.summary == SUSPICIOUS)
+    })
+    .await;
+    let note = h
+        .notes()
+        .into_iter()
+        .find(|n| n.summary == SUSPICIOUS)
+        .unwrap();
+
+    h.daemon
+        .on_desktop_action(note.id + 1000, "allow-sync")
+        .await;
+    assert!(h.proxy.status("").await.unwrap().paused);
+}
+
 /// Sair da conta espera a reabertura das contas terminar: senão, a conta que acabou de sair
 /// voltava montada pela reabertura.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

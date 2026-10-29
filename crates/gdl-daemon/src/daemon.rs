@@ -922,27 +922,21 @@ impl Daemon {
         // histórico quando `notify` termina. Um servidor que não responde não prende o clique.
         let mut showing = self.showing.subscribe();
         let _ = tokio::time::timeout(CLICK_WAIT, showing.wait_for(|n| *n == 0)).await;
-        let shown = self.history.shown_as(desktop_id);
-        let id = shown.as_ref().map(|(note, _)| note.id);
-        let device = shown
-            .as_ref()
-            .and_then(|(_, slot)| slot.as_deref())
-            .and_then(notify::device_of);
-        let done = match (key, &shown, device) {
-            (MUTE, Some((note, _)), _) => self.set_notification_enabled(&note.kind, false).await,
-            (DEVICE_ALWAYS, _, Some(device)) => self.backup_device(device, true).await,
-            (DEVICE_IGNORE, _, Some(device)) => self.ignore_device(device).await,
-            _ => {
-                let account = shown.as_ref().map_or("", |(note, _)| note.account.as_str());
-                self.run_action(account, key).await
-            }
+        // `ActionInvoked` chega a todos os clientes D-Bus: o ID que não é de um aviso nosso é de
+        // outro app, e o clique nele não é da conta de ninguém.
+        let Some((note, slot)) = self.history.shown_as(desktop_id) else {
+            return;
+        };
+        let done = match (key, slot.as_deref().and_then(notify::device_of)) {
+            (MUTE, _) => self.set_notification_enabled(&note.kind, false).await,
+            (DEVICE_ALWAYS, Some(device)) => self.backup_device(device, true).await,
+            (DEVICE_IGNORE, Some(device)) => self.ignore_device(device).await,
+            _ => self.run_action(&note.account, key).await,
         };
         if let Err(e) = done {
             tracing::warn!(erro = %e, acao = key, "ação do aviso falhou");
         }
-        if let Some(id) = id
-            && self.history.mark_read(id)
-        {
+        if self.history.mark_read(note.id) {
             self.emit_notifications_changed().await;
         }
     }

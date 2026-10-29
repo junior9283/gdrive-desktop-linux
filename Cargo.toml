@@ -66,3 +66,8 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Mantém o target/ pequeno: sem cache incremental e com informação de depuração enxuta
+[profile.dev]
+incremental = false
+debug = "line-tables-only"

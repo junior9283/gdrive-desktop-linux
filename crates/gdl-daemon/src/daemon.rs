@@ -122,7 +122,8 @@ pub struct Config {
     /// Este computador no Drive ("Computadores/<nome>").
     pub computer: Computer,
     pub folder_timing: gdl_folders::watch::Timing,
-    /// O prazo único de `settle` depois de desmontar uma conta.
+    /// O prazo de `settle` depois de desmontar uma conta e da espera de uma troca de pasta pela
+    /// passada antiga.
     pub unmount_limit: Duration,
     pub updates: crate::updates::UpdateCheck,
 }

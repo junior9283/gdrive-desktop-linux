@@ -3198,6 +3198,54 @@ async fn relocating_to_another_folder_merges_and_trashes_nothing() {
 
 /// Uma segunda troca de lugar da mesma pasta, antes de a primeira terminar, é recusada: senão
 /// dois laços rodavam no mesmo par.
+/// Uma passada antiga que não acaba (envio preso) não segura a troca para sempre: passado o prazo
+/// a troca desiste, a pasta continua no lugar antigo e dá para tentar de novo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relocation_gives_up_when_the_old_pass_never_ends() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    let docs = local_folder(&h, "Documentos");
+    std::fs::write(docs.join("a.txt"), b"um").unwrap();
+    let id = h
+        .proxy
+        .add_local_folder("", docs.to_str().unwrap(), false)
+        .await
+        .unwrap();
+    wait_until("a.txt no Drive", || h.fake.find_live("a.txt").len() == 1).await;
+    let (first, second) = (local_folder(&h, "Primeira"), local_folder(&h, "Segunda"));
+    h.fake.inject(gdl_fake_drive::Fault::DelayUploads(
+        std::time::Duration::from_secs(10),
+    ));
+    std::fs::write(docs.join("b.txt"), b"dois").unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    h.proxy
+        .relocate_local_folder("", id, first.to_str().unwrap())
+        .await
+        .unwrap();
+    // O prazo do harness é de 2 s: depois dele a troca desistiu e a seguinte é aceita.
+    let started = std::time::Instant::now();
+    loop {
+        match h
+            .proxy
+            .relocate_local_folder("", id, second.to_str().unwrap())
+            .await
+        {
+            Ok(()) => break,
+            Err(ServiceError::Refused(r)) if r == "moving" => {}
+            Err(e) => panic!("{e:?}"),
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(8),
+            "a troca não desistiu"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(started.elapsed() >= std::time::Duration::from_secs(1));
+    assert!(!first.join("a.txt").exists(), "a primeira troca desistiu");
+    h.fake.clear_faults();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn second_relocation_waits_for_the_first() {
     let h = Harness::new().await;

@@ -391,10 +391,22 @@ impl Daemon {
         // A passada em andamento do laço antigo ainda grava o estado sincronizado do par: o lugar
         // novo (que zera esse estado) só entra quando ele termina, e a resposta não espera.
         let daemon = self.clone();
+        let limit = self.config.unmount_limit;
         tokio::spawn(async move {
             let _moving = moving;
             if let Some(old) = old {
-                let _ = old.await;
+                // Sem prazo, uma passada presa (um envio que não acaba) seguraria a troca e o
+                // `Moving` para sempre; a conta parar também encerra a espera. Nos dois casos o
+                // par fica no lugar antigo (só o fim da troca grava o lugar novo) e a pessoa
+                // pode tentar de novo.
+                tokio::select! {
+                    _ = old => {}
+                    _ = account.shutdown.cancelled() => return,
+                    _ = tokio::time::sleep(limit) => {
+                        tracing::warn!(pair = id, "a passada antiga não terminou; a pasta não foi trocada de lugar");
+                        return;
+                    }
+                }
             }
             // A conta parou durante a espera: o laço novo seria de uma conta que já saiu.
             if account.shutdown.is_cancelled() {

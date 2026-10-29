@@ -329,9 +329,10 @@ pub struct Daemon {
     saving: tokio::sync::Mutex<()>,
     /// Uma reabertura das contas por vez (`restart_accounts`).
     reopening: tokio::sync::Mutex<()>,
-    /// Segura do envio de um aviso ao servidor de notificações até o ID dele estar no
-    /// histórico: um clique que chega nesse meio-tempo espera (`on_desktop_action`).
-    showing: tokio::sync::Mutex<()>,
+    /// Quantos avisos estão a caminho do servidor de notificações, sem o ID no histórico ainda:
+    /// um clique que chega nesse meio-tempo espera, com prazo (`on_desktop_action`). Os envios
+    /// não se esperam entre si.
+    showing: watch::Sender<usize>,
     exit: watch::Sender<Option<Exit>>,
     i18n: I18n,
     /// Os nomes das pastas da raiz da montagem, no idioma do sistema (como o FUSE mostra).
@@ -430,7 +431,7 @@ impl Daemon {
             prefs: RwLock::new(Arc::new(prefs)),
             saving: tokio::sync::Mutex::default(),
             reopening: tokio::sync::Mutex::default(),
-            showing: tokio::sync::Mutex::default(),
+            showing: watch::Sender::new(0),
             exit: watch::Sender::new(None),
             config,
             accounts: tokio::sync::Mutex::default(),
@@ -865,7 +866,7 @@ impl Daemon {
     }
 
     /// Mostra o aviso e o guarda no histórico, a menos que a família dele esteja desligada.
-    async fn notify(&self, note: &Notification) {
+    pub(crate) async fn notify(&self, note: &Notification) {
         if self.muted(note.kind_id) {
             return;
         }
@@ -876,7 +877,8 @@ impl Daemon {
         };
         let extra = notify::extra_actions(note, &self.i18n);
         let named = self.with_account_name(note).await;
-        let _showing = self.showing.lock().await;
+        self.showing.send_modify(|n| *n += 1);
+        let _showing = Showing(&self.showing);
         if let Some(desktop_id) = notifier.send(&named, &extra).await {
             self.history.set_desktop_id(id, desktop_id);
         }
@@ -902,8 +904,9 @@ impl Daemon {
     /// Botão de um aviso clicado no servidor de notificações.
     pub(crate) async fn on_desktop_action(self: &Arc<Self>, desktop_id: u32, key: &str) {
         // Um aviso ainda a caminho do servidor já pode ter sido clicado: o ID dele só chega ao
-        // histórico quando `notify` termina.
-        drop(self.showing.lock().await);
+        // histórico quando `notify` termina. Um servidor que não responde não prende o clique.
+        let mut showing = self.showing.subscribe();
+        let _ = tokio::time::timeout(CLICK_WAIT, showing.wait_for(|n| *n == 0)).await;
         let shown = self.history.shown_as(desktop_id);
         let id = shown.as_ref().map(|(note, _)| note.id);
         let device = shown
@@ -2511,6 +2514,18 @@ fn folder_error_id(pair: i64, rel: &str) -> String {
 fn folder_error(item_id: &str) -> Option<(i64, &str)> {
     let (pair, rel) = item_id.strip_prefix(FOLDER_ERROR)?.split_once(':')?;
     Some((pair.parse().ok()?, rel))
+}
+
+/// Quanto um clique em aviso espera os que ainda estão a caminho do servidor de notificações.
+const CLICK_WAIT: Duration = Duration::from_secs(2);
+
+/// Tira um aviso de `showing` ao sair do envio, mesmo cancelado.
+struct Showing<'a>(&'a watch::Sender<usize>);
+
+impl Drop for Showing<'_> {
+    fn drop(&mut self) {
+        self.0.send_modify(|n| *n -= 1);
+    }
 }
 
 /// O que sobra de uma conta depois de desmontada: os arquivos que ainda estão abertos na

@@ -4053,3 +4053,55 @@ async fn mount_point_per_account() {
     let managed = h.proxy.set_mount_point(ANA, "/outro").await.unwrap_err();
     assert_eq!(managed.short_name(), "Managed");
 }
+
+fn plain_note(summary: &str) -> crate::notify::Notification {
+    crate::notify::Notification {
+        kind_id: "test",
+        summary: summary.into(),
+        body: String::new(),
+        action: None,
+        replaces_key: None,
+        account: String::new(),
+    }
+}
+
+/// O servidor de notificações demora para responder a um aviso: o aviso seguinte não espera por
+/// ele.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_notification_does_not_block_the_next_one() {
+    let h = Harness::new().await;
+    let daemon = h.daemon.clone();
+    let slow = tokio::spawn(async move {
+        daemon
+            .notify(&plain_note(&format!("{}um", crate::testutil::SLOW)))
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let started = std::time::Instant::now();
+    h.daemon.notify(&plain_note("dois")).await;
+    assert!(
+        started.elapsed() < crate::testutil::SLOW_DELAY / 2,
+        "o segundo aviso esperou o primeiro"
+    );
+    slow.await.unwrap();
+}
+
+/// Um clique espera os avisos a caminho, mas não para sempre: com o servidor lento, volta em 2 s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn click_waits_at_most_two_seconds_for_a_slow_server() {
+    let h = Harness::new().await;
+    let daemon = h.daemon.clone();
+    let slow = tokio::spawn(async move {
+        daemon
+            .notify(&plain_note(&format!("{}um", crate::testutil::SLOW)))
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let started = std::time::Instant::now();
+    h.daemon.on_desktop_action(999, "mute").await;
+    assert!(started.elapsed() < std::time::Duration::from_millis(3500));
+    assert!(started.elapsed() >= std::time::Duration::from_millis(1500));
+    slow.await.unwrap();
+}

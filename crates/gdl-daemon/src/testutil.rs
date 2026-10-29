@@ -36,6 +36,10 @@ pub(crate) struct Note {
     pub actions: Vec<String>,
 }
 
+/// O aviso cujo resumo começa assim demora `SLOW_DELAY` para o servidor responder.
+pub(crate) const SLOW: &str = "lento:";
+pub(crate) const SLOW_DELAY: Duration = Duration::from_secs(4);
+
 struct FakeNotifications(Arc<Mutex<Vec<Note>>>);
 
 #[zbus::interface(name = "org.freedesktop.Notifications")]
@@ -46,7 +50,7 @@ impl FakeNotifications {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn notify(
+    async fn notify(
         &self,
         _app_name: String,
         replaces_id: u32,
@@ -57,6 +61,10 @@ impl FakeNotifications {
         _hints: HashMap<String, OwnedValue>,
         _expire_timeout: i32,
     ) -> u32 {
+        // Um servidor lento (ou parado) de propósito, para os testes de envio.
+        if summary.starts_with(SLOW) {
+            tokio::time::sleep(SLOW_DELAY).await;
+        }
         let mut notes = self.0.lock().unwrap();
         // Como no servidor de verdade: substituir mantém o ID.
         let id = match replaces_id {

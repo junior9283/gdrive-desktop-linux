@@ -15,7 +15,7 @@ até 4 contas ao mesmo tempo, Drives compartilhados, o modo Espelho (o Meu Drive
 do computador), pastas do computador sincronizadas, backup de pendrives, um tour de boas-vindas e, no gerenciador de
 arquivos, emblemas de estado (inclusive de erro), compartilhamento, versões e atalhos pelo botão direito. Desde a 1.0
 tem paridade com o app oficial para Windows, item a item na [matriz de paridade](paridade.md); a 1.1
-fecha as pendências dela. Ele também
+fecha as pendências dela e a 1.2 tira as esperas sem fim da desmontagem, da troca de pasta e dos avisos. Ele também
 pausa os envios diante de arquivos que parecem cifrados por um vírus, recupera as edições se os
 dados locais se danificarem e tem um servidor MCP para assistentes de IA.
 

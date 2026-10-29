@@ -65,6 +65,8 @@ const BESIDE: &str = "beside";
 /// Quanto se espera, ao todo, uma montagem desfeita largar os arquivos abertos e os motores
 /// antigos terminarem (`Config::unmount_limit`).
 pub const UNMOUNT_LIMIT: Duration = Duration::from_secs(60);
+/// Quanto um clique em aviso espera os que ainda estão a caminho do servidor de notificações.
+const CLICK_WAIT: Duration = Duration::from_secs(2);
 /// O mesmo prazo quando o serviço está saindo: o encerramento da sessão não espera mais que isso.
 const SHUTDOWN_LIMIT: Duration = Duration::from_secs(5);
 /// Chave no banco da conta com a pasta da montagem escolhida em "Alterar" (vazia: o padrão).
@@ -128,7 +130,10 @@ pub struct Config {
     pub updates: crate::updates::UpdateCheck,
 }
 
-/// A conta conectada. Ao sair, desmonta e depois para o motor (os campos caem nessa ordem).
+/// A conta conectada. Ao sair, desmonta e depois para o motor: os campos caem na ordem em que
+/// estão declarados, então `_session` (que desmonta) fica antes de `_stop` (que cancela as
+/// tarefas), e não se reordena sem pensar nisso. `signing_out_unmounts_the_drive_folder` guarda
+/// a desmontagem.
 struct Account {
     email: String,
     engine: Arc<Engine>,
@@ -142,7 +147,7 @@ struct Account {
     folders: Arc<folders::Runners>,
     /// Os arquivos abertos na montagem, que continua atendendo-os depois de desmontada.
     open_files: gdl_fs::OpenFiles,
-    /// Só existe para cair: largá-la desmonta (veja a ordem em `unmount`).
+    /// Só existe para cair: largá-la desmonta (veja a ordem em `Account`).
     _session: fuser::BackgroundSession,
     _stop: DropGuard,
 }
@@ -1542,10 +1547,9 @@ impl Daemon {
             accounts.remove(index)
         };
         let removed = (account.engine.clone(), account.mount_point.clone());
-        // O motor volta para quem chama (que o usa para apagar os dados): só os arquivos contam.
         let old = [Old {
             files: account.open_files.clone(),
-            engine: std::sync::Weak::new(),
+            engine: None,
         }];
         unmount(vec![account]).await;
         settle(&old, self.config.unmount_limit).await;
@@ -2516,9 +2520,6 @@ fn folder_error(item_id: &str) -> Option<(i64, &str)> {
     Some((pair.parse().ok()?, rel))
 }
 
-/// Quanto um clique em aviso espera os que ainda estão a caminho do servidor de notificações.
-const CLICK_WAIT: Duration = Duration::from_secs(2);
-
 /// Tira um aviso de `showing` ao sair do envio, mesmo cancelado.
 struct Showing<'a>(&'a watch::Sender<usize>);
 
@@ -2532,7 +2533,8 @@ impl Drop for Showing<'_> {
 /// montagem (que segue atendendo-os) e o motor, que só some quando as tarefas dele terminam.
 struct Old {
     files: gdl_fs::OpenFiles,
-    engine: std::sync::Weak<Engine>,
+    /// `None` quando o motor volta para quem chama (que o segura), e só os arquivos contam.
+    engine: Option<std::sync::Weak<Engine>>,
 }
 
 /// As partes de `accounts` que `settle` espera, para pegar antes de desmontá-las.
@@ -2541,7 +2543,7 @@ fn old_of(accounts: &[Account]) -> Vec<Old> {
         .iter()
         .map(|a| Old {
             files: a.open_files.clone(),
-            engine: Arc::downgrade(&a.engine),
+            engine: Some(Arc::downgrade(&a.engine)),
         })
         .collect()
 }
@@ -2552,7 +2554,10 @@ fn old_of(accounts: &[Account]) -> Vec<Old> {
 async fn settle(old: &[Old], limit: Duration) {
     let deadline = tokio::time::Instant::now() + limit;
     let files_open = || old.iter().any(|o| o.files.count() > 0);
-    let engines_alive = || old.iter().any(|o| o.engine.strong_count() > 0);
+    let engines_alive = || {
+        old.iter()
+            .any(|o| o.engine.as_ref().is_some_and(|e| e.strong_count() > 0))
+    };
     if files_open() {
         tracing::info!("esperando fechar os arquivos abertos nas montagens antigas");
     }

@@ -7,6 +7,24 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.2.0] - 2026-10-29
+
+Robustez: nada de espera sem fim ao desmontar, e avisos e erros que dizem o que aconteceu.
+
+### Corrigido
+- Mudar o cache de lugar (ou sair da conta) com um programa preso segurando um arquivo da pasta do
+  Google Drive não trava mais: o app espera até 60 s a pasta largar os arquivos e segue, deixando
+  o motivo no log. Antes, a espera não tinha fim e travava também o login.
+- Sair da conta, redefinir os dados locais e desinstalar esperam a pasta largar os arquivos antes
+  de apagar o cache, para não tirá-lo de debaixo de um programa que ainda grava.
+- Trocar de lugar uma pasta do computador com um envio preso desiste no prazo, e também ao parar a
+  conta, e a pasta continua no lugar antigo; antes, a troca e a trava de "uma troca por vez" ficavam
+  presas para sempre.
+- Um servidor de notificações lento não atrasa mais os avisos seguintes, e o clique num aviso
+  espera os que estão a caminho por no máximo 2 s.
+- Janela de erros: arquivo que o app não consegue ler numa pasta do computador aparece em
+  "Sem permissão para ler no computador", com texto próprio, em vez de "Outros erros".
+
 ## [1.1.0] - 2026-10-28
 
 Pendências da 1.0: correções de corridas raras e o emblema de erro nas pastas do computador.
@@ -587,7 +605,8 @@ está feito, ou registrado em "Diferenças inevitáveis" no README.
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.1.0...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.11.0...v1.0.0
 [0.11.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v0.10.0...v0.11.0

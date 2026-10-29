@@ -4105,3 +4105,24 @@ async fn click_waits_at_most_two_seconds_for_a_slow_server() {
     assert!(started.elapsed() >= std::time::Duration::from_millis(1500));
     slow.await.unwrap();
 }
+
+/// O ponto de montagem aparece em `/proc/self/mountinfo` enquanto a conta está conectada e some
+/// quando ela sai: guarda que largar a `Account` desmonta a pasta.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn signing_out_unmounts_the_drive_folder() {
+    let h = Harness::new().await;
+    h.logged_in().await;
+    // O `mountinfo` escreve o espaço do caminho como `\040`.
+    let drive = h.drive().parent().unwrap().to_path_buf();
+    let mounted = |path: &std::path::Path| {
+        let wanted = path.to_str().unwrap().replace(' ', "\\040");
+        std::fs::read_to_string("/proc/self/mountinfo")
+            .unwrap()
+            .lines()
+            .any(|l| l.split(' ').nth(4) == Some(wanted.as_str()))
+    };
+    assert!(mounted(&drive), "a pasta devia estar montada");
+
+    h.daemon.sign_out(&h.fake.email()).await.unwrap();
+    wait_until("a pasta desmontar", || !mounted(&drive)).await;
+}

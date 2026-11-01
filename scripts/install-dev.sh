@@ -90,9 +90,15 @@ remove "$share/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLin
 for file in "$repo"/assets/icons/hicolor/scalable/emblems/*.svg; do
   install_as 644 "$file" "$share/icons/hicolor/scalable/emblems/$(basename "$file")"
 done
-# Os ícones da bandeja, no tema próprio que ela procura ao lado dos programas.
+# Os ícones da bandeja, no tema próprio que ela procura ao lado dos programas e no tema hicolor.
+install_as 644 "$repo/assets/icons/hicolor/index.theme" "$share/gdrive-desktop-linux/icons/hicolor/index.theme"
+for file in "$repo"/assets/icons/hicolor/*/status/*.png; do
+  install_as 644 "$file" "$share/gdrive-desktop-linux/icons/hicolor/${file#"$repo/assets/icons/hicolor/"}"
+  install_as 644 "$file" "$share/icons/hicolor/${file#"$repo/assets/icons/hicolor/"}"
+done
 for file in "$repo"/assets/icons/hicolor/scalable/status/*.svg; do
   install_as 644 "$file" "$share/gdrive-desktop-linux/icons/hicolor/scalable/status/$(basename "$file")"
+  install_as 644 "$file" "$share/icons/hicolor/scalable/status/$(basename "$file")"
 done
 # O menu do botão direito no Nautilus, no Nemo, no Caja e no Thunar: a mesma extensão na pasta de
 # cada um (só carrega onde o pacote de Python do gerenciador estiver instalado).

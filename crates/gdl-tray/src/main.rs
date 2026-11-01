@@ -15,6 +15,7 @@ use gdl_ipc::launcher::Launcher;
 use gdl_ipc::{BUS_NAME, ServiceProxy, Status};
 use gdl_tray::hotkey::{DEFAULT_TRIGGER, Hotkey};
 use gdl_tray::model::{Action, MenuItem, TrayView, is_signed_out};
+use gdl_tray::pixmap::pixmap_for;
 use ksni::TrayMethods;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
@@ -52,6 +53,10 @@ impl ksni::Tray for Tray {
 
     fn icon_theme_path(&self) -> String {
         self.theme_path.clone()
+    }
+
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        pixmap_for(self.view.icon_at(self.frame))
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
@@ -92,13 +97,10 @@ impl ksni::Tray for Tray {
 /// build de desenvolvimento, os do repositório.
 fn theme_path() -> String {
     let installed = exe_dir().map(|dir| dir.join("../share/gdrive-desktop-linux/icons"));
-    #[cfg(debug_assertions)]
-    let installed = installed.into_iter().chain([PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../assets/icons"
-    ))]);
+    let dev = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/icons"));
     installed
         .into_iter()
+        .chain([dev])
         .find(|dir| dir.is_dir())
         .map(|dir| dir.display().to_string())
         .unwrap_or_default()
@@ -392,5 +394,13 @@ mod tests {
     #[test]
     fn found_icons_in_development() {
         assert!(theme_path().ends_with("assets/icons"), "{}", theme_path());
+    }
+
+    #[test]
+    fn every_icon_has_a_pixmap() {
+        for name in STILL_ICONS.iter().chain(&SYNC_ICONS) {
+            let icons = pixmap_for(name);
+            assert!(!icons.is_empty(), "pixmap faltando para {name}");
+        }
     }
 }

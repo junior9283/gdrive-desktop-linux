@@ -2,3 +2,4 @@
 
 pub mod hotkey;
 pub mod model;
+pub mod pixmap;

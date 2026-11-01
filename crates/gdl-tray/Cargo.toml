@@ -15,6 +15,7 @@ path = "src/main.rs"
 futures-util.workspace = true
 gdl-common.workspace = true
 gdl-ipc.workspace = true
+image = { workspace = true }
 ksni.workspace = true
 ashpd.workspace = true
 thiserror.workspace = true

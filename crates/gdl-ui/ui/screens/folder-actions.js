@@ -15,8 +15,9 @@ export function folderItems(ctx, folders, manyAccounts) {
 }
 
 // A linha de `row` (de `folderRows`) como `li.local-folder`.
-export function folderRow({ api, t }, row) {
-  const args = { account: row.account, id: row.id };
+export function folderRow({ api, t, home }, row) {
+  const args = { account: row.account, id: row.id, folder_id: row.id };
+  const busy = home?.status?.state === 'checking' || home?.status?.state === 'syncing' || home?.status?.paused;
   const confirmDeletes = row.needsConfirm
     ? el('button', { class: 'text', onclick: () => attempt(api.call('confirm_folder_deletes', args)) }, t('folder-confirm-deletes'))
     : [];
@@ -28,7 +29,7 @@ export function folderRow({ api, t }, row) {
       row.notice ? el('span', { class: 'folder-notice' }, t(...row.notice), confirmDeletes) : []),
     menuButton(t('row-menu'), () => [
       { id: 'open', label: t('folder-open'), action: () => attempt(api.openLocalFolder(row.account, row.id)) },
-      { id: 'sync-now', label: t('button-sync-now'), action: () => attempt(api.call('sync_now', args), () => toast(t('sync-now-toast'))) },
+      { id: 'sync-now', label: t('button-sync-now'), disabled: busy, action: () => attempt(api.call('sync_now', args), () => toast(t('sync-now-toast'))) },
       ...(row.canRelocate ? [{ id: 'relocate', label: t('folder-relocate'), action: () => relocate({ api, t }, row) }] : []),
       { id: 'stop', label: t('folder-stop'), action: () => stopFolder({ api, t }, row) },
     ]));

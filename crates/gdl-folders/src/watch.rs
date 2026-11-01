@@ -81,7 +81,7 @@ impl FolderSync {
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
                 () = self.wake.notified() => {
-                    due.get_or_insert_with(Instant::now);
+                    due = Some(Instant::now());
                 }
                 _ = ticks.tick() => {
                     due.get_or_insert_with(Instant::now);

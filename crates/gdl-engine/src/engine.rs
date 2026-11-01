@@ -447,7 +447,10 @@ impl Engine {
         if self.is_suspicious_paused() {
             return false;
         }
-        if is_compressed(name) || lock(&self.ransomware).is_quiet(now) {
+        if is_compressed(name)
+            || path.components().any(|c| c.as_os_str() == ".git")
+            || lock(&self.ransomware).is_quiet(now)
+        {
             return true;
         }
         let head = read_head(path, SAMPLE_BYTES);

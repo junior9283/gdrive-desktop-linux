@@ -85,6 +85,7 @@ pub(super) struct Runners {
 
 /// O que os pares de uma conta precisam: o e-mail (para os avisos), o motor, os laços que rodam e
 /// o cancelamento da conta.
+#[derive(Clone)]
 pub(super) struct FolderAccount {
     pub email: String,
     pub engine: Arc<Engine>,
@@ -165,9 +166,16 @@ impl Runners {
         self.get(id).inspect(|sync| sync.retry()).is_some()
     }
 
+    pub(super) fn set_ignore_node_modules(&self, on: bool) {
+        for (sync, ..) in self.lock().values() {
+            sync.set_ignore_node_modules(on);
+        }
+    }
+
     /// Andamento em tempo real de todas as pastas que rodam.
-    pub(super) fn sync_progress(&self) -> (bool, u32, u32, String, i32) {
+    pub(super) fn sync_progress(&self) -> (bool, bool, u32, u32, String, i32) {
         let runners = self.lock();
+        let mut any_checking = false;
         let mut any_syncing = false;
         let mut total_completed = 0;
         let mut total_files = 0;
@@ -176,6 +184,9 @@ impl Runners {
 
         for (sync, ..) in runners.values() {
             let p = sync.progress();
+            if p.is_checking {
+                any_checking = true;
+            }
             if p.is_syncing {
                 any_syncing = true;
                 if active_file.is_empty() && !p.current_file.is_empty() {
@@ -187,6 +198,7 @@ impl Runners {
             total_files += p.total;
         }
         (
+            any_checking,
             any_syncing,
             total_completed,
             total_files,
@@ -207,8 +219,18 @@ impl Daemon {
                     PairKind::Mirror => self.mirror_refused().is_ok(),
                     PairKind::Device => false,
                 };
+                let has_folders = pairs
+                    .iter()
+                    .any(|p| p.kind == PairKind::Folder && allowed(p.kind));
                 for pair in pairs.into_iter().filter(|p| allowed(p.kind)) {
                     self.start_folder(account, pair);
+                }
+                if has_folders {
+                    let daemon = self.clone();
+                    let account = account.clone();
+                    tokio::spawn(async move {
+                        let _ = daemon.consolidate_computer_folders(&account).await;
+                    });
                 }
             }
             Err(e) => tracing::warn!(erro = %e, "falha ao ler as pastas do computador"),
@@ -230,7 +252,8 @@ impl Daemon {
             pair,
             self.system_trash(),
             self.i18n.tr("conflict-word", &[]),
-        );
+        )
+        .with_ignore_node_modules(self.prefs().ignore_node_modules);
         if kind == PairKind::Mirror {
             sync = sync.with_links(Links {
                 email: account.email.clone(),
@@ -661,20 +684,56 @@ impl Daemon {
         let store = engine.store();
         let known = store.kv_get(COMPUTER_KEY).map_err(failed)?;
         if let Some(id) = known.filter(|id| {
-            let item = store.get(&ItemId(id.clone())).ok().flatten();
-            item.is_some_and(|i| !i.trashed)
+            let Some(item) = store.get(&ItemId(id.clone())).ok().flatten() else {
+                return false;
+            };
+            if item.trashed {
+                return false;
+            }
+            item.parent
+                .as_ref()
+                .and_then(|p| store.get(p).ok().flatten())
+                .is_some_and(|p| !p.trashed)
         }) {
             return Ok(Some(id));
         }
-        let found = find_support(engine, COMPUTER, &self.config.computer.id).await?;
-        if let Some(id) = &found {
-            store.kv_set(COMPUTER_KEY, id).map_err(failed)?;
-            let computer = store.get(&ItemId(id.clone())).map_err(failed)?;
-            if let Some(computers) = computer.and_then(|i| i.parent) {
-                note_computers(engine, &computers.0)?;
+        let candidates = engine
+            .client()
+            .find_by_app_property(COMPUTER, &self.config.computer.id)
+            .await
+            .map_err(failed)?;
+        for r in candidates {
+            let parent_id = r.parents.first().cloned();
+            let parent_alive = match &parent_id {
+                Some(pid) => {
+                    if let Some(p) = store.get(&ItemId(pid.clone())).ok().flatten() {
+                        !p.trashed
+                    } else if let Ok(p) = engine.client().get(pid).await {
+                        let alive = !p.trashed;
+                        if alive {
+                            let _ = remember(engine, p);
+                        }
+                        alive
+                    } else {
+                        false
+                    }
+                }
+                None => false,
+            };
+            if parent_alive {
+                let id = remember(engine, r)?;
+                store.kv_set(COMPUTER_KEY, &id).map_err(failed)?;
+                if let Some(computers) = parent_id {
+                    note_computers(engine, &computers)?;
+                }
+                return Ok(Some(id));
+            } else {
+                // O pai (Computers) foi para a lixeira: descarta esta pasta órfã também.
+                let _ = engine.client().set_trashed(&r.id, true).await;
+                let _ = store.remove_item(&ItemId(r.id));
             }
         }
-        Ok(found)
+        Ok(None)
     }
 
     /// "Computadores/<este computador>" no Drive, criando o que faltar.
@@ -718,49 +777,84 @@ impl Daemon {
         Ok(id)
     }
 
-    /// Garante que todas as pastas de backup fiquem sob uma única pasta Computers -> hostname
-    /// e remove pastas duplicadas no Drive.
+    /// Garante que todas as pastas de backup fiquem sob uma única pasta Computers -> hostname,
+    /// recria pastas que tenham sido apagadas no Drive e remove pastas duplicadas.
     pub(super) async fn consolidate_computer_folders(
-        &self,
-        engine: &Arc<Engine>,
+        self: &Arc<Self>,
+        account: &FolderAccount,
     ) -> Result<(), ServiceError> {
+        let engine = &account.engine;
         let store = engine.store();
         let client = engine.client();
 
-        let primary_computer = match self.find_computer_folder(engine).await {
-            Ok(Some(id)) => id,
-            _ => return Ok(()),
-        };
+        let folder_pairs: Vec<Pair> = store
+            .pairs()
+            .map_err(failed)?
+            .into_iter()
+            .filter(|p| p.kind == PairKind::Folder)
+            .collect();
+        if folder_pairs.is_empty() {
+            return Ok(());
+        }
 
-        if let Ok(pairs) = store.pairs() {
-            for pair in pairs {
-                if pair.kind != PairKind::Folder {
-                    continue;
-                }
-                let item = store.get(&pair.remote_id).ok().flatten();
-                let current_parent = item
-                    .as_ref()
-                    .and_then(|i| i.parent.as_ref())
-                    .map(|p| p.0.clone());
-                if current_parent.as_deref() != Some(&primary_computer) {
-                    tracing::info!(
-                        pasta = %pair.local.display(),
-                        id = %pair.remote_id.0,
-                        antigo = ?current_parent,
-                        novo = %primary_computer,
-                        "unificando pasta no computador único do Drive"
-                    );
-                    let moved = client
-                        .rename_move(
-                            &pair.remote_id.0,
-                            None,
-                            Some(&primary_computer),
-                            current_parent.as_deref(),
-                        )
-                        .await;
-                    if let Ok(m) = moved {
-                        let _ = remember(engine, m);
+        let primary_computer = self.computer_folder(engine).await?;
+
+        for pair in folder_pairs {
+            let item = store.get(&pair.remote_id).ok().flatten();
+            let parent_alive = item
+                .as_ref()
+                .and_then(|i| i.parent.as_ref())
+                .and_then(|p| store.get(p).ok().flatten())
+                .is_some_and(|p| !p.trashed);
+            let item_alive = item.as_ref().is_some_and(|i| !i.trashed) && parent_alive;
+
+            if !item_alive {
+                let folder_name = file_name(&pair.local);
+                let new_remote_id = match live_folder(engine, &primary_computer, &folder_name)? {
+                    Some(existing) => existing.id.0,
+                    None => {
+                        let made = client
+                            .create_folder(&primary_computer, &folder_name, None)
+                            .await
+                            .map_err(failed)?;
+                        remember(engine, made)?
                     }
+                };
+                tracing::info!(
+                    pasta = %pair.local.display(),
+                    antigo = %pair.remote_id.0,
+                    novo = %new_remote_id,
+                    "recriando pasta do computador no Drive e reiniciando sincronização"
+                );
+                store
+                    .set_pair_remote(pair.id, &ItemId(new_remote_id))
+                    .map_err(failed)?;
+                self.restart_folder(account, pair.id).await?;
+                continue;
+            }
+
+            let current_parent = item
+                .as_ref()
+                .and_then(|i| i.parent.as_ref())
+                .map(|p| p.0.clone());
+            if current_parent.as_deref() != Some(&primary_computer) {
+                tracing::info!(
+                    pasta = %pair.local.display(),
+                    id = %pair.remote_id.0,
+                    antigo = ?current_parent,
+                    novo = %primary_computer,
+                    "unificando pasta no computador único do Drive"
+                );
+                let moved = client
+                    .rename_move(
+                        &pair.remote_id.0,
+                        None,
+                        Some(&primary_computer),
+                        current_parent.as_deref(),
+                    )
+                    .await;
+                if let Ok(m) = moved {
+                    let _ = remember(engine, m);
                 }
             }
         }

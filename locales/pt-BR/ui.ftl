@@ -656,3 +656,5 @@ tour-more-text = Preferências, lista de erros, feedback e o que mais o app ofer
 tour-next = Próximo
 tour-done = Concluir
 pref-take-tour = Fazer o tour da janela principal
+pref-ignore-node-modules = Ignorar pastas node_modules automaticamente
+pref-ignore-node-modules-hint = Não sincroniza pastas node_modules encontradas nas pastas do computador

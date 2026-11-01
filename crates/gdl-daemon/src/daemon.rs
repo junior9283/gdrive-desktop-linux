@@ -630,7 +630,11 @@ impl Daemon {
         // retomada do usuário.
         let metered_changed = self.prefs().pause_syncing_on_metered_connection
             != prefs.pause_syncing_on_metered_connection;
+        let ignore_nm = prefs.ignore_node_modules;
         *self.prefs.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(prefs);
+        for account in self.accounts.lock().await.iter() {
+            account.folders.set_ignore_node_modules(ignore_nm);
+        }
         if metered_changed {
             self.apply_metered(self.is_metered()).await;
         }
@@ -1373,8 +1377,13 @@ impl Daemon {
         });
         self.forward_events(email.into(), events, shutdown.clone());
         self.forward_activity(engine.activity_changes(), shutdown.clone());
-        self.forward_states(engine.clone(), mount_point.clone(), shutdown.clone());
         let folders = Arc::new(folders::Runners::default());
+        self.forward_states(
+            engine.clone(),
+            folders.clone(),
+            mount_point.clone(),
+            shutdown.clone(),
+        );
         self.start_folders(&folders::FolderAccount {
             email: email.into(),
             engine: engine.clone(),
@@ -1475,12 +1484,14 @@ impl Daemon {
     fn forward_states(
         self: &Arc<Self>,
         engine: Arc<Engine>,
+        folders: Arc<folders::Runners>,
         mount: PathBuf,
         shutdown: CancellationToken,
     ) {
         let daemon = Arc::downgrade(self);
         tokio::spawn(async move {
             let mut shown = engine.summary().ok().map(shown_summary);
+            let mut shown_folders = folders.sync_progress();
             loop {
                 tokio::select! {
                     () = shutdown.cancelled() => break,
@@ -1502,11 +1513,17 @@ impl Daemon {
                     .unwrap_or_default()
                 };
                 daemon.emit_states_changed(&paths).await;
+                let now_folders = folders.sync_progress();
+                let folder_completed_changed = now_folders.2 != shown_folders.2;
                 // A bandeja só relê o estado com `StatusChanged`: o fim de um envio ou de um
                 // download não passa por um evento do motor, e o ícone ficaria "sincronizando".
-                if summary.is_some() && summary != shown {
+                if (summary.is_some() && summary != shown) || now_folders != shown_folders {
                     shown = summary;
+                    shown_folders = now_folders;
                     daemon.emit_status_changed().await;
+                    if folder_completed_changed {
+                        daemon.emit_activity_changed().await;
+                    }
                 }
             }
         });
@@ -1624,10 +1641,19 @@ impl Daemon {
         for (email, mount_point, engine, folders) in listed {
             let mut summary = engine.summary().map_err(failed)?;
             summary.errors += folders.failure_count();
-            let (folder_syncing, folder_completed, folder_total, folder_active, folder_percent) =
-                folders.sync_progress();
+            let (
+                folder_checking,
+                folder_syncing,
+                folder_completed,
+                folder_total,
+                folder_active,
+                folder_percent,
+            ) = folders.sync_progress();
+            if folder_checking {
+                summary.is_checking = true;
+            }
             if folder_syncing {
-                summary.syncing += 1;
+                summary.syncing += folder_total.saturating_sub(folder_completed).max(1);
                 if summary.current_file.is_empty() {
                     summary.current_file = folder_active;
                     summary.current_percent = folder_percent;
@@ -1809,21 +1835,24 @@ impl Daemon {
     }
 
     /// Força a sincronização imediata (de todas as pastas ou de um par específico).
-    pub async fn sync_now(&self, account: &str, folder_id: i64) -> Result<(), ServiceError> {
+    pub async fn sync_now(
+        self: &Arc<Self>,
+        account: &str,
+        folder_id: i64,
+    ) -> Result<(), ServiceError> {
         let account = self.folder_account(account).await?;
         let engine = &account.engine;
         let now = gdl_common::time::now_ms();
         engine.recognize_activity(now);
+        engine.refresh().await;
 
-        let _ = self.consolidate_computer_folders(engine).await;
+        let _ = self.consolidate_computer_folders(&account).await;
 
         if folder_id > 0 {
             account.runners.retry(folder_id);
-        } else {
-            if let Ok(pairs) = engine.store().pairs() {
-                for pair in pairs {
-                    account.runners.retry(pair.id);
-                }
+        } else if let Ok(pairs) = engine.store().pairs() {
+            for pair in pairs {
+                account.runners.retry(pair.id);
             }
         }
         self.emit_status_changed().await;

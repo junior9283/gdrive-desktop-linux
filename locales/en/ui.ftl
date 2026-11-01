@@ -656,3 +656,5 @@ tour-more-text = Preferences, the error list, feedback and everything else the a
 tour-next = Next
 tour-done = Done
 pref-take-tour = Take the tour of the main window
+pref-ignore-node-modules = Automatically ignore node_modules folders
+pref-ignore-node-modules-hint = Do not sync node_modules folders found inside computer folders

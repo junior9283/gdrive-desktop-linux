@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -43,8 +43,9 @@ pub enum SyncError {
 }
 
 /// Andamento da sincronização da pasta em tempo real.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct FolderProgress {
+    pub is_checking: bool,
     pub is_syncing: bool,
     pub completed: u32,
     pub total: u32,
@@ -124,6 +125,7 @@ pub struct FolderSync {
     is_mount_point: fn(&Path) -> bool,
     screen: Option<Screen>,
     progress: Arc<Mutex<FolderProgress>>,
+    ignore_node_modules: AtomicBool,
 }
 
 impl FolderSync {
@@ -152,11 +154,27 @@ impl FolderSync {
             is_mount_point: guard::is_mount_point,
             screen: None,
             progress: Arc::new(Mutex::new(FolderProgress::default())),
+            ignore_node_modules: AtomicBool::new(false),
         }
     }
 
     pub fn progress(&self) -> FolderProgress {
         self.progress.lock().unwrap().clone()
+    }
+
+    pub fn with_ignore_node_modules(self, on: bool) -> FolderSync {
+        self.ignore_node_modules.store(on, Ordering::Relaxed);
+        self
+    }
+
+    pub fn set_ignore_node_modules(&self, on: bool) {
+        if self.ignore_node_modules.swap(on, Ordering::Relaxed) != on {
+            self.wake.notify_one();
+        }
+    }
+
+    pub fn ignore_node_modules(&self) -> bool {
+        self.ignore_node_modules.load(Ordering::Relaxed)
     }
 
     /// Troca a conferência de ponto de montagem (os testes não montam discos).
@@ -306,6 +324,20 @@ impl FolderSync {
             self.set_state(PairState::Stopped(reason))?;
             return Ok(Report::default());
         }
+        struct ProgressGuard<'a>(&'a Mutex<FolderProgress>);
+        impl Drop for ProgressGuard<'_> {
+            fn drop(&mut self) {
+                let mut p = self.0.lock().unwrap();
+                p.is_checking = false;
+                p.is_syncing = false;
+                p.current_file.clear();
+            }
+        }
+        let _guard = ProgressGuard(&self.progress);
+        {
+            let mut p = self.progress.lock().unwrap();
+            p.is_checking = true;
+        }
         let mut report = Report::default();
         for _ in 0..MAX_PASSES {
             report.failed.clear();
@@ -335,6 +367,11 @@ impl FolderSync {
 
     /// Uma passada; verdadeiro se outra é necessária.
     async fn pass(&self, report: &mut Report) -> Result<bool> {
+        {
+            let mut p = self.progress.lock().unwrap();
+            p.is_checking = true;
+            p.is_syncing = false;
+        }
         let mut v = self.view().await?;
         // Renomear ou mover num lado vira o mesmo no outro (sem novo envio nem download).
         if self.follow_local_renames(&v).await? | self.follow_remote_renames(&v)? {
@@ -370,6 +407,7 @@ impl FolderSync {
         })?;
         {
             let mut p = self.progress.lock().unwrap();
+            p.is_checking = false;
             p.is_syncing = !plan.is_empty();
             p.total = plan.len() as u32;
             p.completed = 0;
@@ -419,11 +457,15 @@ impl FolderSync {
 
     async fn view(&self) -> Result<View> {
         let root = self.pair.local.clone();
-        let locals = tokio::task::spawn_blocking(move || scan(&root))
+        let ignore_nm = self.ignore_node_modules();
+        let locals = tokio::task::spawn_blocking(move || scan(&root, ignore_nm))
             .await
             .map_err(io::Error::other)??;
         let (mut remotes, mut links) = (BTreeMap::new(), BTreeMap::new());
         for (rel, item) in remote_tree(&self.store, &self.pair.remote_id, self.pair.kind)? {
+            if ignore_nm && has_node_modules(&rel) {
+                continue;
+            }
             match item.kind {
                 ItemKind::File | ItemKind::Folder => remotes.insert(rel, item),
                 _ if self.links.is_some() => links.insert(rel, item),
@@ -441,6 +483,7 @@ impl FolderSync {
             .store
             .synced_of(self.pair.id)?
             .into_iter()
+            .filter(|s| !(ignore_nm && has_node_modules(&s.rel_path)))
             .map(|s| (s.rel_path.clone(), s))
             .partition(|(_, s)| s.md5.as_deref() == Some(LINK_MARK));
         let mut locals = locals;
@@ -1128,12 +1171,16 @@ impl SessionSlot for KvSession<'_> {
 
 /// Arquivos e pastas sob `root` (sem atalhos simbólicos nem arquivos especiais), pelo caminho
 /// relativo. Uma pasta ilegível falha a varredura: ausente, ela iria para a lixeira do Drive.
-fn scan(root: &Path) -> io::Result<BTreeMap<String, Local>> {
+fn scan(root: &Path, ignore_node_modules: bool) -> io::Result<BTreeMap<String, Local>> {
     let mut out = BTreeMap::new();
     let walker = walkdir::WalkDir::new(root)
         .min_depth(1)
         .into_iter()
-        .filter_entry(|e| e.file_name().to_str().is_some_and(|n| !ignored(n)));
+        .filter_entry(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| !ignored(n) && !(ignore_node_modules && n == "node_modules"))
+        });
     for entry in walker {
         let entry = entry?;
         let kind = entry.file_type();
@@ -1146,6 +1193,10 @@ fn scan(root: &Path) -> io::Result<BTreeMap<String, Local>> {
         out.insert(rel.to_owned(), Local::of(&entry.metadata()?));
     }
     Ok(out)
+}
+
+fn has_node_modules(rel: &str) -> bool {
+    rel.split('/').any(|part| part == "node_modules")
 }
 
 /// O que um par tem no Drive, pelo caminho relativo: tudo abaixo de `root` menos os nomes que

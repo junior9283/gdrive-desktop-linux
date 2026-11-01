@@ -20,10 +20,13 @@ pub const QUIET_MS: i64 = 60 * 60_000;
 const COMPRESSED: &[&str] = &[
     "zip", "gz", "7z", "rar", "xz", "zst", "bz2", "tgz", "tbz2", "lz", "lzma", "cab", "jpg",
     "jpeg", "png", "gif", "webp", "heic", "heif", "svg", "ico", "bmp", "tiff", "tif", "raw", "cr2",
-    "nef", "arw", "dng", "rw2", "orf", "pef", "mp3", "mp4", "mkv", "mov", "avi", "ogg", "opus",
-    "flac", "m4v", "webm", "mpg", "mpeg", "3gp", "flv", "aac", "wav", "m4a", "wma", "pdf", "docx",
-    "xlsx", "pptx", "odt", "ods", "odp", "apk", "jar", "iso", "dmg", "img", "bin", "deb", "rpm",
-    "map", "woff", "woff2", "ttf", "eot",
+    "cr3", "nef", "arw", "dng", "rw2", "orf", "pef", "raf", "thm", "acr", "mp3", "mp4", "mkv",
+    "mov", "avi", "ogg", "opus", "flac", "m4v", "webm", "mpg", "mpeg", "3gp", "flv", "aac", "wav",
+    "m4a", "wma", "pdf", "epub", "mobi", "azw", "azw3", "cbz", "cbr", "docx", "xlsx", "pptx",
+    "odt", "ods", "odp", "apk", "jar", "iso", "dmg", "img", "bin", "deb", "rpm", "map", "woff",
+    "woff2", "ttf", "eot", "dat", "dat_old", "mca", "mcr", "mcpack", "mcworld", "pack", "idx",
+    "rev", "db", "db-wal", "db-shm", "sqlite", "sqlite3", "pyc", "whl", "crate", "wasm", "so",
+    "dll", "dylib",
 ];
 
 /// Extensões que programas de sequestro de dados põem nos arquivos que cifram.

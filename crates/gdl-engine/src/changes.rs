@@ -391,9 +391,16 @@ impl ChangePoller {
 
     /// Uma consulta, avisando quando a rede cai e volta e anotando a hora da última que deu certo.
     pub async fn poll(&self) {
+        struct PollGuard<'a>(&'a AtomicBool);
+        impl Drop for PollGuard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Relaxed);
+            }
+        }
         self.is_polling.store(true, Ordering::Relaxed);
+        let _guard = PollGuard(&self.is_polling);
         let result = self.run_once().await;
-        self.is_polling.store(false, Ordering::Relaxed);
+        drop(_guard);
         let now_offline = matches!(result, Err(EngineError::Drive(DriveError::Offline)));
         self.set_offline(now_offline);
         let disabled = matches!(result, Err(EngineError::Drive(DriveError::AccountDisabled)));

@@ -155,6 +155,20 @@ impl Store {
         })
     }
 
+    /// O par passa a outra pasta do Drive (por exemplo, quando a pasta antiga foi apagada no Drive
+    /// e recriada em Computadores). O estado sincronizado antigo sai junto e o par volta a ativo.
+    pub fn set_pair_remote(&self, id: i64, remote_id: &ItemId) -> Result<()> {
+        self.modify(|batch| {
+            let conn = batch.conn;
+            conn.execute(
+                "UPDATE folder_pairs SET remote_id = ?2, state = 'active' WHERE id = ?1",
+                params![id, remote_id.0],
+            )?;
+            conn.execute("DELETE FROM synced WHERE pair_id = ?1", [id])?;
+            Ok::<_, StoreError>(())
+        })
+    }
+
     /// O estado sincronizado do par, em ordem de caminho.
     pub fn synced_of(&self, pair: i64) -> Result<Vec<Synced>> {
         let conn = self.conn();

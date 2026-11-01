@@ -1,7 +1,7 @@
 // Janela principal: cabeçalho com o estado da sincronização, menu da conta, "Mais opções", o menu
 // lateral com as visões e a área da visão escolhida. Atualiza com os eventos da ponte.
 
-import { attempt, el, icon, stylesheet } from '../components.js';
+import { attempt, el, icon, stylesheet, toast } from '../components.js';
 import { accountButton, accountMenu } from './home/account.js';
 import { headerFor, shownStatus, withoutAccount } from './home/model.js';
 import { moreMenu, runArg } from './home/more.js';
@@ -62,7 +62,10 @@ function layout({ api, t }) {
   ui.syncNow = el('button', {
     class: 'button',
     hidden: true,
-    onclick: () => attempt(api.call('sync_now', { account: currentAccount(), folder_id: 0 }), () => toast(t('sync-now-toast'))),
+    onclick: () => {
+      ui.syncNow.disabled = true;
+      attempt(api.call('sync_now', { account: currentAccount(), folder_id: 0 }).finally(updateStatus), () => toast(t('sync-now-toast')));
+    },
   }, t('button-sync-now'));
   ui.pause = el('button', { class: 'header-pause tonal', onclick: togglePause });
   ui.signIn = el('button', {
@@ -191,6 +194,7 @@ function updateHeader() {
   ui.title.textContent = t(...header.title);
   ui.subtitle.textContent = header.subtitle ? t(...header.subtitle) : '';
   ui.syncNow.hidden = withoutAccount(status.state);
+  ui.syncNow.disabled = status.state === 'checking' || status.state === 'syncing' || status.paused;
   ui.pause.hidden = !header.pause;
   if (header.pause) ui.pause.textContent = t(header.pause);
   ui.signIn.hidden = !header.signIn;

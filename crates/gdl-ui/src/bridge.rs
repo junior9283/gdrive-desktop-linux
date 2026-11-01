@@ -157,7 +157,10 @@ impl Bridge {
                 j!(s.set_notification_enabled(a.str("kind")?, a.bool("enabled")?))
             }
             "retry" => j!(s.retry(a.account(), a.str("item_id")?)),
-            "sync_now" => j!(s.sync_now(a.account(), a.i64("folder_id").unwrap_or(0))),
+            "sync_now" => j!(s.sync_now(
+                a.account(),
+                a.i64("folder_id").or_else(|_| a.i64("id")).unwrap_or(0)
+            )),
             "cancel_upload" => j!(s.cancel_upload(a.account(), a.str("item_id")?)),
             "pin" => j!(s.pin(a.str("path")?)),
             "unpin" => j!(s.unpin(a.str("path")?)),

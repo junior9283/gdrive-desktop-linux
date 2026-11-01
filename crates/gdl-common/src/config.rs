@@ -119,6 +119,7 @@ preferences! {
     "DisableOnboardingDialog" => disable_onboarding_dialog: bool = false;
     "DisableSSLValidation" => disable_ssl_validation: bool = false;
     "DoNotShowNotifications" => do_not_show_notifications: Vec<String> = Vec::new();
+    "ExcludedFolders" => excluded_folders: Vec<String> = Vec::new();
     "IgnoreNodeModules" => ignore_node_modules: bool = false;
     "MinFreeDiskSpaceKBytes" => min_free_disk_space_kbytes: u64 = 512_000;
     "OpenOfficeFilesInDocs" => open_office_files_in_docs: bool = true;

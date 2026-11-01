@@ -208,6 +208,7 @@ function computerTab() {
   const noDevices = policyOn('DisableExternalMediaSync');
   ui.folders = el('ul', { class: 'local-folders' });
   ui.suggestions = el('ul', { class: 'list suggested-folders' });
+  ui.excluded = el('ul', { class: 'local-folders excluded-folders' });
   ui.devices = el('ul', { class: 'devices' });
   drawFolders();
   return [
@@ -218,6 +219,12 @@ function computerTab() {
       el('button', { class: 'tonal add-folder', onclick: pickDir(addFolder) }, t('pref-add-folder')),
       disabled ? el('span', { class: 'meta managed-note' }, t('folder-refused-folders-disabled')) : []),
     checkbox('IgnoreNodeModules', 'pref-ignore-node-modules', 'pref-ignore-node-modules-hint'),
+    el('h2', {}, t('pref-excluded-folders')),
+    el('p', { class: 'meta' }, t('pref-excluded-folders-text')),
+    ui.excluded,
+    el('fieldset', { class: 'pref', 'data-key': 'ExcludedFolders', disabled: form.managed.has('ExcludedFolders') },
+      el('button', { class: 'tonal add-excluded-folder', onclick: pickDir(addExcludedFolder) }, t('pref-add-excluded-folder')),
+      form.managed.has('ExcludedFolders') ? el('span', { class: 'meta managed-note' }, t('pref-managed')) : []),
     el('h2', {}, t('pref-devices')),
     el('fieldset', { class: 'pref', 'data-key': 'DisableExternalMediaSync', disabled: noDevices },
       checkbox('PromptToBackupDevices', 'pref-ask-devices'),
@@ -230,7 +237,46 @@ function computerTab() {
 function drawFolders() {
   ui.folders?.replaceChildren(...folderItems(screen.ctx, computer.folders, computer.accounts.length > 1));
   drawSuggestions();
+  drawExcluded();
   drawDevices();
+}
+
+function drawExcluded() {
+  const { t } = screen.ctx;
+  const list = Array.isArray(form.edited.ExcludedFolders) ? form.edited.ExcludedFolders : [];
+  const managed = form.managed.has('ExcludedFolders');
+  ui.excluded?.replaceChildren(...(list.length
+    ? list.map((path) => el('li', { class: 'local-folder', 'data-path': path },
+      el('div', { class: 'field' },
+        el('strong', {}, folderName(path)),
+        el('span', { class: 'path' }, path)),
+      el('button', { class: 'text', disabled: managed, onclick: () => removeExcludedFolder(path) },
+        t('pref-excluded-remove'))))
+    : [el('li', { class: 'empty' }, t('pref-excluded-empty'))]));
+}
+
+function saveExcludedFolders(next, message) {
+  const { api } = screen.ctx;
+  attempt(api.call('set_preferences', { values: [['ExcludedFolders', JSON.stringify(next)]] }), () => {
+    form.original.ExcludedFolders = [...next];
+    form.edited.ExcludedFolders = [...next];
+    drawExcluded();
+    updateFooter();
+    toast(message);
+  });
+}
+
+function addExcludedFolder(path) {
+  const { t } = screen.ctx;
+  const list = Array.isArray(form.edited.ExcludedFolders) ? form.edited.ExcludedFolders : [];
+  if (list.includes(path)) return;
+  saveExcludedFolders([...list, path], t('pref-excluded-added', { name: folderName(path) }));
+}
+
+function removeExcludedFolder(path) {
+  const { t } = screen.ctx;
+  const list = Array.isArray(form.edited.ExcludedFolders) ? form.edited.ExcludedFolders : [];
+  saveExcludedFolders(list.filter((p) => p !== path), t('pref-excluded-removed', { name: folderName(path) }));
 }
 
 // As pastas do usuário que ainda não sincronizam, cada uma com "Adicionar" (o configurador de

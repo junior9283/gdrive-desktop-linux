@@ -126,6 +126,7 @@ pub struct FolderSync {
     screen: Option<Screen>,
     progress: Arc<Mutex<FolderProgress>>,
     ignore_node_modules: AtomicBool,
+    excluded_folders: Mutex<Vec<PathBuf>>,
 }
 
 impl FolderSync {
@@ -155,6 +156,7 @@ impl FolderSync {
             screen: None,
             progress: Arc::new(Mutex::new(FolderProgress::default())),
             ignore_node_modules: AtomicBool::new(false),
+            excluded_folders: Mutex::default(),
         }
     }
 
@@ -175,6 +177,48 @@ impl FolderSync {
 
     pub fn ignore_node_modules(&self) -> bool {
         self.ignore_node_modules.load(Ordering::Relaxed)
+    }
+
+    pub fn with_excluded_folders(self, paths: Vec<PathBuf>) -> FolderSync {
+        *self.excluded_folders.lock().unwrap() = paths;
+        self
+    }
+
+    pub fn set_excluded_folders(&self, paths: Vec<PathBuf>) {
+        let mut current = self.excluded_folders.lock().unwrap();
+        if *current != paths {
+            *current = paths;
+            drop(current);
+            self.wake.notify_one();
+        }
+    }
+
+    fn excluded_rel_paths(&self) -> Vec<String> {
+        self.excluded_folders
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|p| {
+                if p.is_absolute() {
+                    p.strip_prefix(&self.pair.local)
+                        .ok()
+                        .and_then(Path::to_str)
+                        .map(|s| s.trim_matches('/').to_owned())
+                        .filter(|s| !s.is_empty())
+                } else {
+                    p.to_str()
+                        .map(|s| s.trim_matches('/').to_owned())
+                        .filter(|s| !s.is_empty())
+                }
+            })
+            .collect()
+    }
+
+    fn is_excluded(&self, rel: &str) -> bool {
+        if self.ignore_node_modules() && has_node_modules(rel) {
+            return true;
+        }
+        self.excluded_rel_paths().iter().any(|ex| inside(rel, ex))
     }
 
     /// Troca a conferência de ponto de montagem (os testes não montam discos).
@@ -393,13 +437,16 @@ impl FolderSync {
             }
         }
         let is_delete = |a: &Action| matches!(a, Action::TrashLocal | Action::TrashRemote);
-        let deletes = plan.iter().filter(|(_, a)| is_delete(a)).count();
+        let deletes = plan
+            .iter()
+            .filter(|(rel, a)| is_delete(a) && !self.is_excluded(rel))
+            .count();
         // A confirmação vale para o tanto que o usuário viu, e só uma vez.
         let confirmed = self.deletes_confirmed.swap(0, Ordering::Relaxed);
         let held = guard::is_mass_delete(deletes, v.bases.len()) && deletes as u64 > confirmed;
         if held {
-            // O resto segue; as exclusões esperam o usuário.
-            plan.retain(|(_, a)| !is_delete(a));
+            // O resto segue; as exclusões esperam o usuário (exceto pastas excluídas nas opções).
+            plan.retain(|(rel, a)| !is_delete(a) || self.is_excluded(rel));
         }
         self.set_state(match held {
             true => PairState::ConfirmDeletes(deletes as u64),
@@ -414,6 +461,15 @@ impl FolderSync {
         }
         for (rel, action) in plan {
             if v.gone.as_deref().is_some_and(|g| inside(&rel, g)) {
+                let mut p = self.progress.lock().unwrap();
+                p.completed += 1;
+                continue;
+            }
+            if self.is_excluded(&rel) && !matches!(action, Action::TrashRemote | Action::ForgetBase)
+            {
+                v.again = true;
+                let mut p = self.progress.lock().unwrap();
+                p.completed += 1;
                 continue;
             }
             {
@@ -458,17 +514,15 @@ impl FolderSync {
     async fn view(&self) -> Result<View> {
         let root = self.pair.local.clone();
         let ignore_nm = self.ignore_node_modules();
-        let locals = tokio::task::spawn_blocking(move || scan(&root, ignore_nm))
+        let excluded_rels = self.excluded_rel_paths();
+        let locals = tokio::task::spawn_blocking(move || scan(&root, ignore_nm, &excluded_rels))
             .await
             .map_err(io::Error::other)??;
         let (mut remotes, mut links) = (BTreeMap::new(), BTreeMap::new());
         for (rel, item) in remote_tree(&self.store, &self.pair.remote_id, self.pair.kind)? {
-            if ignore_nm && has_node_modules(&rel) {
-                continue;
-            }
             match item.kind {
                 ItemKind::File | ItemKind::Folder => remotes.insert(rel, item),
-                _ if self.links.is_some() => links.insert(rel, item),
+                _ if self.links.is_some() && !self.is_excluded(&rel) => links.insert(rel, item),
                 _ => None,
             };
         }
@@ -479,13 +533,13 @@ impl FolderSync {
             .map(|(rel, item)| (rel.clone(), item.id.0.clone()))
             .chain([root])
             .collect();
-        let (link_bases, bases): (BTreeMap<_, _>, BTreeMap<_, _>) = self
+        let (mut link_bases, bases): (BTreeMap<_, _>, BTreeMap<_, _>) = self
             .store
             .synced_of(self.pair.id)?
             .into_iter()
-            .filter(|s| !(ignore_nm && has_node_modules(&s.rel_path)))
             .map(|s| (s.rel_path.clone(), s))
             .partition(|(_, s)| s.md5.as_deref() == Some(LINK_MARK));
+        link_bases.retain(|rel, _| !self.is_excluded(rel));
         let mut locals = locals;
         locals.retain(|rel, _| !links.contains_key(rel) && !link_bases.contains_key(rel));
         Ok(View {
@@ -563,9 +617,15 @@ impl FolderSync {
             .map(|(rel, item)| (&item.id, rel))
             .collect();
         for base in v.bases.values() {
+            if self.is_excluded(&base.rel_path) {
+                continue;
+            }
             let Some(&to) = remote_paths.get(&base.item_id) else {
                 continue;
             };
+            if self.is_excluded(to) {
+                continue;
+            }
             let parent_here = to
                 .rsplit_once('/')
                 .is_none_or(|(p, _)| v.locals.get(p).is_some_and(|l| l.is_dir));
@@ -601,6 +661,15 @@ impl FolderSync {
 
     /// O que fazer com um caminho.
     async fn plan(&self, v: &View, rel: &str) -> Result<Action> {
+        if self.is_excluded(rel) {
+            return Ok(
+                if v.remotes.contains_key(rel) || v.bases.contains_key(rel) {
+                    Action::TrashRemote
+                } else {
+                    Action::Nothing
+                },
+            );
+        }
         let local = v.locals.get(rel).copied();
         let remote = v.remotes.get(rel);
         let base = v.bases.get(rel);
@@ -727,11 +796,16 @@ impl FolderSync {
                 self.put(rel, &remote.expect("lado do Drive").id.0, made, None)?;
             }
             Action::TrashRemote => {
-                let r = self
-                    .client
-                    .set_trashed(&remote.expect("lado do Drive").id.0, true)
-                    .await?;
-                self.remember(r)?;
+                let id = remote
+                    .as_ref()
+                    .map(|r| r.id.0.clone())
+                    .or_else(|| v.bases.get(rel).map(|b| b.item_id.0.clone()))
+                    .expect("lado do Drive");
+                match self.client.set_trashed(&id, true).await {
+                    Ok(r) => self.remember(r)?,
+                    Err(gdl_drive::client::DriveError::NotFound) => {}
+                    Err(e) => return Err(e.into()),
+                }
                 self.forget(v, rel)?;
             }
             Action::TrashLocal => {
@@ -1171,15 +1245,28 @@ impl SessionSlot for KvSession<'_> {
 
 /// Arquivos e pastas sob `root` (sem atalhos simbólicos nem arquivos especiais), pelo caminho
 /// relativo. Uma pasta ilegível falha a varredura: ausente, ela iria para a lixeira do Drive.
-fn scan(root: &Path, ignore_node_modules: bool) -> io::Result<BTreeMap<String, Local>> {
+fn scan(
+    root: &Path,
+    ignore_node_modules: bool,
+    excluded_rels: &[String],
+) -> io::Result<BTreeMap<String, Local>> {
     let mut out = BTreeMap::new();
     let walker = walkdir::WalkDir::new(root)
         .min_depth(1)
         .into_iter()
         .filter_entry(|e| {
-            e.file_name()
-                .to_str()
-                .is_some_and(|n| !ignored(n) && !(ignore_node_modules && n == "node_modules"))
+            let Some(name) = e.file_name().to_str() else {
+                return false;
+            };
+            if ignored(name) || (ignore_node_modules && name == "node_modules") {
+                return false;
+            }
+            if let Some(rel) = e.path().strip_prefix(root).ok().and_then(Path::to_str)
+                && excluded_rels.iter().any(|ex| inside(rel, ex))
+            {
+                return false;
+            }
+            true
         });
     for entry in walker {
         let entry = entry?;
@@ -2044,6 +2131,34 @@ mod tests {
         assert_eq!(
             std::fs::read(w.trash_dir.join("files/Plano.gdoc")).unwrap(),
             b"meu texto"
+        );
+    }
+
+    #[tokio::test]
+    async fn excluded_folder_is_skipped_and_trashed_on_drive_if_already_synced() {
+        let w = World::new().await;
+        w.write("manter/ok.txt", b"ok");
+        w.write("excluir/segredo.txt", b"segredo");
+        w.reconcile().await;
+
+        assert_eq!(w.fake.find_live("ok.txt").len(), 1);
+        assert_eq!(w.fake.find_live("excluir").len(), 1);
+        assert_eq!(w.fake.find_live("segredo.txt").len(), 1);
+
+        let sync = w
+            .sync_with(8)
+            .with_excluded_folders(vec![w.local.join("excluir")]);
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+
+        assert_eq!(w.fake.find_live("ok.txt").len(), 1, "o resto permanece");
+        assert!(
+            w.fake.find_live("excluir").is_empty(),
+            "a pasta excluída foi removida do Drive"
+        );
+        assert!(
+            w.local.join("excluir/segredo.txt").exists(),
+            "continua intacta no computador"
         );
     }
 }

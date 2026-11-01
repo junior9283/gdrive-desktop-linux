@@ -172,6 +172,12 @@ impl Runners {
         }
     }
 
+    pub(super) fn set_excluded_folders(&self, paths: Vec<PathBuf>) {
+        for (sync, ..) in self.lock().values() {
+            sync.set_excluded_folders(paths.clone());
+        }
+    }
+
     /// Andamento em tempo real de todas as pastas que rodam.
     pub(super) fn sync_progress(&self) -> (bool, bool, u32, u32, String, i32) {
         let runners = self.lock();
@@ -246,6 +252,8 @@ impl Daemon {
             ..
         } = account;
         let (id, name, kind) = (pair.id, file_name(&pair.local), pair.kind);
+        let prefs = self.prefs();
+        let excluded: Vec<PathBuf> = prefs.excluded_folders.iter().map(PathBuf::from).collect();
         let mut sync = FolderSync::new(
             engine.store().clone(),
             engine.client().clone(),
@@ -253,7 +261,8 @@ impl Daemon {
             self.system_trash(),
             self.i18n.tr("conflict-word", &[]),
         )
-        .with_ignore_node_modules(self.prefs().ignore_node_modules);
+        .with_ignore_node_modules(prefs.ignore_node_modules)
+        .with_excluded_folders(excluded);
         if kind == PairKind::Mirror {
             sync = sync.with_links(Links {
                 email: account.email.clone(),

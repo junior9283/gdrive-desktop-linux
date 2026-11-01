@@ -631,9 +631,11 @@ impl Daemon {
         let metered_changed = self.prefs().pause_syncing_on_metered_connection
             != prefs.pause_syncing_on_metered_connection;
         let ignore_nm = prefs.ignore_node_modules;
+        let excluded: Vec<PathBuf> = prefs.excluded_folders.iter().map(PathBuf::from).collect();
         *self.prefs.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(prefs);
         for account in self.accounts.lock().await.iter() {
             account.folders.set_ignore_node_modules(ignore_nm);
+            account.folders.set_excluded_folders(excluded.clone());
         }
         if metered_changed {
             self.apply_metered(self.is_metered()).await;

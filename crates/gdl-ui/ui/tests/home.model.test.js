@@ -53,6 +53,16 @@ test('cabeçalho para cada estado', () => {
     'Última sincronização há 5 minutos',
     'Pausar',
   ]);
+  assert.deepEqual(texts(pt, status('syncing', { syncing: 2, completed_files: 3, total_files: 5, current_file: 'nota.txt', current_percent: 50, remaining_secs: 60 })), [
+    'Sincronizando 3 de 5 itens (60%)',
+    'nota.txt 50% • Cerca de 1 minuto restantes',
+    'Pausar',
+  ]);
+  assert.deepEqual(texts(pt, status('checking')), [
+    'Verificando alterações…',
+    'Procurando atualizações no Google Drive',
+    'Pausar',
+  ]);
   assert.deepEqual(texts(pt, status('offline'))[0], 'Sem internet');
   assert.deepEqual(texts(pt, status('quota-full'))[0], 'Armazenamento cheio');
   assert.deepEqual(texts(pt, status('needs-sign-in'))[0], 'Entre de novo na conta');

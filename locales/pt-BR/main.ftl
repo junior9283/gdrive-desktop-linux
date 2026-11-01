@@ -158,7 +158,12 @@ cli-uninstall-done = O Google Drive foi desinstalado.
 cli-no-service = O serviço do Google Drive não está rodando ({ $error }).
 cli-status-account = Conta: { $account }
 cli-status-mount = Pasta: { $path }
+cli-status-state = Estado: { $state }
 cli-status-pending = Envios pendentes: { $count }
+cli-status-progress = Progresso: { $completed }/{ $total } arquivos ({ $percent }%)
+cli-status-active-file = Arquivo ativo: { $file } ({ $percent }%)
+cli-status-active-file-no-percent = Arquivo ativo: { $file }
+cli-status-remaining-time = Tempo restante: { $time }
 cli-status-paused = Sincronização pausada
 cli-status-offline = Sem conexão
 cli-status-last-sync = Última sincronização: { $when }
@@ -178,6 +183,10 @@ link-role-reader = ver
 link-role-commenter = comentar
 link-role-writer = editar
 tray-synced = Tudo sincronizado
+tray-checking = Verificando alterações…
+tray-status-progress = Sincronizando: { $completed } de { $total } ({ $percent }%)
+tray-status-file = Enviando { $file }
+tray-status-file-percent = Enviando { $file } ({ $percent }%)
 tray-syncing = { $count ->
     [1] Sincronizando 1 arquivo
    *[other] Sincronizando { $count } arquivos

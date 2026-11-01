@@ -158,7 +158,12 @@ cli-uninstall-done = Google Drive was uninstalled.
 cli-no-service = The Google Drive service isn't running ({ $error }).
 cli-status-account = Account: { $account }
 cli-status-mount = Folder: { $path }
+cli-status-state = State: { $state }
 cli-status-pending = Pending uploads: { $count }
+cli-status-progress = Progress: { $completed }/{ $total } files ({ $percent }%)
+cli-status-active-file = Active file: { $file } ({ $percent }%)
+cli-status-active-file-no-percent = Active file: { $file }
+cli-status-remaining-time = Time remaining: { $time }
 cli-status-paused = Syncing paused
 cli-status-offline = No connection
 cli-status-last-sync = Last sync: { $when }
@@ -178,6 +183,10 @@ link-role-reader = view
 link-role-commenter = comment
 link-role-writer = edit
 tray-synced = Everything is up to date
+tray-checking = Checking for changes…
+tray-status-progress = Syncing: { $completed } of { $total } ({ $percent }%)
+tray-status-file = Uploading { $file }
+tray-status-file-percent = Uploading { $file } ({ $percent }%)
 tray-syncing = { $count ->
     [1] Syncing 1 file
    *[other] Syncing { $count } files

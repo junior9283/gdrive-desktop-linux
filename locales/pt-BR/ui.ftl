@@ -17,11 +17,21 @@ action-resume = Retomar
 
 header-signed-out = Você não fez login
 header-starting = Conectando à sua conta…
+header-checking = Verificando alterações…
+header-checking-detail = Procurando atualizações no Google Drive
 header-synced = Sincronização concluída
 header-error = Sincronização incompleta
 header-syncing = { $count ->
     [one] Sincronizando 1 item
    *[other] Sincronizando { $count } itens
+}
+header-syncing-progress = Sincronizando { $completed } de { $total } itens ({ $percent }%)
+header-syncing-file = { $file }
+header-syncing-file-percent = { $file } ({ $percent }%)
+header-syncing-file-remaining = { $file } { $percent } • Cerca de { $time } restantes
+header-syncing-detail = { $count ->
+    [one] Falta 1 item para sincronizar
+   *[other] Faltam { $count } itens para sincronizar
 }
 header-offline = Sem internet
 header-quota-full = Armazenamento cheio

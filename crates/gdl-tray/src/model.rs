@@ -83,6 +83,7 @@ impl TrayView {
             "signed-out" => return signed_out(i18n, "tray-signed-out", false),
             "syncing" => (Icon::Syncing, i18n.tr_count("tray-syncing", pending)),
             "starting" => (Icon::Syncing, i18n.tr("tray-starting", &[])),
+            "checking" => (Icon::Syncing, i18n.tr("tray-checking", &[])),
             "paused" => (still("gdl-paused"), i18n.tr_count("tray-paused", pending)),
             "offline" => (still("gdl-offline"), i18n.tr_count("tray-offline", pending)),
             "quota-full" => (still("gdl-error"), i18n.tr("tray-quota-full", &[])),
@@ -93,6 +94,42 @@ impl TrayView {
                 i18n.tr_count("tray-accounts", status.accounts.len() as u64),
             ),
             _ => (still("gdl-synced"), i18n.tr("tray-synced", &[])),
+        };
+        let status_label = match status.state.as_str() {
+            "syncing" => {
+                if status.total_files > 0 && status.completed_files > 0 {
+                    let pct = ((status.completed_files as f64 / status.total_files as f64) * 100.0)
+                        .round() as u64;
+                    i18n.tr(
+                        "tray-status-progress",
+                        &[
+                            ("completed", &status.completed_files.to_string()),
+                            ("total", &status.total_files.to_string()),
+                            ("percent", &pct.to_string()),
+                        ],
+                    )
+                } else if !status.current_file.is_empty() && status.current_percent >= 0 {
+                    i18n.tr(
+                        "tray-status-file-percent",
+                        &[
+                            ("file", &status.current_file),
+                            ("percent", &status.current_percent.to_string()),
+                        ],
+                    )
+                } else if !status.current_file.is_empty() {
+                    i18n.tr("tray-status-file", &[("file", &status.current_file)])
+                } else {
+                    i18n.tr_count("tray-syncing", pending)
+                }
+            }
+            "checking" => i18n.tr("tray-checking", &[]),
+            "starting" => i18n.tr("tray-starting", &[]),
+            "paused" => i18n.tr_count("tray-paused", pending),
+            "offline" => i18n.tr_count("tray-offline", pending),
+            "quota-full" => i18n.tr("tray-quota-full", &[]),
+            "needs-sign-in" => i18n.tr("tray-needs-sign-in", &[]),
+            "error" => i18n.tr_count("tray-error", errors),
+            _ => i18n.tr("tray-synced", &[]),
         };
         let pause = if status.paused {
             item(i18n, "tray-resume", Action::Resume)
@@ -114,6 +151,11 @@ impl TrayView {
             icon,
             tooltip,
             items: vec![
+                MenuItem::Item {
+                    label: status_label,
+                    action: Action::Open("home"),
+                },
+                MenuItem::Separator,
                 item(i18n, "tray-open-folder", Action::OpenFolder),
                 item(i18n, "tray-open-web", Action::OpenWeb),
                 item(i18n, "tray-search", Action::Open("search")),
@@ -342,6 +384,8 @@ mod tests {
         assert_eq!(
             labels(&view),
             [
+                "Tudo sincronizado",
+                "---",
                 "Abrir a pasta do Google Drive",
                 "Abrir o Google Drive no navegador",
                 "Pesquisar",
@@ -455,5 +499,21 @@ mod tests {
             _ => None,
         });
         assert_eq!(errors, Some("Lista de erros (3)"));
+    }
+
+    #[test]
+    fn syncing_menu_shows_real_progress() {
+        let i18n = I18n::new("pt_BR");
+        let mut s = status("syncing", 2, 0);
+        s.completed_files = 3;
+        s.total_files = 5;
+        let view = TrayView::from_status(&s, false, &i18n);
+        assert_eq!(labels(&view)[0], "Sincronizando: 3 de 5 (60%)");
+
+        let mut active = status("syncing", 1, 0);
+        active.current_file = "relatorio.pdf".into();
+        active.current_percent = 45;
+        let view = TrayView::from_status(&active, false, &i18n);
+        assert_eq!(labels(&view)[0], "Enviando relatorio.pdf (45%)");
     }
 }

@@ -162,6 +162,39 @@ impl ActivityLog {
         rows.iter().cloned().collect()
     }
 
+    /// O arquivo ativo no momento (subindo ou descendo) e o andamento (0-100 ou -1).
+    pub fn active_file(&self) -> Option<(String, i32)> {
+        let rows = self.rows.lock().unwrap_or_else(|e| e.into_inner());
+        rows.iter()
+            .find(|r| {
+                matches!(
+                    r.activity.state,
+                    ActivityState::Uploading | ActivityState::Downloading
+                )
+            })
+            .map(|r| {
+                let percent = r.activity.percent.map_or(-1, |p| p as i32);
+                (r.activity.name.clone(), percent)
+            })
+    }
+
+    /// Contagem de arquivos concluídos e bytes transferidos recentemente.
+    pub fn completed_stats(&self) -> (u32, u64) {
+        let rows = self.rows.lock().unwrap_or_else(|e| e.into_inner());
+        let mut count = 0u32;
+        let mut bytes = 0u64;
+        for r in rows.iter() {
+            if matches!(
+                r.activity.state,
+                ActivityState::Uploaded | ActivityState::Downloaded
+            ) {
+                count += 1;
+                bytes += r.activity.size;
+            }
+        }
+        (count, bytes)
+    }
+
     pub fn subscribe(&self) -> watch::Receiver<u64> {
         self.version.subscribe()
     }

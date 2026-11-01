@@ -7,6 +7,17 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.2.4] - 2026-11-01
+
+Melhorias: status real de sincronização em tempo real na bandeja, aplicativo e CLI, e ícone simbólico nativo.
+
+### Adicionado
+- Status real de sincronização: progresso detalhado de arquivos e bytes concluídos e restantes (ex: "X de Y arquivos concluídos", percentual e arquivo ativo).
+- Estado de verificação de alterações ("checking") ativo enquanto o serviço consulta mudanças no Drive.
+- Item de status em destaque no topo do menu da bandeja que abre a janela principal ao ser clicado.
+- Exibição do estado, progresso e arquivo ativo no comando `status` da CLI.
+- Ícone simbólico branco para a bandeja com suporte nativo a pixmap ARGB32 no GNOME Shell.
+
 ## [1.2.3] - 2026-10-29
 
 Correção: clicar numa notificação de outro programa não abre mais o app.

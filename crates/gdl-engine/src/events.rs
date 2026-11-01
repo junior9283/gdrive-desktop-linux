@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 /// Resumo do estado da sincronização, mostrado na bandeja e na CLI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SyncSummary {
     pub pending_uploads: u32,
     pub paused: bool,
@@ -18,6 +18,20 @@ pub struct SyncSummary {
     pub syncing: u32,
     /// Estimativa pelo ritmo dos envios recentes; `None` sem amostras.
     pub remaining_secs: Option<u64>,
+    /// Quantos arquivos foram concluídos nesta sessão.
+    pub completed_files: u32,
+    /// Total de arquivos deste ciclo (`completed_files + syncing`).
+    pub total_files: u32,
+    /// Bytes transferidos nesta sessão.
+    pub completed_bytes: u64,
+    /// Total de bytes deste ciclo (`completed_bytes + pending_bytes`).
+    pub total_bytes: u64,
+    /// Nome do arquivo ativo no momento (subindo ou descendo), ou vazio.
+    pub current_file: String,
+    /// Progresso do arquivo ativo (0-100), ou -1 se não houver arquivo ativo.
+    pub current_percent: i32,
+    /// Se está verificando mudanças no Drive no momento.
+    pub is_checking: bool,
 }
 
 /// O estado que a bandeja e a janela principal mostram, do que menos ao que mais pede atenção
@@ -29,6 +43,7 @@ pub enum SyncState {
     /// O serviço acabou de subir e ainda está reconectando as contas guardadas.
     Starting,
     Synced,
+    Checking,
     Syncing,
     Paused,
     Offline,
@@ -44,6 +59,7 @@ impl SyncState {
             SyncState::SignedOut => "signed-out",
             SyncState::Starting => "starting",
             SyncState::Synced => "synced",
+            SyncState::Checking => "checking",
             SyncState::Syncing => "syncing",
             SyncState::Paused => "paused",
             SyncState::Offline => "offline",
@@ -56,7 +72,7 @@ impl SyncState {
 
 impl SyncSummary {
     /// Vale o primeiro que se aplicar: login vencido, pausado, sem internet, cota cheia,
-    /// sincronizando, erro.
+    /// sincronizando, verificando mudanças, erro.
     pub fn state(&self) -> SyncState {
         if self.needs_sign_in {
             SyncState::NeedsSignIn
@@ -68,6 +84,8 @@ impl SyncSummary {
             SyncState::QuotaFull
         } else if self.syncing > 0 {
             SyncState::Syncing
+        } else if self.is_checking {
+            SyncState::Checking
         } else if self.errors > 0 {
             SyncState::Error
         } else {
@@ -193,7 +211,7 @@ mod tests {
     fn sync_state_follows_the_precedence() {
         let base = SyncSummary::default();
         let with = |f: fn(&mut SyncSummary)| {
-            let mut s = base;
+            let mut s = base.clone();
             f(&mut s);
             s.state()
         };
@@ -228,6 +246,7 @@ mod tests {
             SyncState::QuotaFull
         );
         assert_eq!(with(|s| s.syncing = 3), SyncState::Syncing);
+        assert_eq!(with(|s| s.is_checking = true), SyncState::Checking);
         assert_eq!(with(|s| s.errors = 1), SyncState::Error);
         assert_eq!(base.state(), SyncState::Synced);
         assert_eq!(SyncState::QuotaFull.as_str(), "quota-full");

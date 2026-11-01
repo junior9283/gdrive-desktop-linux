@@ -17,11 +17,21 @@ action-resume = Resume
 
 header-signed-out = You are not signed in
 header-starting = Connecting to your account…
+header-checking = Checking for changes…
+header-checking-detail = Looking for updates in Google Drive
 header-synced = Sync complete
 header-error = Sync incomplete
 header-syncing = { $count ->
     [one] Syncing 1 item
    *[other] Syncing { $count } items
+}
+header-syncing-progress = Syncing { $completed } of { $total } items ({ $percent }%)
+header-syncing-file = { $file }
+header-syncing-file-percent = { $file } ({ $percent }%)
+header-syncing-file-remaining = { $file } { $percent } • About { $time } left
+header-syncing-detail = { $count ->
+    [one] 1 item left to sync
+   *[other] { $count } items left to sync
 }
 header-offline = No internet connection
 header-quota-full = Storage is full

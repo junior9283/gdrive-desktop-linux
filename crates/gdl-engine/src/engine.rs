@@ -540,6 +540,15 @@ impl Engine {
         let queue = self.store.queue_stats()?;
         let downloads = self.store.count_incomplete_pinned()?;
         let stats = &self.uploads.stats;
+        let (completed_files, completed_bytes) = self.activity.completed_stats();
+        let (current_file, current_percent) = self
+            .activity
+            .active_file()
+            .unwrap_or_else(|| (String::new(), -1));
+        let syncing = queue.pending + downloads;
+        let total_files = completed_files + syncing;
+        let total_bytes = completed_bytes + queue.bytes;
+        let is_checking = self.poller.is_polling();
         Ok(SyncSummary {
             pending_uploads: queue.pending,
             paused: self.is_paused(),
@@ -550,8 +559,15 @@ impl Engine {
             errors: queue.failed + self.lost_and_found().count() as u32,
             // Sem nada na fila, a cota cheia não impede nada.
             quota_full: queue.pending > 0 && stats.quota_full(),
-            syncing: queue.pending + downloads,
+            syncing,
             remaining_secs: stats.remaining_secs(queue.bytes, now_ms()),
+            completed_files,
+            total_files,
+            completed_bytes,
+            total_bytes,
+            current_file,
+            current_percent,
+            is_checking,
         })
     }
 

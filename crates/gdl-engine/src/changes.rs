@@ -38,6 +38,8 @@ pub struct ChangePoller {
     /// consulta também: pega o que mudou com o app fechado e o banco de quem veio da 0.7, que
     /// foi indexado sem Drives compartilhados.
     drives_listed: AtomicBool,
+    /// Se uma consulta ao Drive está em andamento.
+    is_polling: AtomicBool,
 }
 
 /// Junta o item do banco com a versão nova da nuvem. Devolve o item e se o cache deve ser
@@ -223,7 +225,12 @@ impl ChangePoller {
             last_sync_ms: AtomicI64::new(0),
             searched_drives: Mutex::default(),
             drives_listed: AtomicBool::new(false),
+            is_polling: AtomicBool::new(false),
         }
+    }
+
+    pub fn is_polling(&self) -> bool {
+        self.is_polling.load(Ordering::Relaxed)
     }
 
     pub fn is_offline(&self) -> bool {
@@ -384,7 +391,9 @@ impl ChangePoller {
 
     /// Uma consulta, avisando quando a rede cai e volta e anotando a hora da última que deu certo.
     pub async fn poll(&self) {
+        self.is_polling.store(true, Ordering::Relaxed);
         let result = self.run_once().await;
+        self.is_polling.store(false, Ordering::Relaxed);
         let now_offline = matches!(result, Err(EngineError::Drive(DriveError::Offline)));
         self.set_offline(now_offline);
         let disabled = matches!(result, Err(EngineError::Drive(DriveError::AccountDisabled)));

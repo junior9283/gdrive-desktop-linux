@@ -6,6 +6,7 @@ import { formatAgo, formatDuration, formatSize } from '../../format.js';
 const TITLES = {
   'signed-out': 'header-signed-out',
   starting: 'header-starting',
+  checking: 'header-checking',
   synced: 'header-synced',
   error: 'header-error',
   syncing: 'header-syncing',
@@ -49,11 +50,33 @@ export const withoutAccount = (state) => state === 'signed-out' || state === 'st
 // `{ title, subtitle, pause, signIn }` do cabeçalho; `pause` é a chave do botão (ou `null` sem
 // conta ou com a conta precisando entrar de novo, caso em que `signIn` pede o botão de entrar).
 export function headerFor(status, now, locale) {
-  const title = [TITLES[status.state] ?? 'header-synced', { count: status.syncing }];
+  let title;
+  if (status.state === 'syncing' && status.total_files > 0 && status.completed_files > 0) {
+    const percent = Math.round((status.completed_files / status.total_files) * 100);
+    title = ['header-syncing-progress', { completed: status.completed_files, total: status.total_files, percent }];
+  } else {
+    title = [TITLES[status.state] ?? 'header-synced', { count: status.syncing }];
+  }
   if (withoutAccount(status.state)) return { title, subtitle: null, pause: null, signIn: false };
   let subtitle;
-  if (status.state === 'syncing' && status.remaining_secs >= 0) {
-    subtitle = ['header-remaining', { time: formatDuration(status.remaining_secs, locale) }];
+  if (status.state === 'syncing') {
+    if (status.current_file && status.remaining_secs >= 0) {
+      const percent = status.current_percent >= 0 ? `${status.current_percent}%` : '';
+      subtitle = [
+        'header-syncing-file-remaining',
+        { file: status.current_file, percent, time: formatDuration(status.remaining_secs, locale) },
+      ];
+    } else if (status.current_file && status.current_percent >= 0) {
+      subtitle = ['header-syncing-file-percent', { file: status.current_file, percent: status.current_percent }];
+    } else if (status.current_file) {
+      subtitle = ['header-syncing-file', { file: status.current_file }];
+    } else if (status.remaining_secs >= 0) {
+      subtitle = ['header-remaining', { time: formatDuration(status.remaining_secs, locale) }];
+    } else {
+      subtitle = lastSync(status, now, locale);
+    }
+  } else if (status.state === 'checking') {
+    subtitle = ['header-checking-detail'];
   } else if (status.state === 'error') {
     subtitle = ['header-error-detail', { count: status.errors }];
   } else if (status.state === 'offline') {

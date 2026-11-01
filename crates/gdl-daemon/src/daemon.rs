@@ -1655,6 +1655,10 @@ impl Daemon {
             true => summaries.iter().map(count).sum(),
             false => count(summary),
         };
+        let total_u64 = |count: fn(&gdl_engine::events::SyncSummary) -> u64| match all {
+            true => summaries.iter().map(count).sum(),
+            false => count(summary),
+        };
         Ok(Status {
             account: accounts[index].email.clone(),
             mount_point: accounts[index].mount_point.clone(),
@@ -1668,6 +1672,12 @@ impl Daemon {
             errors: total(|s| s.errors),
             accounts,
             can_add_account,
+            completed_files: total(|s| s.completed_files),
+            total_files: total(|s| s.total_files),
+            completed_bytes: total_u64(|s| s.completed_bytes),
+            total_bytes: total_u64(|s| s.total_bytes),
+            current_file: summary.current_file.clone(),
+            current_percent: summary.current_percent,
         })
     }
 

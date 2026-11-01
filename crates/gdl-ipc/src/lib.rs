@@ -121,6 +121,18 @@ pub struct Status {
     /// Cabe mais uma conta: menos de 4 e sem `DisableAddAccount` (esta só vale a partir da
     /// primeira conta).
     pub can_add_account: bool,
+    /// Quantos arquivos foram sincronizados recentemente / na sessão atual.
+    pub completed_files: u32,
+    /// Total de arquivos do ciclo atual de sincronização (`completed_files + syncing`).
+    pub total_files: u32,
+    /// Quantos bytes já foram transferidos recentemente / na sessão atual.
+    pub completed_bytes: u64,
+    /// Total de bytes do ciclo de sincronização (`completed_bytes + pending_bytes`).
+    pub total_bytes: u64,
+    /// Nome do arquivo ativo no momento (subindo ou descendo), ou vazio.
+    pub current_file: String,
+    /// Progresso do arquivo ativo (0-100), ou -1 se não houver arquivo ativo.
+    pub current_percent: i32,
 }
 
 /// Um aviso do histórico (`Notifications`), o mais novo primeiro.

@@ -359,8 +359,53 @@ async fn status(proxy: &ServiceProxy<'_>, account: &str, i18n: &I18n) -> Res {
     let line = |key: &str, args: &[(&str, &str)]| println!("{}", i18n.tr(key, args));
     line("cli-status-account", &[("account", &status.account)]);
     line("cli-status-mount", &[("path", &status.mount_point)]);
+    let state_text = match status.state.as_str() {
+        "syncing" => i18n.tr_count("tray-syncing", status.syncing as u64),
+        "checking" => i18n.tr("tray-checking", &[]),
+        "synced" => i18n.tr("tray-synced", &[]),
+        "paused" => i18n.tr("cli-status-paused", &[]),
+        "offline" => i18n.tr("cli-status-offline", &[]),
+        "quota-full" => i18n.tr("tray-quota-full", &[]),
+        "needs-sign-in" => i18n.tr("tray-needs-sign-in", &[]),
+        "error" => i18n.tr(
+            "cli-status-errors",
+            &[("count", &status.errors.to_string())],
+        ),
+        _ => status.state.clone(),
+    };
+    line("cli-status-state", &[("state", &state_text)]);
     let pending = status.pending_uploads.to_string();
     line("cli-status-pending", &[("count", &pending)]);
+    if status.total_files > 0 && status.completed_files > 0 {
+        let pct =
+            ((status.completed_files as f64 / status.total_files as f64) * 100.0).round() as u64;
+        line(
+            "cli-status-progress",
+            &[
+                ("completed", &status.completed_files.to_string()),
+                ("total", &status.total_files.to_string()),
+                ("percent", &pct.to_string()),
+            ],
+        );
+    }
+    if !status.current_file.is_empty() {
+        if status.current_percent >= 0 {
+            let pct = status.current_percent.to_string();
+            line(
+                "cli-status-active-file",
+                &[("file", &status.current_file), ("percent", &pct)],
+            );
+        } else {
+            line(
+                "cli-status-active-file-no-percent",
+                &[("file", &status.current_file)],
+            );
+        }
+    }
+    if status.remaining_secs >= 0 {
+        let secs = format!("{}s", status.remaining_secs);
+        line("cli-status-remaining-time", &[("time", &secs)]);
+    }
     if status.paused {
         line("cli-status-paused", &[]);
     }

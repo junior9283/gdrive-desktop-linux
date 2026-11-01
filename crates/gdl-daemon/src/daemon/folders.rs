@@ -164,6 +164,36 @@ impl Runners {
     pub(super) fn retry(&self, id: i64) -> bool {
         self.get(id).inspect(|sync| sync.retry()).is_some()
     }
+
+    /// Andamento em tempo real de todas as pastas que rodam.
+    pub(super) fn sync_progress(&self) -> (bool, u32, u32, String, i32) {
+        let runners = self.lock();
+        let mut any_syncing = false;
+        let mut total_completed = 0;
+        let mut total_files = 0;
+        let mut active_file = String::new();
+        let mut active_percent = -1;
+
+        for (sync, ..) in runners.values() {
+            let p = sync.progress();
+            if p.is_syncing {
+                any_syncing = true;
+                if active_file.is_empty() && !p.current_file.is_empty() {
+                    active_file = p.current_file;
+                    active_percent = p.current_percent;
+                }
+            }
+            total_completed += p.completed;
+            total_files += p.total;
+        }
+        (
+            any_syncing,
+            total_completed,
+            total_files,
+            active_file,
+            active_percent,
+        )
+    }
 }
 
 impl Daemon {
@@ -667,6 +697,18 @@ impl Daemon {
             }
         };
         let computer = &self.config.computer;
+
+        // Se já existe uma pasta com o nome deste computador em computers, reutiliza
+        if let Ok(children) = engine.store().children(&ItemId(computers.clone()))
+            && let Some(existing) = children
+                .into_iter()
+                .find(|c| !c.trashed && c.local_name == computer.name)
+        {
+            let id = existing.id.0;
+            engine.store().kv_set(COMPUTER_KEY, &id).map_err(failed)?;
+            return Ok(id);
+        }
+
         let made = client
             .create_folder_with_props(&computers, &computer.name, &[(COMPUTER, &computer.id)])
             .await
@@ -674,6 +716,68 @@ impl Daemon {
         let id = remember(engine, made)?;
         engine.store().kv_set(COMPUTER_KEY, &id).map_err(failed)?;
         Ok(id)
+    }
+
+    /// Garante que todas as pastas de backup fiquem sob uma única pasta Computers -> hostname
+    /// e remove pastas duplicadas no Drive.
+    pub(super) async fn consolidate_computer_folders(
+        &self,
+        engine: &Arc<Engine>,
+    ) -> Result<(), ServiceError> {
+        let store = engine.store();
+        let client = engine.client();
+
+        let primary_computer = match self.find_computer_folder(engine).await {
+            Ok(Some(id)) => id,
+            _ => return Ok(()),
+        };
+
+        if let Ok(pairs) = store.pairs() {
+            for pair in pairs {
+                if pair.kind != PairKind::Folder {
+                    continue;
+                }
+                let item = store.get(&pair.remote_id).ok().flatten();
+                let current_parent = item
+                    .as_ref()
+                    .and_then(|i| i.parent.as_ref())
+                    .map(|p| p.0.clone());
+                if current_parent.as_deref() != Some(&primary_computer) {
+                    tracing::info!(
+                        pasta = %pair.local.display(),
+                        id = %pair.remote_id.0,
+                        antigo = ?current_parent,
+                        novo = %primary_computer,
+                        "unificando pasta no computador único do Drive"
+                    );
+                    let moved = client
+                        .rename_move(
+                            &pair.remote_id.0,
+                            None,
+                            Some(&primary_computer),
+                            current_parent.as_deref(),
+                        )
+                        .await;
+                    if let Ok(m) = moved {
+                        let _ = remember(engine, m);
+                    }
+                }
+            }
+        }
+
+        // Procura pastas Computers duplicadas e as remove do Drive e do banco
+        if let Ok(dups) = client.find_by_app_property(ROLE.0, ROLE.1).await {
+            let primary_computers = store.computers_folder().ok().flatten().map(|i| i.0);
+            for dup in dups {
+                if primary_computers.as_deref() != Some(&dup.id) {
+                    tracing::info!(id = %dup.id, "removendo pasta Computers duplicada");
+                    let _ = client.set_trashed(&dup.id, true).await;
+                    let _ = store.remove_item(&ItemId(dup.id));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// E-mail, motor e montagem de cada conta conectada.
@@ -724,11 +828,31 @@ pub(super) async fn look_for_computers(engine: &Engine) {
 
 /// A pasta de apoio "Computadores" no Drive, gravada no banco para a montagem mostrar.
 async fn find_computers(engine: &Engine) -> Result<Option<String>, ServiceError> {
+    let store = engine.store();
+    if let Ok(Some(id)) = store.computers_folder()
+        && let Ok(Some(item)) = store.get(&id)
+        && !item.trashed
+    {
+        return Ok(Some(id.0));
+    }
     let found = find_support(engine, ROLE.0, ROLE.1).await?;
     if let Some(id) = &found {
         note_computers(engine, id)?;
+        return Ok(Some(id.clone()));
     }
-    Ok(found)
+    if let Ok(Some(root_id)) = store.kv_get("root_id")
+        && let Ok(children) = store.children(&ItemId(root_id))
+    {
+        for child in children {
+            if !child.trashed
+                && (child.local_name == "Computers" || child.local_name == "Computadores")
+            {
+                note_computers(engine, &child.id.0)?;
+                return Ok(Some(child.id.0));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Grava a pasta de apoio, que a montagem mostra na raiz.

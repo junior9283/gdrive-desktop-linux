@@ -143,6 +143,20 @@ const MIGRATIONS: &[&str] = &[
         drive_name   TEXT NOT NULL
     ) WITHOUT ROWID;
 ",
+    "
+    -- Histórico persistente de atividade de sincronização.
+    CREATE TABLE IF NOT EXISTS activity_history (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        time_ms     INTEGER NOT NULL,
+        name        TEXT NOT NULL,
+        path        TEXT NOT NULL,
+        size        INTEGER NOT NULL,
+        state       TEXT NOT NULL,
+        percent     INTEGER NOT NULL DEFAULT -1,
+        item_id     TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS activity_history_time ON activity_history (time_ms DESC, id DESC);
+",
 ];
 
 /// Aplica as migrações que faltam, cada uma na própria transação.

@@ -37,6 +37,7 @@ pub enum Action {
     OpenWeb,
     Pause,
     Resume,
+    SyncNow,
     /// Grava o pacote de diagnóstico; o serviço abre a pasta onde ele ficou.
     GenerateDiagnostics,
     /// Liga ou desliga o registro detalhado.
@@ -160,6 +161,7 @@ impl TrayView {
                 item(i18n, "tray-open-web", Action::OpenWeb),
                 item(i18n, "tray-search", Action::Open("search")),
                 pause,
+                item(i18n, "tray-sync-now", Action::SyncNow),
                 MenuItem::Separator,
                 item(i18n, "tray-offline-files", Action::Open("offline")),
                 MenuItem::Item {
@@ -390,6 +392,7 @@ mod tests {
                 "Abrir o Google Drive no navegador",
                 "Pesquisar",
                 "Pausar a sincronização",
+                "Forçar sincronização",
                 "---",
                 "Arquivos off-line",
                 "Lista de erros",

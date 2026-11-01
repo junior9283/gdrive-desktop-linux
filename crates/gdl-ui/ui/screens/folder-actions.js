@@ -28,6 +28,7 @@ export function folderRow({ api, t }, row) {
       row.notice ? el('span', { class: 'folder-notice' }, t(...row.notice), confirmDeletes) : []),
     menuButton(t('row-menu'), () => [
       { id: 'open', label: t('folder-open'), action: () => attempt(api.openLocalFolder(row.account, row.id)) },
+      { id: 'sync-now', label: t('button-sync-now'), action: () => attempt(api.call('sync_now', args), () => toast(t('sync-now-toast'))) },
       ...(row.canRelocate ? [{ id: 'relocate', label: t('folder-relocate'), action: () => relocate({ api, t }, row) }] : []),
       { id: 'stop', label: t('folder-stop'), action: () => stopFolder({ api, t }, row) },
     ]));

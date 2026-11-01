@@ -17,6 +17,7 @@ export async function moreMenu(anchor, ctx) {
     { id: 'errors', label: t('more-errors', { count: errors }), action: () => api.openScreen('errors'), disabled: !signedIn },
     { id: 'notification-settings', label: t('more-notification-settings'), action: () => api.openScreen('notification-settings') },
     { id: 'shared-drives', label: t('more-shared-drives'), action: () => api.openScreen('shared-drives', currentAccount()), disabled: !signedIn },
+    { id: 'sync-now', label: t('button-sync-now'), action: () => attempt(api.call('sync_now', { account: currentAccount(), folder_id: 0 }), () => toast(t('sync-now-toast'))), disabled: !signedIn },
     '-',
     { id: 'feedback', label: t('more-feedback'), action: () => api.openScreen('feedback') },
     { id: 'diagnostics', label: t('more-diagnostics'), action: () => attempt(api.call('generate_diagnostics'), () => toast(t('diagnostics-done'))) },

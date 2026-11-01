@@ -134,6 +134,7 @@ export function paginate(rows, page, size) {
 
 const FIELDS = {
   name: (a, b) => a.name.localeCompare(b.name),
+  path: (a, b) => (a.path || '').localeCompare(b.path || ''),
   size: (a, b) => a.size - b.size,
   time: (a, b) => a.time_ms - b.time_ms,
 };

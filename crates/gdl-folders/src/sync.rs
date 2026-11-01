@@ -42,6 +42,16 @@ pub enum SyncError {
     Held,
 }
 
+/// Andamento da sincronização da pasta em tempo real.
+#[derive(Debug, Default, Clone)]
+pub struct FolderProgress {
+    pub is_syncing: bool,
+    pub completed: u32,
+    pub total: u32,
+    pub current_file: String,
+    pub current_percent: i32,
+}
+
 pub type Result<T> = std::result::Result<T, SyncError>;
 
 /// Uma comparação para quando nada mais muda (um conflito ou um renomear pede outra passada).
@@ -113,6 +123,7 @@ pub struct FolderSync {
     /// A raiz é um ponto de montagem agora (injetável nos testes).
     is_mount_point: fn(&Path) -> bool,
     screen: Option<Screen>,
+    progress: Arc<Mutex<FolderProgress>>,
 }
 
 impl FolderSync {
@@ -140,7 +151,12 @@ impl FolderSync {
             links: None,
             is_mount_point: guard::is_mount_point,
             screen: None,
+            progress: Arc::new(Mutex::new(FolderProgress::default())),
         }
+    }
+
+    pub fn progress(&self) -> FolderProgress {
+        self.progress.lock().unwrap().clone()
     }
 
     /// Troca a conferência de ponto de montagem (os testes não montam discos).
@@ -352,14 +368,35 @@ impl FolderSync {
             true => PairState::ConfirmDeletes(deletes as u64),
             false => PairState::Active,
         })?;
+        {
+            let mut p = self.progress.lock().unwrap();
+            p.is_syncing = !plan.is_empty();
+            p.total = plan.len() as u32;
+            p.completed = 0;
+        }
         for (rel, action) in plan {
             if v.gone.as_deref().is_some_and(|g| inside(&rel, g)) {
                 continue;
             }
+            {
+                let mut p = self.progress.lock().unwrap();
+                p.current_file = last(&rel).to_string();
+                p.current_percent = 50;
+            }
             match self.apply(&mut v, &rel, action).await {
-                Ok(()) => report.applied += 1,
+                Ok(()) => {
+                    report.applied += 1;
+                    let mut p = self.progress.lock().unwrap();
+                    p.completed += 1;
+                    p.current_percent = 100;
+                }
                 Err(e) => self.failed(report, rel, e),
             }
+        }
+        {
+            let mut p = self.progress.lock().unwrap();
+            p.is_syncing = false;
+            p.current_file.clear();
         }
         self.write_links(&v, report);
         report.trashed += v.trashed;
@@ -570,6 +607,27 @@ impl FolderSync {
                 let existing = remote.as_ref().map(|r| r.id.0.as_str());
                 let (r, sent) = self.upload(v, rel, existing, to_remote(last(rel))).await?;
                 self.put(rel, &r.id, sent, r.md5)?;
+                let folder_name = self
+                    .pair
+                    .local
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Pasta");
+                let full_path = format!(
+                    "{} -> Computadores/{}/{}",
+                    self.pair.local.join(rel).display(),
+                    folder_name,
+                    rel
+                );
+                let _ = self.store.record_activity(
+                    gdl_common::time::now_ms(),
+                    last(rel),
+                    &full_path,
+                    sent.size,
+                    "uploaded",
+                    100,
+                    &r.id,
+                );
             }
             Action::UploadAsConflict => {
                 let name = self.conflict_name(&to_remote(last(rel)), 0);
@@ -581,7 +639,30 @@ impl FolderSync {
             Action::Download => {
                 let r = remote.expect("lado do Drive");
                 match self.download(&path, &r, local).await? {
-                    Some(l) => self.put(rel, &r.id.0, l, r.md5)?,
+                    Some(l) => {
+                        self.put(rel, &r.id.0, l, r.md5)?;
+                        let folder_name = self
+                            .pair
+                            .local
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("Pasta");
+                        let full_path = format!(
+                            "Computadores/{}/{} -> {}",
+                            folder_name,
+                            rel,
+                            self.pair.local.join(rel).display()
+                        );
+                        let _ = self.store.record_activity(
+                            gdl_common::time::now_ms(),
+                            last(rel),
+                            &full_path,
+                            l.size,
+                            "downloaded",
+                            100,
+                            &r.id.0,
+                        );
+                    }
                     // O arquivo mudou durante o download: a próxima passada decide de novo.
                     None => v.again = true,
                 }

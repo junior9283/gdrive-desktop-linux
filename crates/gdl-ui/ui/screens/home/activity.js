@@ -1,7 +1,7 @@
 // Atividade de sincronização: tabela ordenável e paginada, com o menu de cada linha.
 
 import { attempt, el, menuButton, pager, toast } from '../../components.js';
-import { formatAgo, formatSize } from '../../format.js';
+import { formatAgo, formatDate, formatSize } from '../../format.js';
 import { currentAccount } from '../../state.js';
 import { paginate, rowActions, sortRows } from './model.js';
 
@@ -42,12 +42,14 @@ function content(ctx, rows, draw) {
     const state = row.percent >= 0 && row.state === 'uploading'
       ? t('activity-uploading-percent', { percent: row.percent })
       : t(`activity-${row.state}`);
+    const timeFormatted = `${formatDate(row.time_ms, locale)} (${formatAgo(row.time_ms, now, locale)})`;
     return el(
       'tr',
       {},
-      el('td', { class: 'name', title: row.path }, row.name),
+      el('td', { class: 'name', title: row.name }, row.name),
+      el('td', { class: 'path', title: row.path }, row.path || '-'),
       el('td', {}, formatSize(row.size, locale)),
-      el('td', {}, formatAgo(row.time_ms, now, locale)),
+      el('td', { class: 'date', title: timeFormatted }, timeFormatted),
       el('td', { class: 'state' }, state),
       el('td', {}, menu),
     );
@@ -73,8 +75,13 @@ function content(ctx, rows, draw) {
       el(
         'thead',
         {},
-        el('tr', {}, heading('name', t('column-name')), heading('size', t('column-size')),
-          heading('time', t('column-date')), el('th', {}, t('column-status')), el('th', {})),
+        el('tr', {},
+          heading('name', t('column-name')),
+          heading('path', t('column-path')),
+          heading('size', t('column-size')),
+          heading('time', t('column-date')),
+          el('th', {}, t('column-status')),
+          el('th', {})),
       ),
       el('tbody', {}, body),
     ),

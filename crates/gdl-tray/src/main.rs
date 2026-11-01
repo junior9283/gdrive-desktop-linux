@@ -174,6 +174,7 @@ impl App {
             }
             Action::Pause => self.service.pause().await.map_err(Error::from),
             Action::Resume => self.service.resume().await.map_err(Error::from),
+            Action::SyncNow => self.service.sync_now("", 0).await.map_err(Error::from),
             Action::GenerateDiagnostics => self
                 .service
                 .generate_diagnostics()

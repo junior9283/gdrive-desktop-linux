@@ -139,14 +139,33 @@
   text-align: left;
   padding: 8px;
   border-bottom: 1px solid var(--md-outline-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .activity-table th {
   font: var(--md-label-large);
 }
 
-.activity-table th:first-child {
-  width: 40%;
+.activity-table th:nth-child(1) {
+  width: 22%;
+}
+
+.activity-table th:nth-child(2) {
+  width: 28%;
+}
+
+.activity-table th:nth-child(3) {
+  width: 12%;
+}
+
+.activity-table th:nth-child(4) {
+  width: 22%;
+}
+
+.activity-table th:nth-child(5) {
+  width: 12%;
 }
 
 .activity-table th:last-child,

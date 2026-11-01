@@ -59,6 +59,11 @@ export async function render(root, ctx) {
 function layout({ api, t }) {
   ui.title = el('h1', { class: 'header-title' });
   ui.subtitle = el('p', { class: 'header-subtitle' });
+  ui.syncNow = el('button', {
+    class: 'button',
+    hidden: true,
+    onclick: () => attempt(api.call('sync_now', { account: currentAccount(), folder_id: 0 }), () => toast(t('sync-now-toast'))),
+  }, t('button-sync-now'));
   ui.pause = el('button', { class: 'header-pause tonal', onclick: togglePause });
   ui.signIn = el('button', {
     class: 'header-sign-in filled',
@@ -78,6 +83,7 @@ function layout({ api, t }) {
     'section',
     { class: 'header', tabindex: '-1', 'aria-live': 'polite' },
     el('div', { class: 'header-text' }, ui.title, ui.subtitle),
+    ui.syncNow,
     ui.pause,
     ui.signIn,
   );
@@ -184,6 +190,7 @@ function updateHeader() {
   const header = headerFor(status, Date.now(), locale);
   ui.title.textContent = t(...header.title);
   ui.subtitle.textContent = header.subtitle ? t(...header.subtitle) : '';
+  ui.syncNow.hidden = withoutAccount(status.state);
   ui.pause.hidden = !header.pause;
   if (header.pause) ui.pause.textContent = t(header.pause);
   ui.signIn.hidden = !header.signIn;

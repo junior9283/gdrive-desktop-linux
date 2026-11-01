@@ -168,6 +168,7 @@ cli-status-paused = Sincronização pausada
 cli-status-offline = Sem conexão
 cli-status-last-sync = Última sincronização: { $when }
 cli-status-errors = Falhas: { $count }
+cli-sync-started = Sincronização iniciada.
 cli-not-pointer = { $path } não é um ponteiro de Documento Google.
 cli-menu-link = Link do item (copie daqui: não há programa para a área de transferência)
 cli-menu-failed = Não foi possível fazer a ação
@@ -214,6 +215,7 @@ tray-open-web = Abrir o Google Drive no navegador
 tray-search = Pesquisar
 tray-pause = Pausar a sincronização
 tray-resume = Retomar a sincronização
+tray-sync-now = Forçar sincronização
 tray-offline-files = Arquivos off-line
 tray-errors = { $count ->
     [0] Lista de erros

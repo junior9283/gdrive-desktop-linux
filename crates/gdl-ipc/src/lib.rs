@@ -492,6 +492,7 @@ pub trait Service {
     fn notification_settings(&self) -> Result<Vec<NotificationSetting>, ServiceError>;
     fn set_notification_enabled(&self, kind: &str, enabled: bool) -> Result<(), ServiceError>;
     fn retry(&self, account: &str, item_id: &str) -> Result<(), ServiceError>;
+    fn sync_now(&self, account: &str, folder_id: i64) -> Result<(), ServiceError>;
     /// `canceled`, `too-late` ou `in-use` (o arquivo está aberto para escrita).
     fn cancel_upload(&self, account: &str, item_id: &str) -> Result<String, ServiceError>;
     fn pin(&self, path: &str) -> Result<(), ServiceError>;

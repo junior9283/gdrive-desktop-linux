@@ -1112,6 +1112,62 @@ impl Store {
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
+
+    /// Grava uma linha no histórico persistente de atividade de sincronização.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_activity(
+        &self,
+        time_ms: i64,
+        name: &str,
+        path: &str,
+        size: u64,
+        state: &str,
+        percent: i32,
+        item_id: &str,
+    ) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO activity_history (time_ms, name, path, size, state, percent, item_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![time_ms, name, path, size as i64, state, percent, item_id],
+        )?;
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM activity_history", [], |r| r.get(0))
+            .unwrap_or(0);
+        if count > 2000 {
+            let _ = conn.execute(
+                "DELETE FROM activity_history WHERE id IN (SELECT id FROM activity_history ORDER BY time_ms ASC, id ASC LIMIT ?1)",
+                params![count - 2000],
+            );
+        }
+        Ok(())
+    }
+
+    /// Lê o histórico persistente de atividade de sincronização, mais recente primeiro.
+    pub fn activity_history(&self, limit: usize) -> Result<Vec<ActivityRecord>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, time_ms, name, path, size, state, percent, item_id FROM activity_history \
+             ORDER BY time_ms DESC, id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| {
+            Ok(ActivityRecord {
+                id: r.get(0)?,
+                time_ms: r.get(1)?,
+                name: r.get(2)?,
+                path: r.get(3)?,
+                size: r.get(4)?,
+                state: r.get(5)?,
+                percent: r.get(6)?,
+                item_id: r.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
 }
 
 /// Estados de um item com edição local que ainda não está no Drive.

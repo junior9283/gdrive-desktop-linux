@@ -64,6 +64,10 @@ impl Service {
         self.daemon.retry(account, item_id).await
     }
 
+    async fn sync_now(&self, account: &str, folder_id: i64) -> Result<(), ServiceError> {
+        self.daemon.sync_now(account, folder_id).await
+    }
+
     async fn notifications(&self) -> Vec<NotificationItem> {
         self.daemon.notifications()
     }

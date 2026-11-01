@@ -52,6 +52,14 @@ enum Command {
     Pause,
     /// Retoma a sincronização.
     Resume,
+    /// Força a sincronização imediata de todas as pastas ou de uma específica.
+    Sync {
+        #[command(flatten)]
+        account: AccountArg,
+        /// ID da pasta a sincronizar (opcional; se omitido, sincroniza tudo).
+        #[arg(long)]
+        folder: Option<i64>,
+    },
     /// Lista o que foi guardado em Lost and Found.
     LostAndFound {
         #[command(flatten)]
@@ -167,6 +175,13 @@ async fn service(command: Command, i18n: &I18n) -> Res {
         Command::Unpin { path } => proxy.unpin(&absolute(&path)?).await,
         Command::Pause => proxy.pause().await,
         Command::Resume => proxy.resume().await,
+        Command::Sync { account, folder } => {
+            proxy
+                .sync_now(&account.account, folder.unwrap_or(0))
+                .await?;
+            println!("{}", i18n.tr("cli-sync-started", &[]));
+            Ok(())
+        }
         Command::LostAndFound { account } => {
             for file in proxy.list_lost_and_found(&account.account).await? {
                 println!("{file}");

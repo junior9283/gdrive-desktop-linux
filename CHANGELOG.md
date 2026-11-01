@@ -7,6 +7,21 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.2.5] - 2026-11-01
+
+Melhorias e correções: unificação da pasta Computadores no Google Drive, sincronização completa contínua, histórico persistente de atividade com origem e destino, persistência de notificações e botão para forçar sincronização sob demanda.
+
+### Adicionado
+- Botão "Forçar sincronização" / "Sincronizar agora" na tela inicial, nas pastas, na bandeja e na CLI (`gdrive-desktop-linux sync`).
+- Histórico persistente de atividade no SQLite com exibição de nome do arquivo, origem/destino ("de/para"), tamanho, data, hora e status.
+- Persistência e preservação de notificações entre fechamentos e aberturas do aplicativo.
+- Unificação automática da estrutura do Drive: apenas uma pasta "Computers" na raiz e apenas uma pasta do computador (hostname), contendo todas as pastas sincronizadas.
+- Expansão de extensões excluídas da verificação de ransomware para evitar bloqueio indevido de coleções de fotos (RAWs, mídias, etc.).
+
+### Corrigido
+- Sincronização contínua de pastas que parava prematuramente com arquivos pendentes.
+- Integração do progresso de sincronização das pastas locais ao estado geral do serviço.
+
 ## [1.2.4] - 2026-11-01
 
 Melhorias: status real de sincronização em tempo real na bandeja, aplicativo e CLI, e ícone simbólico nativo.

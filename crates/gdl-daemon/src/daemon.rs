@@ -1624,6 +1624,17 @@ impl Daemon {
         for (email, mount_point, engine, folders) in listed {
             let mut summary = engine.summary().map_err(failed)?;
             summary.errors += folders.failure_count();
+            let (folder_syncing, folder_completed, folder_total, folder_active, folder_percent) =
+                folders.sync_progress();
+            if folder_syncing {
+                summary.syncing += 1;
+                if summary.current_file.is_empty() {
+                    summary.current_file = folder_active;
+                    summary.current_percent = folder_percent;
+                }
+            }
+            summary.completed_files += folder_completed;
+            summary.total_files += folder_total;
             accounts.push(AccountSummary {
                 email,
                 mount_point: mount_point.display().to_string(),
@@ -1697,6 +1708,23 @@ impl Daemon {
 
     pub async fn activity(&self, account: &str) -> Result<Vec<ActivityItem>, ServiceError> {
         let (engine, mount) = self.engine_and_mount(account).await?;
+        if let Ok(records) = engine.store().activity_history(500)
+            && !records.is_empty()
+        {
+            return Ok(records
+                .into_iter()
+                .map(|r| ActivityItem {
+                    seq: r.id as u64,
+                    time_ms: r.time_ms,
+                    path: r.path,
+                    size: r.size,
+                    state: r.state,
+                    percent: r.percent,
+                    item_id: r.item_id,
+                    name: r.name,
+                })
+                .collect());
+        }
         let rows = engine.activity().map_err(failed)?;
         Ok(rows
             .into_iter()
@@ -1776,6 +1804,28 @@ impl Daemon {
         }
         let engine = self.account_engine(account).await?;
         engine.retry(&ItemId(item_id.into())).map_err(failed)?;
+        self.emit_status_changed().await;
+        Ok(())
+    }
+
+    /// Força a sincronização imediata (de todas as pastas ou de um par específico).
+    pub async fn sync_now(&self, account: &str, folder_id: i64) -> Result<(), ServiceError> {
+        let account = self.folder_account(account).await?;
+        let engine = &account.engine;
+        let now = gdl_common::time::now_ms();
+        engine.recognize_activity(now);
+
+        let _ = self.consolidate_computer_folders(engine).await;
+
+        if folder_id > 0 {
+            account.runners.retry(folder_id);
+        } else {
+            if let Ok(pairs) = engine.store().pairs() {
+                for pair in pairs {
+                    account.runners.retry(pair.id);
+                }
+            }
+        }
         self.emit_status_changed().await;
         Ok(())
     }

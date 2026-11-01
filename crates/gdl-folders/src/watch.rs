@@ -88,8 +88,18 @@ impl FolderSync {
                 }
                 () = wait => {
                     due = None;
-                    if let Err(e) = self.reconcile().await {
-                        tracing::warn!(pair = self.pair().id, "falha ao comparar a pasta: {e}");
+                    match self.reconcile().await {
+                        Ok(report) => {
+                            if !report.failed.is_empty()
+                                || self.pending_uploads().await.unwrap_or(0) > 0
+                            {
+                                due = Some(Instant::now() + Duration::from_secs(5));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(pair = self.pair().id, "falha ao comparar a pasta: {e}");
+                            due = Some(Instant::now() + Duration::from_secs(10));
+                        }
                     }
                 }
             }

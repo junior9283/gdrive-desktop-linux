@@ -223,3 +223,16 @@ impl DrivePath {
         }
     }
 }
+
+/// Registro persistente de atividade de sincronização.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityRecord {
+    pub id: i64,
+    pub time_ms: i64,
+    pub name: String,
+    pub path: String,
+    pub size: i64,
+    pub state: String,
+    pub percent: i32,
+    pub item_id: String,
+}

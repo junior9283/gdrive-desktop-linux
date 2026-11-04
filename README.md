@@ -208,7 +208,7 @@ compartilhados". Fora da pasta do Drive ele não aparece.
 
 | Gerenciador | Como funciona |
 |---|---|
-| Dolphin (KDE Plasma 6) | plugin que vem nos pacotes `.deb`, `.rpm` e Arch (no `.tar.gz` não: o Qt só procura plugins nas pastas do sistema) |
+| Dolphin (KDE Plasma 6) | plugin que vem nos pacotes `.deb`, `.rpm` e Arch. O `scripts/install-dev.sh` (instalação em `~/.local`, do código-fonte) também o compila e instala, e grava o `QT_PLUGIN_PATH` em `~/.config/environment.d` (vale na próxima sessão; `--no-dolphin` pula). No `.tar.gz` não vem: o Qt só procura plugins nas pastas do sistema |
 | Nautilus (GNOME, Ubuntu, Pop!_OS 22.04, Zorin), Nemo (Cinnamon, Mint), Caja (MATE), Thunar (Xfce) | extensão que vem em todos os formatos; precisa do pacote de Python do gerenciador: `nautilus-python`/`python3-nautilus`, `nemo-python`/`python3-nemo`, `python3-caja`/`python-caja` ou `thunarx-python` |
 | COSMIC Files (Pop!_OS 24.04) | não aceita extensões nem submenus: o serviço põe as ações soltas, com "Google Drive:" no nome, e elas avisam quando o item não é do Meu Drive |
 

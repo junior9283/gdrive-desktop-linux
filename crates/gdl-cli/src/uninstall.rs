@@ -52,14 +52,19 @@ pub fn package_removal(kind: &str) -> Option<Vec<&'static str>> {
     Some([&["pkexec"], tool, &[PACKAGE]].concat())
 }
 
+/// O arquivo que o `install-dev.sh` grava em `environment.d` para o Qt achar os plugins do
+/// Dolphin: a única coisa instalada fora do prefixo.
+const QT_ENV_FILE: &str = "environment.d/50-gdrive-desktop-linux.conf";
+
 /// Apaga os arquivos da lista e a própria lista, e as pastas que ficarem vazias dentro da pasta
-/// do app. Só o que está dentro de `prefix`: uma lista adulterada não apaga outra coisa.
+/// do app. Só o que está dentro de `prefix` (e o arquivo do Qt em `environment.d`): uma lista
+/// adulterada não apaga outra coisa.
 pub fn remove_listed(prefix: &Path, manifest: &Path) -> io::Result<()> {
     let own = own_share(prefix);
     for line in std::fs::read_to_string(manifest)?.lines() {
         let file = Path::new(line);
         let inside = file.is_absolute()
-            && file.starts_with(prefix)
+            && (file.starts_with(prefix) || file.ends_with(QT_ENV_FILE))
             && !file.components().any(|c| c == Component::ParentDir);
         if !inside {
             continue;
@@ -171,9 +176,23 @@ mod tests {
         }
         let manifest = own_share(&prefix).join("installed-files");
         let escape = prefix.join("bin/../../fora.txt");
-        let list = [&program, &icon, &outside, &escape, &prefix.join("sumiu")]
-            .map(|p| p.display().to_string())
-            .join("\n");
+        let qt_env = dir.path().join(".config").join(QT_ENV_FILE);
+        let other_conf = dir.path().join(".config/environment.d/90-outro.conf");
+        for file in [&qt_env, &other_conf] {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, b"").unwrap();
+        }
+        let list = [
+            &program,
+            &icon,
+            &outside,
+            &escape,
+            &qt_env,
+            &other_conf,
+            &prefix.join("sumiu"),
+        ]
+        .map(|p| p.display().to_string())
+        .join("\n");
         std::fs::write(&manifest, list).unwrap();
 
         remove_listed(&prefix, &manifest).unwrap();
@@ -185,6 +204,8 @@ mod tests {
         );
         assert!(data.exists(), "apagou dados que não estavam na lista");
         assert!(unlisted.exists() && outside.exists());
+        assert!(!qt_env.exists(), "deixou o arquivo do Qt em environment.d");
+        assert!(other_conf.exists(), "apagou outro arquivo de environment.d");
         assert!(
             prefix.join("bin").is_dir(),
             "apagou uma pasta que não é do app"

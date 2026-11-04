@@ -210,6 +210,58 @@ fn destdir_stages_files_for_the_prefix() {
     );
 }
 
+/// Os plugins do Dolphin ficam em `<prefixo>/lib/qt6/plugins` e o Qt só os acha pelo
+/// `QT_PLUGIN_PATH`: sem o arquivo em `environment.d` o menu e as nuvens somem sem aviso.
+const PLUGINS: [&str; 2] = [
+    "kfileitemaction/gdrive_desktop_linux_menu",
+    "overlayicon/gdrive_desktop_linux_overlay",
+];
+
+#[test]
+fn dolphin_plugins_install_with_the_qt_plugin_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let (bins, prefix) = (fake_bins(dir.path()), dir.path().join("com espaço"));
+    let (built, config) = (dir.path().join("plugins"), dir.path().join("config"));
+    std::fs::create_dir_all(&built).unwrap();
+    for plugin in PLUGINS {
+        std::fs::write(
+            built.join(format!("{}.so", plugin.rsplit('/').next().unwrap())),
+            "",
+        )
+        .unwrap();
+    }
+
+    let out = Command::new("sh")
+        .arg(repo().join("scripts/install-dev.sh"))
+        .args(["--prefix", prefix.to_str().unwrap()])
+        .args(["--from", bins.to_str().unwrap(), "--no-activate"])
+        .args(["--dolphin", built.to_str().unwrap()])
+        .env("XDG_CONFIG_HOME", &config)
+        .output()
+        .unwrap();
+    succeeded(out);
+
+    for plugin in PLUGINS {
+        let file = prefix
+            .join("lib/qt6/plugins/kf6")
+            .join(format!("{plugin}.so"));
+        assert!(file.is_file(), "{plugin}");
+    }
+    let conf = config.join("environment.d/50-gdrive-desktop-linux.conf");
+    assert_eq!(
+        read(conf.clone()),
+        format!(
+            "QT_PLUGIN_PATH={}/lib/qt6/plugins${{QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}}\n",
+            prefix.display()
+        )
+    );
+    let listed = read(prefix.join("share/gdrive-desktop-linux/installed-files"));
+    assert!(
+        listed.lines().any(|l| l == conf.display().to_string()),
+        "{listed}"
+    );
+}
+
 /// O ícone do app virou PNG: o SVG de uma instalação anterior sai, senão o tema o prefere.
 #[test]
 fn removes_the_old_scalable_app_icon() {

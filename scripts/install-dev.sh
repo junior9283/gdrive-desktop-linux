@@ -2,22 +2,31 @@
 # Instala o app para uso, sem root, em <prefixo> (padrão ~/.local): os programas, o serviço do
 # usuário (systemd), a ativação do serviço e da janela pelo D-Bus, o .desktop (menu e ponteiros
 # dos Documentos Google), os tipos dos ponteiros, os ícones e o menu do botão direito nos
-# gerenciadores de arquivos GTK.
+# gerenciadores de arquivos GTK e os plugins do Dolphin (menu e emblemas).
 #
 #   scripts/install-dev.sh [--prefix DIR] [--destdir DIR] [--from DIR] [--dry-run] [--no-activate]
+#                          [--dolphin DIR | --no-dolphin]
 #
+# Os plugins do Dolphin vão em <prefixo>/lib/qt6/plugins, e o Qt só olha ali se o QT_PLUGIN_PATH
+# disser; por isso o instalador grava um arquivo em ~/.config/environment.d (vale na próxima
+# sessão). --dolphin usa os .so já compilados em DIR (o que o integrations/dolphin/build.sh
+# preenche); sem ele, na instalação em ~/.local feita do código-fonte, o instalador compila os
+# plugins (precisa de CMake, ECM, Qt 6 e KIO 6; sem isso, avisa e segue sem eles);
+# --no-dolphin não instala os plugins.
 # --from usa os programas já compilados em DIR (sem ele, compila com `cargo build --release`);
 # --dry-run só lista o que instalaria; --no-activate não avisa o systemd nem o D-Bus nem atualiza
 # os bancos de tipos e de aplicativos; --destdir grava em DIR/<prefixo> os arquivos que vão funcionar
 # em <prefixo> (para montar os pacotes; implica --no-activate).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
-prefix="$HOME/.local" destdir="" from="" dry=false activate=true
+prefix="$HOME/.local" destdir="" from="" dolphin="" no_dolphin=false dry=false activate=true
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=$2; shift 2 ;;
     --destdir) destdir=$2; activate=false; shift 2 ;;
     --from) from=$2; shift 2 ;;
+    --dolphin) dolphin=$2; shift 2 ;;
+    --no-dolphin) no_dolphin=true; shift ;;
     --dry-run) dry=true; shift ;;
     --no-activate) activate=false; shift ;;
     *) echo "argumento desconhecido: $1" >&2; exit 2 ;;
@@ -100,6 +109,35 @@ for manager in nautilus nemo caja thunarx; do
   install_as 644 "$repo/integrations/gtk/gdrive_desktop_linux_menu.py" \
     "$share/$manager-python/extensions/gdrive_desktop_linux_menu.py"
 done
+
+# Os plugins do Dolphin (menu do botão direito e emblemas de estado). Eles só vêm nos pacotes e
+# nesta instalação: sem eles o Dolphin fica sem o submenu "Google Drive" e sem as nuvens.
+if [ -z "$destdir" ] && ! $no_dolphin; then
+  if [ -z "$dolphin" ] && ! $dry && [ "$prefix" = "$HOME/.local" ] &&
+    [ -f "$repo/integrations/dolphin/build.sh" ]; then
+    built=$(mktemp -d)
+    trap 'rm -rf "$built"' EXIT
+    if sh "$repo/integrations/dolphin/build.sh" "$built" >&2; then
+      dolphin=$built
+    else
+      echo "aviso: não consegui compilar os plugins do Dolphin; o menu e os emblemas dele ficam de fora" >&2
+    fi
+  fi
+  if [ -n "$dolphin" ]; then
+    for plugin in kfileitemaction/gdrive_desktop_linux_menu overlayicon/gdrive_desktop_linux_overlay; do
+      install_as 755 "$dolphin/${plugin##*/}.so" "$prefix/lib/qt6/plugins/kf6/$plugin.so"
+    done
+    conf="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/50-gdrive-desktop-linux.conf"
+    echo "instala $conf"
+    installed="$installed$conf
+"
+    if ! $dry; then
+      mkdir -p "$(dirname "$conf")"
+      printf 'QT_PLUGIN_PATH=%s/lib/qt6/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}\n' "$prefix" > "$conf"
+    fi
+    echo "Os plugins do Dolphin só valem depois de sair e entrar de novo na sessão (o Qt lê o QT_PLUGIN_PATH ao iniciar)."
+  fi
+fi
 
 # Os pacotes trazem um marcador do formato no lugar da lista (o gerenciador sabe o que é dele).
 if ! $dry && [ -z "$destdir" ]; then

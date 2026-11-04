@@ -7,6 +7,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Corrigido
+
+- Dolphin: o menu do botão direito e as nuvens de estado sumiam quando o pacote `.rpm` era removido,
+  porque a instalação em `~/.local` não trazia os plugins. O `scripts/install-dev.sh` agora os
+  compila e instala em `~/.local/lib/qt6/plugins` e registra a pasta no `QT_PLUGIN_PATH`
+  (`~/.config/environment.d`, vale na próxima sessão); `--no-dolphin` pula. A desinstalação
+  apaga esse arquivo.
+
 ## [1.2.3] - 2026-10-29
 
 Correção: clicar numa notificação de outro programa não abre mais o app.

@@ -12,3 +12,6 @@
 *.sys
 /crates/gdl-ui/gen/
 __pycache__/
+
+# O JSON do cliente OAuth baixado do Google Cloud (tem o segredo): nunca no repositório.
+client_secret_*.json

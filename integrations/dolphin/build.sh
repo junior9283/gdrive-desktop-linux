@@ -20,7 +20,7 @@ mkdir -p "$1"
 out=$(cd "$1" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-build="$work/build" src=$here
+build="$work/build" src=$here plugins="gdrive_desktop_linux_menu gdrive_desktop_linux_overlay"
 case "$flavor" in
   default) ;;
   gerasync)
@@ -30,12 +30,13 @@ case "$flavor" in
     cp -rp "$repo/integrations" "$work/repo/"
     cp -p "$repo/scripts/e2e-bus.conf" "$work/repo/scripts/"
     find "$work/repo" -type f -exec sed -i -f "$repo/packaging/gerasync/rename.sed" {} +
-    src="$work/repo/integrations/dolphin" ;;
+    src="$work/repo/integrations/dolphin"
+    plugins=$(echo "$plugins" | sed -f "$repo/packaging/gerasync/rename.sed") ;;
   *) echo "variante desconhecida: $flavor" >&2; exit 2 ;;
 esac
 cmake -S "$src" -B "$build" -DCMAKE_BUILD_TYPE=Release -Wno-dev
 cmake --build "$build" -j"$(nproc)"
 (cd "$build" && ctest --output-on-failure)
-for plugin in $(echo gdrive_desktop_linux_menu gdrive_desktop_linux_overlay | sed -f "$here/../../packaging/gerasync/rename.sed"); do
+for plugin in $plugins; do
   cp "$(find "$build" -name "$plugin.so" | head -1)" "$out/"
 done

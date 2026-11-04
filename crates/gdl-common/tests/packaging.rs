@@ -441,10 +441,10 @@ fn names_old_app(text: &str) -> bool {
 fn gerasync_stage_has_no_old_names() {
     let usr = gerasync_stage();
 
-    let files = files_under(&usr);
+    let files = files_under(usr);
     assert!(files.len() > 20, "{files:?}");
     for path in files {
-        let relative = path.strip_prefix(&usr).unwrap().display().to_string();
+        let relative = path.strip_prefix(usr).unwrap().display().to_string();
         assert!(!names_old_app(&relative), "{relative}");
         if let Ok(text) = std::fs::read_to_string(&path) {
             assert!(!names_old_app(&text), "{relative}:\n{text}");

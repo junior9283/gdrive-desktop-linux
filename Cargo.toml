@@ -63,6 +63,8 @@ ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "g
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+# A variante GeraSync (crates/gdl-common/src/brand.rs, scripts/cargo-gerasync.sh).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(gerasync)"] }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

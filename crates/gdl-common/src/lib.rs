@@ -1,5 +1,6 @@
 //! Utilidades comuns: nomes, caminhos, preferências e idiomas.
 
+pub mod brand;
 pub mod browser;
 pub mod config;
 pub mod crash;
@@ -26,4 +27,4 @@ pub fn os_name() -> &'static str {
 }
 
 /// O id do app: o nome do `.desktop`, do ícone e da classe das janelas.
-pub const APP_ID: &str = "io.github.junior9283.GDriveDesktopLinux";
+pub use brand::APP_ID;

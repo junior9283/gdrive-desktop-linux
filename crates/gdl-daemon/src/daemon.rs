@@ -819,7 +819,9 @@ impl Daemon {
                 // entrar de novo.
                 let stored = self.config.tokens.load(email).await.map_err(failed)?;
                 let access = match stored {
-                    Some((creds, tokens)) => AccessTokens::new(creds, tokens, token_url),
+                    Some((creds, tokens)) => {
+                        AccessTokens::new(crate::official::effective(creds), tokens, token_url)
+                    }
                     None => AccessTokens::revoked(token_url),
                 };
                 self.mount_account(email, Arc::new(access), *beside).await
@@ -1111,8 +1113,8 @@ impl Daemon {
         given: ClientCredentials,
         expected: &str,
     ) -> Result<ClientCredentials, ServiceError> {
-        if !given.client_id.is_empty() {
-            return Ok(given);
+        if gdl_common::brand::OFFICIAL || !given.client_id.is_empty() {
+            return Ok(crate::official::effective(given));
         }
         let emails: Vec<String> = self
             .accounts

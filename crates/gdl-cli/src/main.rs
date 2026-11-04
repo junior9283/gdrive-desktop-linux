@@ -33,9 +33,12 @@ struct Cli {
 enum Command {
     /// Conecta uma conta Google (abre o navegador).
     Login {
+        /// No GeraSync o Client ID vem embutido: sem estas opções.
+        #[cfg(not(gerasync))]
         #[arg(long)]
         client_id: Option<String>,
         /// Arquivo com o segredo do cliente (fora do histórico do shell).
+        #[cfg(not(gerasync))]
         #[arg(long)]
         client_secret_file: Option<PathBuf>,
     },
@@ -158,10 +161,14 @@ async fn service(command: Command, i18n: &I18n) -> Res {
     let _ = gdl_ipc::ensure_activatable(&conn).await;
     let proxy = ServiceProxy::new(&conn).await?;
     match command {
+        #[cfg(not(gerasync))]
         Command::Login {
             client_id,
             client_secret_file,
         } => login(&proxy, client_id, client_secret_file, i18n).await,
+        // O GeraSync entra direto: o serviço usa o Client ID embutido.
+        #[cfg(gerasync)]
+        Command::Login {} => sign_in(&proxy, "", "", i18n).await,
         Command::Status { account } => status(&proxy, &account.account, i18n).await,
         Command::Pin { path } => proxy.pin(&absolute(&path)?).await,
         Command::Unpin { path } => proxy.unpin(&absolute(&path)?).await,
@@ -282,6 +289,7 @@ async fn uninstall(proxy: &ServiceProxy<'_>, purge: bool, yes: bool, i18n: &I18n
     Ok(())
 }
 
+#[cfg(not(gerasync))]
 async fn login(
     proxy: &ServiceProxy<'_>,
     client_id: Option<String>,
@@ -297,10 +305,13 @@ async fn login(
         Some(file) => std::fs::read_to_string(file).map_err(failed)?,
         None => prompt(&i18n.tr("cli-client-secret", &[]), true)?,
     };
+    sign_in(proxy, client_id.trim(), secret.trim(), i18n).await
+}
+
+/// Abre o login no navegador e espera o resultado.
+async fn sign_in(proxy: &ServiceProxy<'_>, client_id: &str, secret: &str, i18n: &I18n) -> Res {
     let mut finished = proxy.receive_login_finished().await?;
-    let url = proxy
-        .begin_login(client_id.trim(), secret.trim(), "")
-        .await?;
+    let url = proxy.begin_login(client_id, secret, "").await?;
     println!("{}\n{url}", i18n.tr("cli-open-url", &[]));
     let signal = finished
         .next()
@@ -380,4 +391,23 @@ async fn status(proxy: &ServiceProxy<'_>, account: &str, i18n: &I18n) -> Res {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// O GeraSync entra com o Client ID embutido: o `login` não pede nem aceita outro.
+    #[cfg(gerasync)]
+    #[test]
+    fn login_takes_no_client_id() {
+        assert!(Cli::try_parse_from(["gerasync", "login"]).is_ok());
+        assert!(Cli::try_parse_from(["gerasync", "login", "--client-id", "x"]).is_err());
+    }
+
+    #[cfg(not(gerasync))]
+    #[test]
+    fn login_takes_the_users_client_id() {
+        assert!(Cli::try_parse_from(["gdrive-desktop-linux", "login", "--client-id", "x"]).is_ok());
+    }
 }

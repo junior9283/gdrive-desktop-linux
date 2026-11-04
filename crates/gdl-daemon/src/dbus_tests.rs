@@ -24,6 +24,27 @@ async fn login_over_dbus_emits_login_finished() {
     assert!(h.drive().is_dir());
 }
 
+/// O GeraSync entra sempre com o Client ID embutido, qualquer que seja o que chegar.
+#[cfg(gerasync)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn login_ignores_given_credentials() {
+    let h = Harness::new().await;
+
+    let url = h
+        .proxy
+        .begin_login("outro.apps.googleusercontent.com", "outro", "")
+        .await
+        .unwrap();
+
+    assert!(
+        url.contains(&format!(
+            "client_id={}",
+            crate::official::credentials().client_id
+        )),
+        "{url}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn login_rejects_account_outside_allowed_pattern() {
     let h = Harness::with_policy(r#"AllowedAccountsPattern = ".*@empresa\\.com""#).await;
@@ -2363,6 +2384,8 @@ async fn disable_add_account_hides_adding_after_the_first() {
     assert!(!h.proxy.status("").await.unwrap().can_add_account);
 }
 
+// Só quem traz o próprio Client ID (no GeraSync vale sempre o embutido).
+#[cfg(not(gerasync))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_new_account_can_reuse_the_credentials_of_the_first() {
     let h = Harness::new().await;
@@ -2379,6 +2402,8 @@ async fn a_new_account_can_reuse_the_credentials_of_the_first() {
     assert_eq!(stored.client_id, "id-de-teste");
 }
 
+// Só quem traz o próprio Client ID (no GeraSync vale sempre o embutido).
+#[cfg(not(gerasync))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn empty_credentials_without_any_account_are_refused() {
     let h = Harness::new().await;

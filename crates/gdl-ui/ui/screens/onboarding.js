@@ -5,7 +5,7 @@ import { prefValue } from '../api.js';
 import { attempt, card, choice, el, errorText, stylesheet, toast, toastError } from '../components.js';
 import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
-import { GUIDE, SLOW_LOGIN_MS, TROUBLES, actions, firstState, needsClient, nextStep, slowLogin, stepsFor, summaryRows } from './onboarding/model.js';
+import { GUIDE, SLOW_LOGIN_MS, actions, firstState, needsClient, nextStep, slowLogin, stepsFor, summaryRows, troublesFor } from './onboarding/model.js';
 import { refusalToast } from './folder-actions.js';
 import { configurator, folderName } from './preferences/folders.js';
 
@@ -144,12 +144,14 @@ function guideSection(ctx, { id, link, copy = [] }) {
     el('button', { class: 'tonal', onclick: () => attempt(api.openLink(link)) }, t('onboarding-setup-open')));
 }
 
-// Um problema comum do login e o que fazer.
+// Um problema comum do login e o que fazer; a lista toda (nenhuma no GeraSync, que não tem guia).
 const trouble = (t, id) => [el('dt', {}, t(`onboarding-trouble-${id}`)), el('dd', {}, t(`onboarding-trouble-${id}-fix`))];
-const troubles = (t) =>
-  el('details', { class: 'troubles' },
+const troubles = (t, official) => {
+  const ids = troublesFor(official);
+  return !ids.length ? [] : el('details', { class: 'troubles' },
     el('summary', {}, t('onboarding-trouble-title')),
-    el('dl', {}, TROUBLES.flatMap((id) => trouble(t, id))));
+    el('dl', {}, ids.flatMap((id) => trouble(t, id))));
+};
 
 // O passo de `add` e de `resume`: o que vai acontecer e o erro do último login.
 const accountStep = (mode) => ({ t }, state) => [
@@ -169,7 +171,7 @@ const STEPS = {
       title(t('onboarding-setup-title')),
       el('p', {}, t('onboarding-setup-text')),
       el('ol', { class: 'guide' }, GUIDE.map((section) => guideSection(ctx, section))),
-      troubles(t),
+      troubles(t, ctx.official),
       el('button', { class: 'text', onclick: () => attempt(api.openLink('client-id-guide')) }, t('onboarding-client-guide')),
     ];
   },
@@ -202,7 +204,7 @@ const STEPS = {
     ];
   },
 
-  waiting({ api, t }, state) {
+  waiting({ api, t, official }, state) {
     const generate = el('button', {
       class: 'tonal generate-link',
       disabled: !state.url,
@@ -218,7 +220,7 @@ const STEPS = {
           beginLogin();
           draw(false);
         } }, t('onboarding-regenerate-link')),
-        troubles(t))
+        troubles(t, official))
       : [];
     return [
       title(t('onboarding-waiting-title')),

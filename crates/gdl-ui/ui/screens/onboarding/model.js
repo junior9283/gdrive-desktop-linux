@@ -35,6 +35,8 @@ export const GUIDE = [
 
 // Os problemas mais comuns do login, com o que fazer (os mesmos do fim do guia em `docs/`).
 export const TROUBLES = ['publish-blocked', 'access-denied', 'redirect-mismatch', 'weekly-logout', 'api-disabled'];
+// Os problemas mostrados: todos falam do projeto do Google Cloud do usuário, que o GeraSync não tem.
+export const troublesFor = (official) => (official ? [] : TROUBLES);
 // Depois do login, na ordem do original: apresentação, a pasta do Drive, pastas do computador,
 // o resumo das escolhas e como deixar arquivos off-line.
 const TOUR = ['intro', 'files', 'folders', 'summary', 'offline'];

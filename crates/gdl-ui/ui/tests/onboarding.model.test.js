@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { GUIDE, REASONS, actions, firstState, loginFailure, nextStep, slowLogin, SLOW_LOGIN_MS, stepsFor, summaryRows } from '../screens/onboarding/model.js';
+import { GUIDE, REASONS, TROUBLES, troublesFor, actions, firstState, loginFailure, nextStep, slowLogin, SLOW_LOGIN_MS, stepsFor, summaryRows } from '../screens/onboarding/model.js';
 
 const signIn = (fields = {}) => ({ ...firstState({ signedIn: false, loginOnly: false }), step: 'sign-in', ...fields });
 
@@ -252,4 +252,9 @@ test('official sign-in needs no client id', () => {
   assert.equal(state.step, 'waiting');
   assert.equal(state.error, null);
   assert.equal(nextStep(state, { type: 'back' }).step, 'sign-in');
+});
+
+test('no GeraSync, o login demorado não mostra os problemas do guia do Client ID', () => {
+  assert.deepEqual(troublesFor(true), []);
+  assert.deepEqual(troublesFor(false), TROUBLES);
 });

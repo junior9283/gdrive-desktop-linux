@@ -63,6 +63,13 @@ fn official_credentials() {
         }
         _ => panic!("GeraSync: defina GERASYNC_CLIENT_ID e GERASYNC_CLIENT_SECRET"),
     };
+    // Guarda mínima contra os dois trocados; o formato completo é conferido no
+    // check-gerasync-secrets.sh, antes de compilar o release.
+    const ID_SUFFIX: &str = ".apps.googleusercontent.com";
+    assert!(
+        id.ends_with(ID_SUFFIX) && !secret.ends_with(ID_SUFFIX),
+        "GeraSync: GERASYNC_CLIENT_ID e GERASYNC_CLIENT_SECRET parecem trocados"
+    );
     println!("cargo:rustc-env=GDL_OFFICIAL_CLIENT_ID={id}");
     println!("cargo:rustc-env=GDL_OFFICIAL_CLIENT_SECRET={secret}");
 }

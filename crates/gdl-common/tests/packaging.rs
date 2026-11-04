@@ -706,6 +706,23 @@ fn release_requires_real_gerasync_secrets() {
         vec![("GERASYNC_CLIENT_ID", fake_id), secret],
         vec![id, ("GERASYNC_CLIENT_SECRET", fake_secret)],
         vec![id, secret, ("GERASYNC_ALLOW_FAKE_CREDS", "1")],
+        // Bug da 1.3.0: os dois segredos cadastrados trocados.
+        vec![
+            ("GERASYNC_CLIENT_ID", secret.1),
+            ("GERASYNC_CLIENT_SECRET", id.1),
+        ],
+        vec![("GERASYNC_CLIENT_ID", "123-abc"), secret],
+        vec![
+            ("GERASYNC_CLIENT_ID", " 123-abc.apps.googleusercontent.com"),
+            secret,
+        ],
+        vec![
+            (
+                "GERASYNC_CLIENT_ID",
+                "123-abc.apps.googleusercontent.com\nx",
+            ),
+            secret,
+        ],
     ] {
         let out = check(&vars);
         assert!(!out.status.success(), "{vars:?}");

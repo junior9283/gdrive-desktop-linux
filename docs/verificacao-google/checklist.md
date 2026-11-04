@@ -62,9 +62,14 @@ o caminho é um domínio próprio, verificado por registro DNS, com o site apont
   comando e cole o valor quando ele pedir:
 
   ```sh
+  # cole o "ID do cliente" (termina em .apps.googleusercontent.com)
   gh secret set GERASYNC_CLIENT_ID -R junior9283/gdrive-desktop-linux
+  # cole a "Chave secreta do cliente" (começa com GOCSPX-)
   gh secret set GERASYNC_CLIENT_SECRET -R junior9283/gdrive-desktop-linux
   ```
+
+  Na 1.3.0 os dois foram cadastrados trocados e o login do GeraSync dava `invalid_client`; o
+  release agora recusa os segredos trocados antes de compilar.
 
 - [ ] Conferir com `gh secret list -R junior9283/gdrive-desktop-linux` (mostra só os nomes).
 

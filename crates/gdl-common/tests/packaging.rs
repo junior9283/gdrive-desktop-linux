@@ -351,3 +351,29 @@ fn desktop_files_are_valid() {
         assert!(out.status.success(), "{}: {report}", path.display());
     }
 }
+
+/// O que `scripts/stage-manifest.sh` lista para a variante (`default` ou `gerasync`).
+fn stage_manifest(flavor: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("manifesto");
+    let status = Command::new("sh")
+        .arg(repo().join("scripts/stage-manifest.sh"))
+        .args(["--flavor", flavor])
+        .arg(&out)
+        .status()
+        .unwrap();
+    assert!(status.success(), "stage-manifest.sh --flavor {flavor}");
+    read(out)
+}
+
+/// A variante atual instala exatamente o que instalava antes do GeraSync: os mesmos caminhos e o
+/// mesmo conteúdo (os programas entram só pelo caminho).
+#[test]
+fn default_stage_matches_golden() {
+    let golden = read(repo().join("crates/gdl-common/tests/golden/default-stage.sha256"));
+    assert_eq!(
+        stage_manifest("default"),
+        golden,
+        "a instalação da variante atual mudou"
+    );
+}

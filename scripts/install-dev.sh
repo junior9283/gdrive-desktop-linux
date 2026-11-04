@@ -19,7 +19,7 @@
 # em <prefixo> (para montar os pacotes; implica --no-activate).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
-prefix="$HOME/.local" destdir="" from="" dolphin="" no_dolphin=false dry=false activate=true
+prefix="$HOME/.local" destdir="" from="" dolphin="" no_dolphin=false dry=false activate=true flavor=default
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=$2; shift 2 ;;
@@ -28,10 +28,15 @@ while [ $# -gt 0 ]; do
     --dolphin) dolphin=$2; shift 2 ;;
     --no-dolphin) no_dolphin=true; shift ;;
     --dry-run) dry=true; shift ;;
+    --flavor) flavor=$2; shift 2 ;;
     --no-activate) activate=false; shift ;;
     *) echo "argumento desconhecido: $1" >&2; exit 2 ;;
   esac
 done
+case "$flavor" in
+  default) ;;
+  *) echo "variante desconhecida: $flavor" >&2; exit 2 ;;
+esac
 # O caminho vai entre aspas no Exec do systemd, do D-Bus e do .desktop, onde " \ ` $ % não cabem
 # (a mesma lista do início automático, em crates/gdl-daemon/src/desktop.rs); | e & quebrariam o sed.
 case "$prefix" in

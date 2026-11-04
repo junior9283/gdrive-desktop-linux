@@ -6,6 +6,7 @@
 use std::io;
 use std::path::Path;
 
+use gdl_common::brand::{DISPLAY_NAME, PACKAGE};
 use gdl_common::fs::write_atomic;
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +15,6 @@ use crate::menu::Action;
 /// A configuração do COSMIC Files, em `~/.config` (só existe se ele já rodou).
 const APP_CONFIG: &str = "cosmic/com.system76.CosmicFiles";
 const ACTIONS_FILE: &str = "v1/context_actions";
-/// O programa que as ações chamam.
-const CLI: &str = "gdrive-desktop-linux";
 
 /// As ações soltas no menu (todas em todo arquivo; poucas, para não poluir).
 const ACTIONS: [(Action, Selection); 5] = [
@@ -56,7 +55,7 @@ pub fn add_actions(
 ) -> io::Result<()> {
     update(config_home, |presets| {
         presets.extend(ACTIONS.map(|(action, selection)| Preset {
-            name: format!("Google Drive: {}", label(action)),
+            name: format!("{}: {}", DISPLAY_NAME, label(action)),
             confirm: false,
             selection,
             steps: vec![format!("{} {} %F", command(bin), action.id())],
@@ -71,7 +70,7 @@ pub fn remove_actions(config_home: &Path) -> io::Result<()> {
 
 /// O começo do comando das nossas ações (o que as identifica).
 fn command(bin: &Path) -> String {
-    format!("\"{}\" menu-action", bin.join(CLI).display())
+    format!("\"{}\" menu-action", bin.join(PACKAGE).display())
 }
 
 /// Tira as nossas ações e deixa `add` pôr as novas. Sem o COSMIC Files, ou com o arquivo
@@ -99,7 +98,7 @@ fn update(config_home: &Path, add: impl FnOnce(&mut Vec<Preset>)) -> io::Result<
     };
     let before = presets.clone();
     // De qualquer pasta: uma instalação em outro prefixo também é nossa.
-    let ours = format!("{CLI}\" menu-action ");
+    let ours = format!("{PACKAGE}\" menu-action ");
     presets.retain(|p| !p.steps.iter().any(|s| s.contains(&ours)));
     add(&mut presets);
     if presets == before {
@@ -148,10 +147,13 @@ mod tests {
             ("Abrir no terminal", Selection::Folders)
         );
         let link = &all[2];
-        assert_eq!(link.name, "Google Drive: MENU-COPY-LINK");
+        assert_eq!(link.name, format!("{}: MENU-COPY-LINK", DISPLAY_NAME));
         assert_eq!(
             link.steps,
-            ["\"/opt/com espaço/bin/gdrive-desktop-linux\" menu-action copy-link %F"]
+            [format!(
+                "\"/opt/com espaço/bin/{}\" menu-action copy-link %F",
+                PACKAGE
+            )]
         );
         assert_eq!(all.last().unwrap().selection, Selection::Folders);
 

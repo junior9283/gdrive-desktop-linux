@@ -19,7 +19,11 @@ struct UiObject {
     screens: mpsc::UnboundedSender<String>,
 }
 
-#[zbus::interface(name = "io.github.junior9283.GDriveDesktopLinux1.Ui")]
+#[cfg_attr(
+    not(gerasync),
+    zbus::interface(name = "io.github.junior9283.GDriveDesktopLinux1.Ui")
+)]
+#[cfg_attr(gerasync, zbus::interface(name = "io.github.junior9283.GeraSync1.Ui"))]
 impl UiObject {
     fn open(&self, screen: String) {
         let _ = self.screens.send(screen);

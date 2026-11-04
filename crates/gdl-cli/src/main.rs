@@ -20,9 +20,9 @@ mod uninstall;
 
 #[derive(Parser)]
 #[command(
-    name = "gdrive-desktop-linux",
+    name = gdl_common::brand::PACKAGE,
     version,
-    about = "Google Drive para Linux"
+    about = gdl_common::brand::DISPLAY_NAME
 )]
 struct Cli {
     #[command(subcommand)]
@@ -109,7 +109,7 @@ fn failed(e: impl std::fmt::Display) -> ServiceError {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    gdl_common::crash::install("gdrive-desktop-linux");
+    gdl_common::crash::install(gdl_common::brand::PACKAGE);
     let cli = Cli::parse();
     let i18n = I18n::from_env();
     let result = match cli.command {

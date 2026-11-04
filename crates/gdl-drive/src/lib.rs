@@ -85,7 +85,11 @@ pub use reqwest::Error as HttpError;
 /// prazo de 30 s.
 pub async fn fetch_json<T: serde::de::DeserializeOwned>(url: &url::Url) -> Result<T, HttpError> {
     http_builder()
-        .user_agent(concat!("gdrive-desktop-linux/", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!(
+            "{}/{}",
+            gdl_common::brand::PACKAGE,
+            env!("CARGO_PKG_VERSION")
+        ))
         .timeout(std::time::Duration::from_secs(30))
         .build()?
         .get(url.clone())

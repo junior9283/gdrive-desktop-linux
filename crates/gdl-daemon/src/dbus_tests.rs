@@ -8,6 +8,7 @@ use gdl_ipc::ServiceError;
 use gdl_store::PinState;
 
 use crate::testutil::{Harness, blocking, poll_until, status_until, wait_until};
+use gdl_common::brand::{DESKTOP_FILE, LOG_FILE, MOUNT_DIR, PACKAGE, UI_PROGRAM};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn login_over_dbus_emits_login_finished() {
@@ -47,7 +48,7 @@ async fn status_reports_pending_and_paused() {
     let status = h.proxy.status("").await.unwrap();
     assert_eq!(status.pending_uploads, 1);
     assert!(status.paused);
-    assert!(status.mount_point.ends_with("Google Drive"));
+    assert!(status.mount_point.ends_with(MOUNT_DIR));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -176,7 +177,7 @@ async fn first_listing_of_a_photo_folder_has_the_thumbnails() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn busy_mount_point_falls_back_to_numbered_folder() {
     let h = Harness::new().await;
-    let busy = h.home.join("Google Drive");
+    let busy = h.home.join(MOUNT_DIR);
     std::fs::create_dir_all(&busy).unwrap();
     std::fs::write(busy.join("meu.txt"), b"de antes").unwrap();
 
@@ -184,13 +185,15 @@ async fn busy_mount_point_falls_back_to_numbered_folder() {
 
     let status = h.proxy.status("").await.unwrap();
     assert!(
-        status.mount_point.ends_with("Google Drive (1)"),
+        status.mount_point.ends_with(&format!("{MOUNT_DIR} (1)")),
         "{status:?}"
     );
     assert_eq!(std::fs::read(busy.join("meu.txt")).unwrap(), b"de antes");
     let moved = h.notes();
     assert!(
-        moved.iter().any(|n| n.body.contains("Google Drive (1)")),
+        moved
+            .iter()
+            .any(|n| n.body.contains(&format!("{MOUNT_DIR} (1)"))),
         "{moved:?}"
     );
 }
@@ -435,7 +438,7 @@ async fn activity_over_dbus() {
     assert_eq!(row.percent, 100);
     assert_eq!(row.size, 9);
     assert!(
-        row.path.ends_with("Google Drive/Meu Drive/a.txt"),
+        row.path.ends_with(&format!("{MOUNT_DIR}/Meu Drive/a.txt")),
         "{}",
         row.path
     );
@@ -569,14 +572,16 @@ async fn errors_over_dbus() {
     assert_eq!(categories, ["quota", "lost-and-found"]);
     assert_eq!(errors[0].name, "novo.txt");
     assert!(
-        errors[0].path.ends_with("Google Drive/Meu Drive/novo.txt"),
+        errors[0]
+            .path
+            .ends_with(&format!("{MOUNT_DIR}/Meu Drive/novo.txt")),
         "{}",
         errors[0].path
     );
     assert!(
         errors[1]
             .path
-            .contains("Google Drive/.Lost and Found/contrato (local "),
+            .contains(&format!("{MOUNT_DIR}/.Lost and Found/contrato (local ")),
         "{}",
         errors[1].path
     );
@@ -959,7 +964,7 @@ async fn autostart_preference_writes_the_session_file() {
         .parent()
         .unwrap()
         .join("autostart")
-        .join(crate::desktop::AUTOSTART_FILE);
+        .join(DESKTOP_FILE);
     assert!(file.exists(), "padrão: abre na sessão");
 
     h.proxy
@@ -1283,13 +1288,9 @@ async fn uninstall_unmounts_and_keeps_the_account() {
     std::fs::write(config_home.join("kdeglobals"), "").unwrap();
     let baloo = || std::fs::read_to_string(config_home.join("baloofilerc")).unwrap_or_default();
     h.logged_in().await;
-    let mount = format!("{}/", h.home.join("Google Drive").display());
+    let mount = format!("{}/", h.home.join(MOUNT_DIR).display());
     assert!(baloo().contains(&mount), "{}", baloo());
-    let autostart = h
-        .paths()
-        .config_home
-        .join("autostart")
-        .join(crate::desktop::AUTOSTART_FILE);
+    let autostart = h.paths().config_home.join("autostart").join(DESKTOP_FILE);
     crate::desktop::set_autostart(
         &h.paths().config_home,
         std::path::Path::new("/usr/bin"),
@@ -1300,7 +1301,7 @@ async fn uninstall_unmounts_and_keeps_the_account() {
     h.proxy.uninstall(false).await.unwrap();
 
     assert!(!h.drive().exists(), "a montagem ficou");
-    assert!(!h.home.join("Google Drive").exists(), "a pasta vazia ficou");
+    assert!(!h.home.join(MOUNT_DIR).exists(), "a pasta vazia ficou");
     assert!(!autostart.exists(), "o início automático ficou");
     assert!(!baloo().contains(&mount), "a exclusão do Baloo ficou");
     assert!(h.tokens.load(&h.fake.email()).await.unwrap().is_some());
@@ -1793,7 +1794,7 @@ async fn logout_of_one_keeps_the_other_mounted() {
     assert_eq!(h.saved_accounts(), ["ana@example.com"]);
     assert!(h.tokens.load(&h.fake.email()).await.unwrap().is_none());
     assert!(h.tokens.load("ana@example.com").await.unwrap().is_some());
-    let first = h.home.join("Google Drive");
+    let first = h.home.join(MOUNT_DIR);
     assert!(blocking(move || std::fs::read_dir(first).unwrap().next().is_none()).await);
 }
 
@@ -2441,7 +2442,7 @@ async fn menu_works_inside_a_shared_drive() {
     let h = Harness::new().await;
     let file = team_drive(&h);
     h.logged_in().await;
-    let mount = h.home.join("Google Drive");
+    let mount = h.home.join(MOUNT_DIR);
     let (folder, plan) = (
         in_team(&mount, "Planos"),
         in_team(&mount, "Planos/plano.txt"),
@@ -2485,7 +2486,7 @@ async fn same_file_in_two_accounts_acts_on_the_chosen_one() {
     h.logged_in().await;
     h.logged_in_as(ANA).await;
     let first = h.fake.email();
-    let (first_mount, ana_mount) = (h.home.join("Google Drive"), h.mount_of(ANA));
+    let (first_mount, ana_mount) = (h.home.join(MOUNT_DIR), h.mount_of(ANA));
     let (first_path, ana_path) = (
         in_team(&first_mount, "Planos/plano.txt"),
         in_team(&ana_mount, "Planos/plano.txt"),
@@ -2532,7 +2533,7 @@ async fn same_file_in_two_accounts_acts_on_the_chosen_one() {
 
 /// Move `name` do Meu Drive para o Drive compartilhado "Equipe" pela montagem.
 async fn move_into_team(h: &Harness, name: &str) {
-    let mount = h.home.join("Google Drive");
+    let mount = h.home.join(MOUNT_DIR);
     let (from, to) = (h.drive().join(name), in_team(&mount, name));
     blocking(move || std::fs::rename(from, to).unwrap()).await;
 }
@@ -2589,7 +2590,7 @@ async fn refused_folder_move_warns_and_cannot_be_turned_off() {
     team_drive(&h);
     h.fake.add_folder(&h.fake.root_id(), "Pasta");
     h.logged_in().await;
-    let mount = h.home.join("Google Drive");
+    let mount = h.home.join(MOUNT_DIR);
     let (from, to) = (h.drive().join("Pasta"), in_team(&mount, "Pasta"));
 
     let err = blocking(move || std::fs::rename(from, to).unwrap_err()).await;
@@ -2623,7 +2624,7 @@ async fn shared_drives_list_toggle_and_create_on_the_requested_account() {
     h.logged_in().await;
     h.logged_in_as(ANA).await;
     let team = h.proxy.shared_drives("").await.unwrap()[0].id.clone();
-    let team_dir = in_team(&h.home.join("Google Drive"), "");
+    let team_dir = in_team(&h.home.join(MOUNT_DIR), "");
     let exists = || {
         let dir = std::path::PathBuf::from(&team_dir);
         blocking(move || dir.symlink_metadata().is_ok())
@@ -2664,7 +2665,7 @@ async fn disabling_a_shared_drive_with_pending_uploads_is_refused() {
     let h = Harness::new().await;
     team_drive(&h);
     h.logged_in().await;
-    let mount = h.home.join("Google Drive");
+    let mount = h.home.join(MOUNT_DIR);
     h.proxy.pause().await.unwrap();
     let draft = in_team(&mount, "rascunho.txt");
     blocking(move || std::fs::write(draft, b"ainda nao subiu").unwrap()).await;
@@ -2690,7 +2691,7 @@ async fn shared_drives_folder_menu_opens_the_screens_of_its_account() {
         let mount = if account == ANA {
             h.mount_of(ANA)
         } else {
-            h.home.join("Google Drive")
+            h.home.join(MOUNT_DIR)
         };
         mount.join("Drives compartilhados").display().to_string()
     };
@@ -2719,7 +2720,7 @@ async fn shared_drives_folder_menu_opens_the_screens_of_its_account() {
     }
 
     // Só vale na própria pasta, e sozinha: o resto do menu não existe lá, e vice-versa.
-    let inside = in_team(&h.home.join("Google Drive"), "Planos");
+    let inside = in_team(&h.home.join(MOUNT_DIR), "Planos");
     let both = [folder(&first), inside.clone()];
     assert!(
         h.proxy
@@ -3841,7 +3842,7 @@ async fn package_has_the_expected_files_and_no_secrets() {
     let logs = crate::logging::logs_dir(&h.paths().state_dir);
     std::fs::create_dir_all(&logs).unwrap();
     std::fs::write(
-        logs.join("gdrive-desktop-linuxd.log"),
+        logs.join(LOG_FILE),
         "Authorization: Bearer ya29.conhecido\nrefresh 1//0guardado\nconta usuario@exemplo.com\n",
     )
     .unwrap();
@@ -3853,7 +3854,7 @@ async fn package_has_the_expected_files_and_no_secrets() {
     assert_eq!(path.parent().unwrap(), h.home.join("Desktop"));
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
     assert!(
-        name.starts_with("gdrive-desktop-linux-diagnostico-"),
+        name.starts_with(&format!("{PACKAGE}-diagnostico-")),
         "{name}"
     );
     assert!(name.ends_with(".tar.gz"), "{name}");
@@ -3869,7 +3870,7 @@ async fn package_has_the_expected_files_and_no_secrets() {
         "preferencias.txt",
         "contas.txt",
         "pastas.txt",
-        "logs/gdrive-desktop-linuxd.log",
+        &format!("logs/{LOG_FILE}"),
     ] {
         assert!(names.contains(&expected), "falta {expected}: {names:?}");
     }
@@ -3897,10 +3898,10 @@ async fn package_has_the_expected_files_and_no_secrets() {
 fn seeded_crash(h: &Harness) -> PathBuf {
     let dir = gdl_common::paths::crashes_dir(&h.paths().state_dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let report = dir.join("gdrive-desktop-linux-ui-2026-10-27-120000.txt");
+    let report = dir.join(format!("{UI_PROGRAM}-2026-10-27-120000.txt"));
     std::fs::write(
         &report,
-        "gdrive-desktop-linux-ui 0.9.0\n\npanicked at src/x.rs:1:1:\nfalhou para ana@exemplo.com com Bearer ya29.segredo\n",
+        format!("{UI_PROGRAM} 0.9.0\n\npanicked at src/x.rs:1:1:\nfalhou para ana@exemplo.com com Bearer ya29.segredo\n"),
     )
     .unwrap();
     report
@@ -4053,12 +4054,12 @@ async fn localized_folders_can_be_turned_off() {
     team_drive(&h);
     h.logged_in().await;
 
-    let mount = h.home.join("Google Drive");
+    let mount = h.home.join(MOUNT_DIR);
     let names = blocking(move || names_in(&mount)).await;
     assert!(names.contains(&"My Drive".to_string()), "{names:?}");
     assert!(names.contains(&"Shared drives".to_string()), "{names:?}");
     assert!(!names.contains(&"Meu Drive".to_string()), "{names:?}");
-    let file = h.home.join("Google Drive/My Drive/a.txt");
+    let file = h.home.join(MOUNT_DIR).join("My Drive/a.txt");
     assert!(blocking(move || file.exists()).await);
 }
 
@@ -4069,7 +4070,7 @@ async fn localized_folders_can_be_turned_off() {
 async fn mount_point_per_account() {
     let mut h = Harness::new().await;
     h.two_accounts(ANA).await;
-    let first = h.home.join("Google Drive");
+    let first = h.home.join(MOUNT_DIR);
     let chosen = h.home.join("Drive da Ana");
     let refused = h.proxy.set_mount_point(ANA, "relativo").await.unwrap_err();
     assert_eq!(refused.short_name(), "InvalidArgs");

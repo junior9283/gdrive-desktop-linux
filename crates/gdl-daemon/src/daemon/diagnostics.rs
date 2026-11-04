@@ -36,7 +36,8 @@ impl Daemon {
             let desktop = user_dir(&config_home, &home, "DESKTOP", "Desktop");
             let dir = if desktop.is_dir() { desktop } else { home };
             let stem = format!(
-                "gdrive-desktop-linux-diagnostico-{}",
+                "{}-diagnostico-{}",
+                gdl_common::brand::PACKAGE,
                 local_stamp(now_ms()).replace(' ', "-")
             );
             let (path, file) = create_numbered(&dir, &stem, ".tar.gz")?;
@@ -85,8 +86,9 @@ impl Daemon {
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            "gdrive-desktop-linux {}\nsistema: {pretty}\nkernel: {}\narquitetura: {}\n\
+            "{} {}\nsistema: {pretty}\nkernel: {}\narquitetura: {}\n\
              área de trabalho: {}\nsessão: {}\nidioma: {}\nFUSE: {fuse}\n",
+            gdl_common::brand::PACKAGE,
             env!("CARGO_PKG_VERSION"),
             read("/proc/sys/kernel/osrelease").trim(),
             std::env::consts::ARCH,

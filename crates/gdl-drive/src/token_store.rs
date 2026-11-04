@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-const APP: &str = "gdrive-desktop-linux";
+use gdl_common::brand::PACKAGE;
 
 /// Client ID e segredo do app no Google Cloud, informados pelo próprio usuário.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,7 +94,7 @@ impl SecretServiceStore {
     }
 
     fn attributes(account: &str) -> HashMap<&str, &str> {
-        HashMap::from([("application", APP), ("account", account)])
+        HashMap::from([("application", PACKAGE), ("account", account)])
     }
 }
 

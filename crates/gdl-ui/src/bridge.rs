@@ -391,7 +391,14 @@ mod tests {
     /// Um serviço de mentira, com só o que os testes usam.
     struct FakeService;
 
-    #[zbus::interface(name = "io.github.junior9283.GDriveDesktopLinux1.Service")]
+    #[cfg_attr(
+        not(gerasync),
+        zbus::interface(name = "io.github.junior9283.GDriveDesktopLinux1.Service")
+    )]
+    #[cfg_attr(
+        gerasync,
+        zbus::interface(name = "io.github.junior9283.GeraSync1.Service")
+    )]
     impl FakeService {
         async fn status(&self, _account: &str) -> Result<Status, ServiceError> {
             Err(ServiceError::NotLoggedIn("nenhuma conta conectada".into()))

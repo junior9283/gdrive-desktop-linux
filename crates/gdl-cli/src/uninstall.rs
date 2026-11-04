@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 use gdl_common::fs::remove_file_if_exists;
 
 /// O nome do pacote nos três formatos.
-const PACKAGE: &str = "gdrive-desktop-linux";
+use gdl_common::brand::PACKAGE;
 
 /// Como o app foi instalado.
 #[derive(Debug, PartialEq)]

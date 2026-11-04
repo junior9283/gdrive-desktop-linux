@@ -45,7 +45,7 @@ pub async fn notify(conn: &zbus::Connection, summary: &str, body: &str) {
             Some("org.freedesktop.Notifications"),
             "Notify",
             &(
-                "Google Drive",
+                gdl_common::brand::DISPLAY_NAME,
                 0u32,
                 gdl_common::APP_ID,
                 summary,

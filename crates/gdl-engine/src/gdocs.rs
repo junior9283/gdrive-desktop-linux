@@ -70,11 +70,12 @@ pub fn web_url(item: &Item) -> Option<String> {
 pub fn pointer_json(id: &str, mime: &str, email: &str) -> String {
     let quoted = |text: &str| serde_json::Value::from(text).to_string();
     format!(
-        r#"{{"url":{},"doc_id":{},"email":{},"mime":{},"app":"gdrive-desktop-linux"}}"#,
+        r#"{{"url":{},"doc_id":{},"email":{},"mime":{},"app":{}}}"#,
         quoted(&open_url(id)),
         quoted(id),
         quoted(email),
         quoted(mime),
+        quoted(gdl_common::brand::PACKAGE),
     )
 }
 
@@ -151,7 +152,10 @@ mod tests {
         let json = pointer_json("abc", "application/vnd.google-apps.document", "a@b.c");
         assert_eq!(
             json,
-            r#"{"url":"https://docs.google.com/open?id=abc","doc_id":"abc","email":"a@b.c","mime":"application/vnd.google-apps.document","app":"gdrive-desktop-linux"}"#
+            format!(
+                r#"{{"url":"https://docs.google.com/open?id=abc","doc_id":"abc","email":"a@b.c","mime":"application/vnd.google-apps.document","app":"{}"}}"#,
+                gdl_common::brand::PACKAGE
+            )
         );
         let quoted = pointer_json("x", "m", "a\"b");
         assert!(serde_json::from_str::<serde_json::Value>(&quoted).is_ok());

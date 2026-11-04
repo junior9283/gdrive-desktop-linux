@@ -21,12 +21,16 @@ macro_rules! brand {
         pub const OFFICIAL: bool = $official;
         /// O id do app: o nome do `.desktop`, do ícone e da classe das janelas.
         pub const APP_ID: &str = $app_id;
+        /// O `.desktop` principal (menu e início automático).
+        pub const DESKTOP_FILE: &str = concat!($app_id, ".desktop");
         /// O nome do pacote, das pastas XDG, do chaveiro e do programa da linha de comando.
         pub const PACKAGE: &str = $package;
         pub const DAEMON: &str = concat!($package, "d");
         pub const TRAY_PROGRAM: &str = concat!($package, "-tray");
         pub const UI_PROGRAM: &str = concat!($package, "-ui");
         pub const MCP_PROGRAM: &str = concat!($package, "-mcp");
+        /// O log do serviço, em `<state_dir>/logs`.
+        pub const LOG_FILE: &str = concat!($package, "d.log");
         /// O nome que o usuário vê (menus, notificações, barra lateral).
         pub const DISPLAY_NAME: &str = $name;
         /// A pasta montada em `~`.

@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use gdl_common::brand::MOUNT_DIR;
 use std::time::Duration;
 
 use gdl_common::paths::Paths;
@@ -224,7 +226,7 @@ impl Harness {
 
     /// A montagem de uma conta que não é a primeira: `Google Drive (<e-mail>)`.
     pub fn mount_of(&self, email: &str) -> PathBuf {
-        self.home.join(format!("Google Drive ({email})"))
+        self.home.join(format!("{} ({email})", MOUNT_DIR))
     }
 
     /// Os e-mails guardados em `accounts`, na ordem do arquivo.
@@ -243,7 +245,7 @@ impl Harness {
 
     /// `Meu Drive` dentro da montagem padrão.
     pub fn drive(&self) -> PathBuf {
-        self.home.join("Google Drive").join("Meu Drive")
+        self.home.join(MOUNT_DIR).join("Meu Drive")
     }
 
     /// O que o serviço mandou abrir no navegador ou no gerenciador de arquivos, em ordem.

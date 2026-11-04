@@ -37,7 +37,11 @@ fn version_prints_the_version_and_exits() {
     );
     assert_eq!(
         stdout.trim(),
-        format!("gdrive-desktop-linuxd {}", env!("CARGO_PKG_VERSION"))
+        format!(
+            "{} {}",
+            gdl_common::brand::DAEMON,
+            env!("CARGO_PKG_VERSION")
+        )
     );
     assert!(untouched(home.path()), "não cria nada");
 }

@@ -3,6 +3,7 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use gdl_common::brand::{DAEMON, PACKAGE};
 use gdl_common::i18n;
 use gdl_common::paths::Paths;
 use gdl_daemon::daemon::Exit;
@@ -15,33 +16,38 @@ use gdl_ipc::launcher::Launcher;
 use gdl_ipc::{BUS_NAME, OBJECT_PATH};
 use tokio::signal::unix::{SignalKind, signal};
 
-const HELP: &str = "\
-Uso: gdrive-desktop-linuxd [opção]
+/// A ajuda de `--help`.
+fn help() -> String {
+    format!(
+        "\
+Uso: {DAEMON} [opção]
 
-Serviço do usuário do gdrive-desktop-linux: monta a conta e atende a janela, a bandeja e os
+Serviço do usuário do {PACKAGE}: monta a conta e atende a janela, a bandeja e os
 gerenciadores de arquivos pelo D-Bus. Normalmente é iniciado pelo systemd ou pelo próprio D-Bus;
 se já estiver rodando, outra cópia sai sem fazer nada.
 
 Opções:
   -h, --help     mostra esta ajuda e sai
   -V, --version  mostra a versão e sai
-";
+"
+    )
+}
 
 fn main() -> ExitCode {
-    gdl_common::crash::install("gdrive-desktop-linuxd");
+    gdl_common::crash::install(DAEMON);
     // Antes de tudo: as opções só respondem, sem tocar no barramento nem na conta.
     match std::env::args().nth(1).as_deref() {
         None => serve(),
         Some("-V" | "--version") => {
-            println!("gdrive-desktop-linuxd {}", env!("CARGO_PKG_VERSION"));
+            println!("{} {}", DAEMON, env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Some("-h" | "--help") => {
-            print!("{HELP}");
+            print!("{}", help());
             ExitCode::SUCCESS
         }
         Some(other) => {
-            eprintln!("gdrive-desktop-linuxd: opção desconhecida: {other}\n\n{HELP}");
+            eprintln!("{}: opção desconhecida: {other}\n\n{}", DAEMON, help());
             ExitCode::from(2)
         }
     }
@@ -52,7 +58,7 @@ async fn serve() -> ExitCode {
     let state_dir = Paths::from_env().state_dir;
     let (subscriber, log) = logging::subscriber(&state_dir, gdl_common::time::now_ms());
     if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
-        eprintln!("gdrive-desktop-linuxd: log indisponível: {e}");
+        eprintln!("{}: log indisponível: {e}", DAEMON);
     }
     // `Restart` sobe o serviço de novo aqui mesmo, sem depender do systemd.
     loop {

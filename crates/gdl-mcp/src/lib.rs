@@ -97,7 +97,7 @@ pub async fn handle(tools: &impl Tools, line: &str) -> Option<Value> {
             json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": "gdrive-desktop-linux", "version": env!("CARGO_PKG_VERSION") },
+                "serverInfo": { "name": gdl_common::brand::PACKAGE, "version": env!("CARGO_PKG_VERSION") },
             }),
         ),
         "ping" => success(id, json!({})),

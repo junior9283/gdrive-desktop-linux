@@ -9,13 +9,11 @@ use gdl_common::APP_ID;
 use gdl_common::fs::{remove_file_if_exists, write_atomic};
 use url::Url;
 
-/// Nome do arquivo em `~/.config/autostart`.
-pub const AUTOSTART_FILE: &str = "io.github.junior9283.GDriveDesktopLinux.desktop";
+/// O arquivo em `~/.config/autostart` tem o nome do `.desktop` do pacote.
+use gdl_common::brand::{DESKTOP_FILE as AUTOSTART_FILE, TRAY_PROGRAM};
 
-const AUTOSTART: &str =
-    include_str!("../../../packaging/desktop/io.github.junior9283.GDriveDesktopLinux.desktop");
-
-const TRAY_EXEC: &str = "Exec=/usr/bin/gdrive-desktop-linux-tray";
+/// O `.desktop` do pacote, já com os nomes da variante (o `build.rs` o gera).
+const AUTOSTART: &str = include_str!(concat!(env!("OUT_DIR"), "/autostart.desktop"));
 
 /// Grava ou apaga `<config_home>/autostart/…desktop`, que abre a bandeja de `bin` (e ela, o
 /// serviço) na sessão. Só grava se mudou.
@@ -43,11 +41,11 @@ pub fn remove_autostart(config_home: &Path) -> io::Result<()> {
 fn autostart_body(bin: &Path) -> String {
     let bin = bin.to_string_lossy();
     let exec = if bin.contains(['"', '`', '$', '\\', '%']) {
-        "TryExec=gdrive-desktop-linux-tray\nExec=gdrive-desktop-linux-tray".to_owned()
+        format!("TryExec={TRAY_PROGRAM}\nExec={TRAY_PROGRAM}")
     } else {
-        format!("TryExec={bin}/gdrive-desktop-linux-tray\nExec=\"{bin}/gdrive-desktop-linux-tray\"")
+        format!("TryExec={bin}/{TRAY_PROGRAM}\nExec=\"{bin}/{TRAY_PROGRAM}\"")
     };
-    AUTOSTART.replace(TRAY_EXEC, &exec)
+    AUTOSTART.replace(&format!("Exec=/usr/bin/{TRAY_PROGRAM}"), &exec)
 }
 
 /// Põe (no fim) ou tira a montagem dos "Locais" do KDE (`user-places.xbel`), sem mexer no resto
@@ -214,12 +212,12 @@ mod tests {
         let body = std::fs::read_to_string(&file).unwrap();
         assert!(body.starts_with("[Desktop Entry]\n"), "{body}");
         assert!(
-            body.contains("\nExec=\"/opt/com espaço/bin/gdrive-desktop-linux-tray\"\n"),
+            body.contains(&format!("\nExec=\"/opt/com espaço/bin/{TRAY_PROGRAM}\"\n")),
             "{body}"
         );
         // Sem o programa (desinstalado pelo gerenciador), a sessão ignora a entrada.
         assert!(
-            body.contains("\nTryExec=/opt/com espaço/bin/gdrive-desktop-linux-tray\n"),
+            body.contains(&format!("\nTryExec=/opt/com espaço/bin/{TRAY_PROGRAM}\n")),
             "{body}"
         );
 
@@ -234,7 +232,7 @@ mod tests {
         set_autostart(tmp.path(), Path::new("/opt/a\"b"), true).unwrap();
         let body = std::fs::read_to_string(tmp.path().join("autostart").join(AUTOSTART_FILE));
         assert!(
-            body.unwrap().contains("\nExec=gdrive-desktop-linux-tray\n"),
+            body.unwrap().contains(&format!("\nExec={TRAY_PROGRAM}\n")),
             "procura no PATH"
         );
     }

@@ -39,7 +39,7 @@ struct Tray {
 
 impl ksni::Tray for Tray {
     fn id(&self) -> String {
-        "gdrive-desktop-linux".into()
+        gdl_common::brand::PACKAGE.into()
     }
 
     fn title(&self) -> String {
@@ -341,7 +341,7 @@ async fn run() -> Result<(), Error> {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    gdl_common::crash::install("gdrive-desktop-linux-tray");
+    gdl_common::crash::install(gdl_common::brand::TRAY_PROGRAM);
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();

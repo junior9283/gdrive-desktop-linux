@@ -1775,7 +1775,7 @@ impl Daemon {
         prefs
             .default_mount_point
             .clone()
-            .unwrap_or_else(|| self.config.home.join("Google Drive"))
+            .unwrap_or_else(|| self.config.home.join(gdl_common::brand::MOUNT_DIR))
     }
 
     /// `DefaultMountPoint` vem da política do administrador.

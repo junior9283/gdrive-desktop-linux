@@ -1145,7 +1145,7 @@ fn reply_xattr(reply: ReplyXattr, value: &[u8], size: u32) {
 pub fn mount(fs: DriveFs, at: &Path) -> std::io::Result<BackgroundSession> {
     let mut config = Config::default();
     config.mount_options = vec![
-        MountOption::FSName("gdrive-desktop-linux".into()),
+        MountOption::FSName(gdl_common::brand::PACKAGE.into()),
         MountOption::Subtype("gdrive".into()),
         MountOption::DefaultPermissions,
         MountOption::NoExec,

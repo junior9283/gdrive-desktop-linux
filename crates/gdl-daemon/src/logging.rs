@@ -11,7 +11,7 @@ use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::reload;
 
 /// O nome do arquivo de log dentro de `<state_dir>/logs`.
-pub const LOG_FILE: &str = "gdrive-desktop-linuxd.log";
+use gdl_common::brand::LOG_FILE;
 /// Quanto o registro detalhado fica ligado.
 pub const VERBOSE_FOR_MS: i64 = 24 * 60 * 60 * 1000;
 const MAX_BYTES: u64 = 10 * 1024 * 1024;

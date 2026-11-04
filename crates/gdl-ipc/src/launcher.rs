@@ -8,7 +8,7 @@ use gdl_common::paths::exe_dir;
 use zbus::Connection;
 
 /// O programa da janela.
-pub const UI_PROGRAM: &str = "gdrive-desktop-linux-ui";
+use gdl_common::brand::UI_PROGRAM;
 /// Quanto esperar a janela aberta responder.
 const UI_TIMEOUT: Duration = Duration::from_secs(3);
 

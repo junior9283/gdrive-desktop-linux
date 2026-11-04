@@ -8,20 +8,29 @@ pub mod launcher;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-pub const BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1";
-pub const OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1";
-/// A janela (`gdrive-desktop-linux-ui`), que fica com este nome enquanto está aberta.
-pub const UI_BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1.Ui";
-pub const UI_OBJECT_PATH: &str = "/io/github/junior9283/GDriveDesktopLinux1/Ui";
-/// A bandeja (`gdrive-desktop-linux-tray`), que fica com este nome enquanto está aberta.
-pub const TRAY_BUS_NAME: &str = "io.github.junior9283.GDriveDesktopLinux1.Tray";
+// Os nomes no barramento. Os atributos do zbus abaixo repetem os literais (não aceitam
+// constantes), um par de `cfg_attr` por variante; os testes do serviço, que falam pelo proxy,
+// pegam uma divergência.
+pub use gdl_common::brand::{BUS_NAME, OBJECT_PATH, TRAY_BUS_NAME, UI_BUS_NAME, UI_OBJECT_PATH};
 
 /// A janela: a bandeja e o atalho pedem uma tela por aqui.
-#[zbus::proxy(
-    interface = "io.github.junior9283.GDriveDesktopLinux1.Ui",
-    default_service = "io.github.junior9283.GDriveDesktopLinux1.Ui",
-    default_path = "/io/github/junior9283/GDriveDesktopLinux1/Ui",
-    gen_blocking = false
+#[cfg_attr(
+    not(gerasync),
+    zbus::proxy(
+        interface = "io.github.junior9283.GDriveDesktopLinux1.Ui",
+        default_service = "io.github.junior9283.GDriveDesktopLinux1.Ui",
+        default_path = "/io/github/junior9283/GDriveDesktopLinux1/Ui",
+        gen_blocking = false
+    )
+)]
+#[cfg_attr(
+    gerasync,
+    zbus::proxy(
+        interface = "io.github.junior9283.GeraSync1.Ui",
+        default_service = "io.github.junior9283.GeraSync1.Ui",
+        default_path = "/io/github/junior9283/GeraSync1/Ui",
+        gen_blocking = false
+    )
 )]
 pub trait Ui {
     /// Mostra a janela na tela `screen` (`home`, `onboarding`, `search`, `offline`, `errors`,
@@ -401,7 +410,11 @@ pub struct Pref {
 }
 
 #[derive(Debug, zbus::DBusError)]
-#[zbus(prefix = "io.github.junior9283.GDriveDesktopLinux1.Error")]
+#[cfg_attr(
+    not(gerasync),
+    zbus(prefix = "io.github.junior9283.GDriveDesktopLinux1.Error")
+)]
+#[cfg_attr(gerasync, zbus(prefix = "io.github.junior9283.GeraSync1.Error"))]
 pub enum ServiceError {
     #[zbus(error)]
     ZBus(zbus::Error),
@@ -452,11 +465,23 @@ impl ServiceError {
 
 /// Os mesmos métodos e sinais do objeto do serviço (`gdl_daemon::dbus::Service`): mudou aqui, mude
 /// lá. `account` é o e-mail da conta; vazio, a primeira.
-#[zbus::proxy(
-    interface = "io.github.junior9283.GDriveDesktopLinux1.Service",
-    default_service = "io.github.junior9283.GDriveDesktopLinux1",
-    default_path = "/io/github/junior9283/GDriveDesktopLinux1",
-    gen_blocking = false
+#[cfg_attr(
+    not(gerasync),
+    zbus::proxy(
+        interface = "io.github.junior9283.GDriveDesktopLinux1.Service",
+        default_service = "io.github.junior9283.GDriveDesktopLinux1",
+        default_path = "/io/github/junior9283/GDriveDesktopLinux1",
+        gen_blocking = false
+    )
+)]
+#[cfg_attr(
+    gerasync,
+    zbus::proxy(
+        interface = "io.github.junior9283.GeraSync1.Service",
+        default_service = "io.github.junior9283.GeraSync1",
+        default_path = "/io/github/junior9283/GeraSync1",
+        gen_blocking = false
+    )
 )]
 pub trait Service {
     /// Abre o login no navegador e devolve o endereço; o resultado vem em `LoginFinished`.

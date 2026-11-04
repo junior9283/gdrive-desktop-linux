@@ -1797,6 +1797,7 @@ dependencies = [
 name = "gdl-mcp"
 version = "1.2.3"
 dependencies = [
+ "gdl-common",
  "gdl-ipc",
  "serde_json",
  "tokio",

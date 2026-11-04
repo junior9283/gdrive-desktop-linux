@@ -202,7 +202,7 @@ async fn pick_folder(
 async fn uninstall(purge: bool) -> Result<(), String> {
     let cli = gdl_common::paths::exe_dir()
         .ok_or("sem a pasta dos programas")?
-        .join("gdrive-desktop-linux");
+        .join(gdl_common::brand::PACKAGE);
     let mut command = std::process::Command::new(cli);
     command.args(["uninstall", "--yes"]);
     if purge {
@@ -228,7 +228,7 @@ async fn start(request: &str) -> zbus::Result<Option<(Bridge, Requests)>> {
 }
 
 fn main() -> ExitCode {
-    gdl_common::crash::install("gdrive-desktop-linux-ui");
+    gdl_common::crash::install(gdl_common::brand::UI_PROGRAM);
     // Antes do GTK: vira a classe das janelas (o app_id no Wayland), pela qual a barra de tarefas
     // e a barra de título acham o `.desktop` e o ícone.
     gtk::glib::set_prgname(Some(gdl_common::APP_ID));

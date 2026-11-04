@@ -2323,9 +2323,14 @@ impl Daemon {
         mode: &str,
         dir: &str,
     ) -> Result<(), ServiceError> {
-        let (engine, email, shutdown) = self
+        let (engine, email, shutdown, remount) = self
             .with_account(account, |a| {
-                (a.engine.clone(), a.email.clone(), a.shutdown.clone())
+                (
+                    a.engine.clone(),
+                    a.email.clone(),
+                    a.shutdown.clone(),
+                    (a.access.clone(), a.beside),
+                )
             })
             .await?;
         match mode {
@@ -2335,12 +2340,14 @@ impl Daemon {
             }
             "discard" => self.sign_out(&email).await,
             "move" if !dir.is_empty() => {
-                let (copier, dir) = (engine.clone(), PathBuf::from(dir));
-                tokio::task::spawn_blocking(move || copy_pending(&copier, &dir))
+                // Destino que não aceita arquivos recusa antes de desmontar a conta.
+                let dir = PathBuf::from(dir);
+                let probe = dir.clone();
+                tokio::task::spawn_blocking(move || accepts_files(&probe))
                     .await
                     .map_err(failed)?
                     .map_err(failed)?;
-                self.sign_out(&email).await
+                self.sign_out_copying(&email, dir, remount).await
             }
             "finish" => {
                 engine.resume();
@@ -2447,9 +2454,58 @@ impl Daemon {
             .remove_account(email)
             .await
             .ok_or_else(|| self.not_logged_in())?;
+        self.forget_account(email, engine, &mount_point).await
+    }
+
+    /// Como `sign_out`, copiando antes para `dir` os envios pendentes e as cópias guardadas. Copia
+    /// com a conta já desmontada e o motor parado, para nada mudar depois da cópia; se ela falha,
+    /// a conta volta a ser montada (`remount`: o acesso e se ficava ao lado da preferida).
+    async fn sign_out_copying(
+        self: &Arc<Self>,
+        email: &str,
+        dir: PathBuf,
+        (access, beside): (Arc<AccessTokens>, bool),
+    ) -> Result<(), ServiceError> {
+        let _reopening = self.reopening.lock().await;
+        let (engine, mount_point) = self
+            .remove_account(email)
+            .await
+            .ok_or_else(|| self.not_logged_in())?;
+        let copier = engine.clone();
+        let copied = tokio::task::spawn_blocking(move || copy_pending(&copier, &dir))
+            .await
+            .map_err(failed)
+            .and_then(|r| r.map_err(failed));
+        let Err(e) = copied else {
+            return self.forget_account(email, engine, &mount_point).await;
+        };
+        drop(engine);
+        match self.mount_account(email, access, beside).await {
+            Ok((mounted, moved)) => self.register_account(mounted, moved).await,
+            // Como na volta das contas: continua no arquivo e fica para reconectar.
+            Err(m) => {
+                tracing::warn!(erro = %m, conta = %email, "não deu para montar a conta de novo");
+                self.not_started().push(SavedAccount {
+                    email: email.into(),
+                    beside,
+                });
+                self.emit_status_changed().await;
+            }
+        }
+        Err(e)
+    }
+
+    /// O fim da saída, com a conta já fora da lista e desmontada: grava a lista, tira a conta dos
+    /// Locais, esquece os tokens e apaga os dados locais.
+    async fn forget_account(
+        &self,
+        email: &str,
+        engine: Arc<Engine>,
+        mount_point: &Path,
+    ) -> Result<(), ServiceError> {
         self.save_accounts().await;
         let places = self.config.paths.data_home.join("user-places.xbel");
-        if let Err(e) = desktop::set_sidebar_place(&places, &mount_point, "", false) {
+        if let Err(e) = desktop::set_sidebar_place(&places, mount_point, "", false) {
             tracing::warn!(erro = %e, "não deu para tirar a conta dos Locais do Dolphin");
         }
         // Os dados locais saem mesmo com o chaveiro fora do ar: a conta já não está na lista, e
@@ -2706,6 +2762,13 @@ fn remove_all_but(dir: &Path, keep: &[PathBuf]) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Cria `dir` se preciso e confere que dá para criar arquivos nela.
+fn accepts_files(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let (probe, _) = create_numbered(dir, ".gdl-teste", "")?;
+    std::fs::remove_file(probe)
 }
 
 /// Copia o conteúdo local dos arquivos pendentes e as cópias guardadas para `dir`, sem

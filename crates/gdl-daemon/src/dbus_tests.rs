@@ -396,6 +396,97 @@ async fn logout_never_deletes_lost_and_found_silently() {
     assert_eq!(copied, 1, "o Lost and Found vai junto para a pasta");
 }
 
+/// Bug: o logout com cópia copiava com a pasta ainda montada; o que o usuário salvasse durante
+/// a cópia virava pendência depois da foto e era apagado junto com o cache, sem aviso.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_move_never_loses_a_save_made_during_the_copy() {
+    let h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "contrato.txt", b"v1".to_vec());
+    h.logged_in().await;
+    // Um FIFO no Lost and Found segura a cópia (abrir para leitura espera quem escreva).
+    let engine = h.daemon.engine().await.unwrap();
+    let kept = engine.lost_and_found().dir().to_path_buf();
+    drop(engine);
+    std::fs::create_dir_all(&kept).unwrap();
+    let fifo = kept.join("segura.txt");
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let copies = h.home.join("Copias");
+    let (daemon, dir) = (h.daemon.clone(), copies.clone());
+    let logout =
+        tokio::spawn(async move { daemon.logout("", "move", dir.to_str().unwrap()).await });
+    wait_until("cópia começou", || copies.exists()).await;
+    // Dá tempo de a cópia passar pelos pendentes e parar no FIFO: salvar antes disso não
+    // provaria nada (o salvo entraria na cópia mesmo com a pasta montada).
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let path = h.drive().join("contrato.txt");
+    let save = path.clone();
+    let saved = blocking(move || std::fs::write(save, b"salvo durante a copia").is_ok()).await;
+    blocking(move || std::fs::write(fifo, b"x").unwrap()).await;
+    tokio::time::timeout(std::time::Duration::from_secs(10), logout)
+        .await
+        .expect("o logout terminou")
+        .unwrap()
+        .unwrap();
+
+    let in_copies = std::fs::read_dir(&copies)
+        .unwrap()
+        .flatten()
+        .any(|e| std::fs::read(e.path()).unwrap() == b"salvo durante a copia");
+    let on_disk = std::fs::read(&path).is_ok_and(|c| c == b"salvo durante a copia");
+    assert!(
+        !saved || in_copies || on_disk,
+        "o que foi salvo durante a cópia sumiu"
+    );
+}
+
+/// Se a cópia não dá certo, a conta continua conectada e montada, com tudo no lugar: a pasta sem
+/// permissão recusa antes de desmontar; a falha no meio da cópia monta a conta de novo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn logout_move_that_fails_keeps_the_account() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |path: &std::path::Path, mode| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let h = Harness::new().await;
+    h.fake
+        .add_file(&h.fake.root_id(), "contrato.txt", b"v1".to_vec());
+    h.logged_in().await;
+    let src = h.home.join("edicao.txt");
+    std::fs::write(&src, b"unica copia").unwrap();
+    let engine = h.daemon.engine().await.unwrap();
+    let saved = engine
+        .lost_and_found()
+        .preserve(&src, "edicao.txt")
+        .unwrap();
+    drop(engine);
+    let copies = h.home.join("Copias");
+    std::fs::create_dir_all(&copies).unwrap();
+
+    mode(&copies, 0o555);
+    let refused = h.proxy.logout("", "move", copies.to_str().unwrap()).await;
+    mode(&copies, 0o755);
+    mode(&saved, 0o000);
+    let midway = h.proxy.logout("", "move", copies.to_str().unwrap()).await;
+    mode(&saved, 0o644);
+
+    for err in [refused.unwrap_err(), midway.unwrap_err()] {
+        assert!(matches!(err, ServiceError::Failed(_)), "{err}");
+    }
+    assert_eq!(h.proxy.status("").await.unwrap().account, h.fake.email());
+    assert_eq!(std::fs::read(&saved).unwrap(), b"unica copia");
+    let path = h.drive().join("contrato.txt");
+    assert_eq!(blocking(move || std::fs::read(path).unwrap()).await, b"v1");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn status_reports_state_and_syncing_count() {
     let h = Harness::new().await;

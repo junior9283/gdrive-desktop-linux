@@ -19,6 +19,10 @@ fecha as pendências dela e a 1.2 tira as esperas sem fim da desmontagem, da tro
 pausa os envios diante de arquivos que parecem cifrados por um vírus, recupera as edições se os
 dados locais se danificarem e tem um servidor MCP para assistentes de IA.
 
+No Dolphin, o menu do botão direito e as nuvens de estado vêm de plugins que agora também são
+instalados pelo `scripts/install-dev.sh` (instalação em `~/.local`), e não só pelos pacotes: o menu
+não some mais se você trocar o pacote pela instalação do código-fonte.
+
 O app roda inteiro no seu computador e conversa com as APIs do Google, usando um Client ID que
 você mesmo cria no seu projeto do Google Cloud (e, uma vez por dia, pergunta ao GitHub qual é a
 última versão do app). O projeto não tem servidores e não recebe nenhum

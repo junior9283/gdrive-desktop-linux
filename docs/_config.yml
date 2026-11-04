@@ -8,4 +8,5 @@ lang: pt-BR
 exclude:
   - superpowers
   - testes
+  - verificacao-google
   - resumo-sessao-*.md

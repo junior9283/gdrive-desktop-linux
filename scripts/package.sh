@@ -31,7 +31,8 @@ case "$flavor" in
   default) rename() { cat; } ; name=gdrive-desktop-linux cargo=cargo target=target/release ;;
   gerasync)
     rename() { sed -f "$repo/packaging/gerasync/rename.sed"; }
-    name=gerasync cargo="sh $repo/scripts/cargo-gerasync.sh" target=target/gerasync/release ;;
+    # Relativo ao $repo (o build roda dentro de cd "$repo"): o caminho dele pode ter espaços.
+    name=gerasync cargo="sh scripts/cargo-gerasync.sh" target=target/gerasync/release ;;
   *) echo "variante desconhecida: $flavor" >&2; exit 2 ;;
 esac
 mkdir -p "$1"

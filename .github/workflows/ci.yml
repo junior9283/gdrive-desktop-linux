@@ -12,8 +12,21 @@ env:
     libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev desktop-file-utils
 
 jobs:
+  # As duas variantes: a de sempre e o GeraSync (--cfg gerasync), este com o Client ID de mentira
+  # (os segredos de verdade só existem no release).
   check:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: default
+            cargo: cargo
+          - flavor: gerasync
+            cargo: sh scripts/cargo-gerasync.sh
+            fake: "1"
+    env:
+      GERASYNC_ALLOW_FAKE_CREDS: ${{ matrix.fake }}
     steps:
       - uses: actions/checkout@v4
       - name: Dependências do sistema
@@ -24,11 +37,12 @@ jobs:
       # Lê a versão e os componentes do rust-toolchain.toml (fonte única) e já faz cache.
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Formatação
+        if: matrix.flavor == 'default'
         run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: ${{ matrix.cargo }} clippy --workspace --all-targets -- -D warnings
       - name: Testes
-        run: cargo test --workspace
+        run: ${{ matrix.cargo }} test --workspace
 
   # A lógica das telas: só o Node, sem esperar a compilação.
   js:
@@ -71,5 +85,7 @@ jobs:
         run: integrations/debian-deps.sh
       - name: Dolphin
         run: integrations/dolphin/build.sh dolphin
+      - name: Dolphin (GeraSync)
+        run: integrations/dolphin/build.sh --flavor gerasync dolphin
       - name: Nautilus, Nemo, Caja e Thunar
         run: integrations/gtk/tests/run.sh

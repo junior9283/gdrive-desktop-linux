@@ -56,7 +56,8 @@ programs="gdrive-desktop-linuxd gdrive-desktop-linux gdrive-desktop-linux-tray g
 
 if [ -z "$from" ] && ! $dry; then
   cargo=cargo
-  [ "$flavor" = default ] || cargo="sh $repo/scripts/cargo-gerasync.sh"
+  # Relativo ao $repo (o build roda dentro de cd "$repo"): o caminho dele pode ter espaços.
+  [ "$flavor" = default ] || cargo="sh scripts/cargo-gerasync.sh"
   (cd "$repo" && $cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui -p gdl-mcp --bins)
 fi
 target=target/release

@@ -1,7 +1,9 @@
 name: Release
 
-# Uma tag vX.Y.Z gera os instaladores, testa cada um na sua distribuição e publica o release com as
-# notas do CHANGELOG. Rodado à mão (workflow_dispatch), só gera e testa, sem publicar.
+# Uma tag vX.Y.Z gera os instaladores das duas variantes (gdrive-desktop-linux, com o Client ID de
+# cada usuário, e GeraSync, com o Client ID oficial dos segredos do repositório), testa cada um na
+# sua distribuição e publica o release com as notas do CHANGELOG. Rodado à mão (workflow_dispatch),
+# só gera e testa, sem publicar.
 on:
   push:
     tags: ["v*"]
@@ -21,10 +23,20 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
     steps:
       - uses: actions/checkout@v4
+      # Antes de qualquer compilação: sem o Client ID oficial, ou com o de mentira, o GeraSync não
+      # loga.
+      - name: Os segredos do GeraSync
+        run: sh scripts/check-gerasync-secrets.sh
+        env:
+          GERASYNC_CLIENT_ID: ${{ secrets.GERASYNC_CLIENT_ID }}
+          GERASYNC_CLIENT_SECRET: ${{ secrets.GERASYNC_CLIENT_SECRET }}
       - name: Dependências
         run: integrations/debian-deps.sh
+      # As duas variantes na mesma pasta: os .so têm nomes diferentes.
       - name: Compila e testa
-        run: integrations/dolphin/build.sh dolphin
+        run: |
+          integrations/dolphin/build.sh dolphin
+          integrations/dolphin/build.sh --flavor gerasync dolphin
       - uses: actions/upload-artifact@v4
         with:
           name: dolphin
@@ -35,6 +47,10 @@ jobs:
     # A glibc mais antiga que o Tauri 2 aceita: os programas rodam do Ubuntu 22.04 e do Debian 12
     # em diante, e nas distribuições mais novas.
     runs-on: ubuntu-22.04
+    # O Client ID oficial do GeraSync: o build.rs do gdl-daemon o embute (nunca vai para log).
+    env:
+      GERASYNC_CLIENT_ID: ${{ secrets.GERASYNC_CLIENT_ID }}
+      GERASYNC_CLIENT_SECRET: ${{ secrets.GERASYNC_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       # Antes de compilar: uma tag errada falha em segundos.
@@ -60,59 +76,65 @@ jobs:
           name: dolphin
           path: dolphin
       - name: Instaladores
-        run: scripts/package.sh --dolphin dolphin dist
+        run: |
+          scripts/package.sh --dolphin dolphin dist
+          scripts/package.sh --flavor gerasync --dolphin dolphin dist
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  # Cada pacote instalado do zero, com as dependências vindas da própria distribuição.
+  # Cada pacote de cada variante instalado do zero, com as dependências vindas da própria
+  # distribuição. $NAME é o nome da variante (dos pacotes e dos programas).
   install:
     needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
+        package: [gdrive-desktop-linux, gerasync]
+        target:
           - image: ubuntu:22.04
-            install: apt-get update && apt-get install -y ./dist/*.deb
+            install: apt-get update && apt-get install -y ./dist/${NAME}_*.deb
           - image: debian:12
-            install: apt-get update && apt-get install -y ./dist/*.deb
+            install: apt-get update && apt-get install -y ./dist/${NAME}_*.deb
           # Com o KIO, para conferir que o plugin do Dolphin acha as bibliotecas dele.
           - image: fedora:latest
-            install: dnf install -y ./dist/*.rpm kf6-kio-widgets-libs
+            install: dnf install -y ./dist/${NAME}-[0-9]*.rpm kf6-kio-widgets-libs
             plugins: /usr/lib64/qt6/plugins/kf6
           - image: opensuse/tumbleweed
-            install: zypper --non-interactive install --allow-unsigned-rpm ./dist/*.rpm
+            install: zypper --non-interactive install --allow-unsigned-rpm ./dist/${NAME}-[0-9]*.rpm
           - image: archlinux:latest
-            install: pacman -Syu --noconfirm kio && pacman -U --noconfirm ./dist/*.pkg.tar.zst
+            install: pacman -Syu --noconfirm kio && pacman -U --noconfirm ./dist/${NAME}-[0-9]*.pkg.tar.zst
             plugins: /usr/lib/qt6/plugins/kf6
           # O .tar.gz não traz as dependências: elas vêm do sistema, como diz o README.
           - image: ubuntu:22.04
             install: >-
               apt-get update && apt-get install -y fuse3 libwebkit2gtk-4.1-0 &&
-              tar -xzf dist/*.tar.gz && sh gdrive-desktop-linux-*/install.sh --prefix /usr/local --no-activate
-    container: ${{ matrix.image }}
+              tar -xzf dist/${NAME}-[0-9]*.tar.gz && sh ${NAME}-[0-9]*/install.sh --prefix /usr/local --no-activate
+    container: ${{ matrix.target.image }}
     env:
       DEBIAN_FRONTEND: noninteractive
+      NAME: ${{ matrix.package }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
       - name: Instala
-        run: ${{ matrix.install }}
+        run: ${{ matrix.target.install }}
       - name: Os programas abrem
         run: |
-          gdrive-desktop-linux --version
+          "$NAME" --version
           # A janela carrega as bibliotecas dela (sem tela, só confere que nenhuma falta).
-          ! ldd "$(command -v gdrive-desktop-linux-ui)" | grep 'not found'
+          ! ldd "$(command -v "$NAME-ui")" | grep 'not found'
       - name: Os plugins do Dolphin carregam as bibliotecas deles
-        if: matrix.plugins
+        if: matrix.target.plugins
         run: |
-          for plugin in kfileitemaction/gdrive_desktop_linux_menu overlayicon/gdrive_desktop_linux_overlay; do
-            test -f "${{ matrix.plugins }}/$plugin.so"
-            ! ldd "${{ matrix.plugins }}/$plugin.so" | grep 'not found'
+          prefix=$(echo "$NAME" | tr - _)
+          for plugin in "kfileitemaction/${prefix}_menu" "overlayicon/${prefix}_overlay"; do
+            test -f "${{ matrix.target.plugins }}/$plugin.so"
+            ! ldd "${{ matrix.target.plugins }}/$plugin.so" | grep 'not found'
           done
 
   publish:
@@ -135,4 +157,5 @@ jobs:
           # As notas: a seção da versão no CHANGELOG, sem o título.
           awk -v head="## [$version]" 'index($0, head) == 1 { on = 1; next } /^## \[/ { on = 0 } on' \
             CHANGELOG.md > notes.md
+          printf '\n%s\n' "Duas variantes: gerasync-*: instale e entre, sem criar Client ID; gdrive-desktop-linux-*: use o seu próprio Client ID." >> notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md

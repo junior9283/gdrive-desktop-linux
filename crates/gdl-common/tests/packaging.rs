@@ -668,3 +668,47 @@ fn gerasync_icons_have_their_sizes() {
         assert_eq!(png_size(&repo().join(window)), (256, 256), "{window}");
     }
 }
+
+/// O release só monta o GeraSync com o Client ID oficial: sem os segredos, com valores de mentira
+/// ou com a permissão das credenciais falsas, para antes de compilar e sem mostrar os valores.
+#[test]
+fn release_requires_real_gerasync_secrets() {
+    let check = |vars: &[(&str, &str)]| {
+        Command::new("sh")
+            .arg(repo().join("scripts/check-gerasync-secrets.sh"))
+            .env_remove("GERASYNC_CLIENT_ID")
+            .env_remove("GERASYNC_CLIENT_SECRET")
+            .env_remove("GERASYNC_ALLOW_FAKE_CREDS")
+            .envs(vars.iter().copied())
+            .output()
+            .unwrap()
+    };
+    let id = ("GERASYNC_CLIENT_ID", "123-abc.apps.googleusercontent.com");
+    let secret = ("GERASYNC_CLIENT_SECRET", "GOCSPX-segredo");
+    // Os de mentira são os que o build.rs embute no CI.
+    let (fake_id, fake_secret) = ("gerasync-fake.apps.googleusercontent.com", "fake-secret");
+    let build = std::fs::read_to_string(repo().join("crates/gdl-daemon/build.rs")).unwrap();
+    assert!(
+        [fake_id, fake_secret]
+            .iter()
+            .all(|fake| build.contains(&format!("\"{fake}\"")))
+    );
+
+    assert!(check(&[id, secret]).status.success());
+    for vars in [
+        vec![],
+        vec![id],
+        vec![("GERASYNC_CLIENT_ID", ""), secret],
+        vec![("GERASYNC_CLIENT_ID", fake_id), secret],
+        vec![id, ("GERASYNC_CLIENT_SECRET", fake_secret)],
+        vec![id, secret, ("GERASYNC_ALLOW_FAKE_CREDS", "1")],
+    ] {
+        let out = check(&vars);
+        assert!(!out.status.success(), "{vars:?}");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !said.contains("GOCSPX") && !said.contains("123-abc"),
+            "{said}"
+        );
+    }
+}

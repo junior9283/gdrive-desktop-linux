@@ -4,8 +4,12 @@
 # dos Documentos Google), os tipos dos ponteiros, os ícones e o menu do botão direito nos
 # gerenciadores de arquivos GTK e os plugins do Dolphin (menu e emblemas).
 #
-#   scripts/install-dev.sh [--prefix DIR] [--destdir DIR] [--from DIR] [--dry-run] [--no-activate]
-#                          [--dolphin DIR | --no-dolphin]
+#   scripts/install-dev.sh [--flavor default|gerasync] [--prefix DIR] [--destdir DIR] [--from DIR]
+#                          [--dry-run] [--no-activate] [--dolphin DIR | --no-dolphin]
+#
+# --flavor gerasync instala o GeraSync (o Client ID embutido no build): os mesmos arquivos, com os
+# nomes e o conteúdo passados pela tabela packaging/gerasync/rename.sed, e o ícone dele. As duas
+# variantes não dividem nenhum arquivo e podem ficar instaladas juntas.
 #
 # Os plugins do Dolphin vão em <prefixo>/lib/qt6/plugins, e o Qt só olha ali se o QT_PLUGIN_PATH
 # disser; por isso o instalador grava um arquivo em ~/.config/environment.d (vale na próxima
@@ -33,8 +37,11 @@ while [ $# -gt 0 ]; do
     *) echo "argumento desconhecido: $1" >&2; exit 2 ;;
   esac
 done
+table="$repo/packaging/gerasync/rename.sed"
+# rename: o texto da entrada como fica na variante (no GeraSync, passado pela tabela).
 case "$flavor" in
-  default) ;;
+  default) rename() { cat; } ; package=gdrive-desktop-linux app_icons="$repo/assets/icons" ;;
+  gerasync) rename() { sed -f "$table"; } ; package=gerasync app_icons="$repo/assets/gerasync/icons" ;;
   *) echo "variante desconhecida: $flavor" >&2; exit 2 ;;
 esac
 # O caminho vai entre aspas no Exec do systemd, do D-Bus e do .desktop, onde " \ ` $ % não cabem
@@ -48,43 +55,59 @@ bin="$prefix/bin" share="$prefix/share"
 programs="gdrive-desktop-linuxd gdrive-desktop-linux gdrive-desktop-linux-tray gdrive-desktop-linux-ui gdrive-desktop-linux-mcp"
 
 if [ -z "$from" ] && ! $dry; then
-  (cd "$repo" && cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui -p gdl-mcp --bins)
+  cargo=cargo
+  [ "$flavor" = default ] || cargo="sh $repo/scripts/cargo-gerasync.sh"
+  (cd "$repo" && $cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui -p gdl-mcp --bins)
 fi
-from=${from:-$repo/target/release}
+target=target/release
+[ "$flavor" = default ] || target=target/gerasync/release
+from=${from:-$repo/$target}
 
-# install_as <modo> <origem> <destino>: copia como está.
+# named <caminho>: o caminho instalado; o que vem depois do prefixo passa pela variante (o
+# prefixo pode ter qualquer nome).
+named() {
+  printf '%s/%s\n' "$prefix" "$(printf '%s\n' "${1#"$prefix/"}" | rename)"
+}
+
 # O que foi instalado, um caminho por linha: a lista que a desinstalação apaga.
 installed=""
 
+# install_as <modo> <origem> <destino>: copia como está (programas e PNG), no caminho da variante.
 install_as() {
-  echo "instala $destdir$3"
-  installed="$installed$3
+  to=$(named "$3")
+  echo "instala $destdir$to"
+  installed="$installed$to
 "
-  $dry || install -Dm"$1" "$2" "$destdir$3"
+  $dry || install -Dm"$1" "$2" "$destdir$to"
 }
 
 # remove <arquivo>: tira um arquivo de uma instalação anterior, se houver.
 remove() {
+  set -- "$(named "$1")"
   [ -e "$destdir$1" ] || return 0
   echo "remove $destdir$1"
   $dry || rm -f "$destdir$1"
 }
 
-# put <origem> <destino>: copia um arquivo com Exec, trocando /usr/bin/<programa> pelo programa
-# instalado, entre aspas.
+# put <origem> <destino>: copia um arquivo de texto com o conteúdo da variante, trocando
+# /usr/bin/<programa> (no Exec) pelo programa instalado, entre aspas.
 put() {
-  echo "instala $destdir$2"
-  installed="$installed$2
+  to=$(named "$2")
+  echo "instala $destdir$to"
+  installed="$installed$to
 "
   $dry && return
-  mkdir -p "$(dirname "$destdir$2")"
-  sed "s|/usr/bin/\([a-z-]*\)|\"$bin/\1\"|g" "$1" > "$destdir$2.tmp"
-  chmod 644 "$destdir$2.tmp"
-  mv "$destdir$2.tmp" "$destdir$2"
+  mkdir -p "$(dirname "$destdir$to")"
+  rename < "$1" | sed "s|/usr/bin/\([a-z-]*\)|\"$bin/\1\"|g" > "$destdir$to.tmp"
+  chmod 644 "$destdir$to.tmp"
+  mv "$destdir$to.tmp" "$destdir$to"
 }
 
+# Os programas: os do build têm os nomes de sempre; os do .tar.gz, os da variante.
 for program in $programs; do
-  install_as 755 "$from/$program" "$bin/$program"
+  source="$from/$(echo "$program" | rename)"
+  [ -e "$source" ] || source="$from/$program"
+  install_as 755 "$source" "$bin/$program"
 done
 put "$repo/packaging/systemd/gdrive-desktop-linuxd.service" "$share/systemd/user/gdrive-desktop-linuxd.service"
 for file in "$repo"/packaging/dbus/*.service; do
@@ -93,25 +116,25 @@ done
 for file in "$repo"/packaging/desktop/*.desktop; do
   put "$file" "$share/applications/$(basename "$file")"
 done
-install_as 644 "$repo/packaging/mime/gdrive-desktop-linux.xml" "$share/mime/packages/gdrive-desktop-linux.xml"
+put "$repo/packaging/mime/gdrive-desktop-linux.xml" "$share/mime/packages/gdrive-desktop-linux.xml"
 # O ícone do app, nos tamanhos do tema (gerados por scripts/update-app-icon.py). O SVG de uma
 # instalação anterior sai: o tema o preferiria aos PNG.
-for file in "$repo"/assets/icons/hicolor/*/apps/*.png; do
-  install_as 644 "$file" "$share/icons/hicolor/${file#"$repo/assets/icons/hicolor/"}"
+for file in "$app_icons"/hicolor/*/apps/*.png; do
+  install_as 644 "$file" "$share/icons/hicolor/${file#"$app_icons/hicolor/"}"
 done
 remove "$share/icons/hicolor/scalable/apps/io.github.junior9283.GDriveDesktopLinux.svg"
 # Os emblemas de estado do Dolphin, no tema do sistema (é nele que o Dolphin procura).
 for file in "$repo"/assets/icons/hicolor/scalable/emblems/*.svg; do
-  install_as 644 "$file" "$share/icons/hicolor/scalable/emblems/$(basename "$file")"
+  put "$file" "$share/icons/hicolor/scalable/emblems/$(basename "$file")"
 done
 # Os ícones da bandeja, no tema próprio que ela procura ao lado dos programas.
 for file in "$repo"/assets/icons/hicolor/scalable/status/*.svg; do
-  install_as 644 "$file" "$share/gdrive-desktop-linux/icons/hicolor/scalable/status/$(basename "$file")"
+  put "$file" "$share/gdrive-desktop-linux/icons/hicolor/scalable/status/$(basename "$file")"
 done
 # O menu do botão direito no Nautilus, no Nemo, no Caja e no Thunar: a mesma extensão na pasta de
 # cada um (só carrega onde o pacote de Python do gerenciador estiver instalado).
 for manager in nautilus nemo caja thunarx; do
-  install_as 644 "$repo/integrations/gtk/gdrive_desktop_linux_menu.py" \
+  put "$repo/integrations/gtk/gdrive_desktop_linux_menu.py" \
     "$share/$manager-python/extensions/gdrive_desktop_linux_menu.py"
 done
 
@@ -122,7 +145,7 @@ if [ -z "$destdir" ] && ! $no_dolphin; then
     [ -f "$repo/integrations/dolphin/build.sh" ]; then
     built=$(mktemp -d)
     trap 'rm -rf "$built"' EXIT
-    if sh "$repo/integrations/dolphin/build.sh" "$built" >&2; then
+    if sh "$repo/integrations/dolphin/build.sh" --flavor "$flavor" "$built" >&2; then
       dolphin=$built
     else
       echo "aviso: não consegui compilar os plugins do Dolphin; o menu e os emblemas dele ficam de fora" >&2
@@ -130,9 +153,10 @@ if [ -z "$destdir" ] && ! $no_dolphin; then
   fi
   if [ -n "$dolphin" ]; then
     for plugin in kfileitemaction/gdrive_desktop_linux_menu overlayicon/gdrive_desktop_linux_overlay; do
-      install_as 755 "$dolphin/${plugin##*/}.so" "$prefix/lib/qt6/plugins/kf6/$plugin.so"
+      # O build.sh da variante já dá aos .so os nomes dela.
+      install_as 755 "$dolphin/$(printf '%s\n' "${plugin##*/}" | rename).so" "$prefix/lib/qt6/plugins/kf6/$plugin.so"
     done
-    conf="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/50-gdrive-desktop-linux.conf"
+    conf="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/50-$package.conf"
     echo "instala $conf"
     installed="$installed$conf
 "
@@ -146,7 +170,7 @@ fi
 
 # Os pacotes trazem um marcador do formato no lugar da lista (o gerenciador sabe o que é dele).
 if ! $dry && [ -z "$destdir" ]; then
-  printf '%s' "$installed" > "$share/gdrive-desktop-linux/installed-files"
+  printf '%s' "$installed" > "$share/$package/installed-files"
 fi
 
 if $dry || ! $activate; then exit 0; fi
@@ -158,4 +182,4 @@ systemctl --user daemon-reload || true
 # Sem isto, o barramento da sessão só conhece a ativação nova na próxima sessão.
 busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig >/dev/null ||
   echo "aviso: o D-Bus não releu a configuração; se a janela disser que o serviço não responde, saia e entre de novo na sessão" >&2
-echo "Pronto. Abra \"Google Drive\" no menu de aplicativos (ou rode $bin/gdrive-desktop-linux-tray)."
+echo "Pronto. Abra \"Google Drive\" no menu de aplicativos (ou rode $bin/gdrive-desktop-linux-tray)." | rename

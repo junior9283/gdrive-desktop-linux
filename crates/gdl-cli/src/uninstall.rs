@@ -54,7 +54,9 @@ pub fn package_removal(kind: &str) -> Option<Vec<&'static str>> {
 
 /// O arquivo que o `install-dev.sh` grava em `environment.d` para o Qt achar os plugins do
 /// Dolphin: a única coisa instalada fora do prefixo.
-const QT_ENV_FILE: &str = "environment.d/50-gdrive-desktop-linux.conf";
+fn qt_env_file() -> PathBuf {
+    Path::new("environment.d").join(format!("50-{PACKAGE}.conf"))
+}
 
 /// Apaga os arquivos da lista e a própria lista, e as pastas que ficarem vazias dentro da pasta
 /// do app. Só o que está dentro de `prefix` (e o arquivo do Qt em `environment.d`): uma lista
@@ -64,7 +66,7 @@ pub fn remove_listed(prefix: &Path, manifest: &Path) -> io::Result<()> {
     for line in std::fs::read_to_string(manifest)?.lines() {
         let file = Path::new(line);
         let inside = file.is_absolute()
-            && (file.starts_with(prefix) || file.ends_with(QT_ENV_FILE))
+            && (file.starts_with(prefix) || file.ends_with(qt_env_file()))
             && !file.components().any(|c| c == Component::ParentDir);
         if !inside {
             continue;
@@ -176,7 +178,7 @@ mod tests {
         }
         let manifest = own_share(&prefix).join("installed-files");
         let escape = prefix.join("bin/../../fora.txt");
-        let qt_env = dir.path().join(".config").join(QT_ENV_FILE);
+        let qt_env = dir.path().join(".config").join(qt_env_file());
         let other_conf = dir.path().join(".config/environment.d/90-outro.conf");
         for file in [&qt_env, &other_conf] {
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();

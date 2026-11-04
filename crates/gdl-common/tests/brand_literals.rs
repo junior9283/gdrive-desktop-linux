@@ -43,6 +43,10 @@ const APP_NAME_FILES: &[&str] = &[
     "cosmic.rs",
 ];
 
+/// O filtro do registro pelo nome dos crates dos programas (`gdrive_desktop_linuxd`…), que é o
+/// mesmo nas duas variantes: não é a identidade do app.
+const CRATE_TARGET: &str = "with_target(\"gdrive_desktop_linux\"";
+
 #[test]
 fn no_identity_literals_outside_brand() {
     let mut offenders = Vec::new();
@@ -66,8 +70,17 @@ fn no_identity_literals_outside_brand() {
             if line.trim_start().starts_with("//") {
                 continue;
             }
-            let old_name = line.contains("GDriveDesktopLinux")
-                || line.contains("\"gdrive-desktop-linux")
+            let code = line
+                // O repositório (páginas e API do GitHub) é o mesmo nas duas variantes.
+                .replace("junior9283/gdrive-desktop-linux", "")
+                .replace(CRATE_TARGET, "");
+            let old_name = [
+                "GDriveDesktopLinux",
+                "gdrive-desktop-linux",
+                "gdrive_desktop_linux",
+            ]
+            .iter()
+            .any(|old| code.contains(old))
                 || (APP_NAME_FILES.contains(&name.as_ref()) && line.contains("\"Google Drive"));
             if old_name {
                 offenders.push(format!(

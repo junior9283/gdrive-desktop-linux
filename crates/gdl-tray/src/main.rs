@@ -91,7 +91,11 @@ impl ksni::Tray for Tray {
 /// Onde estão os ícones `gdl-*` (estrutura de tema): os instalados ao lado do programa ou, num
 /// build de desenvolvimento, os do repositório.
 fn theme_path() -> String {
-    let installed = exe_dir().map(|dir| dir.join("../share/gdrive-desktop-linux/icons"));
+    let installed = exe_dir().map(|dir| {
+        dir.join("../share")
+            .join(gdl_common::brand::PACKAGE)
+            .join("icons")
+    });
     #[cfg(debug_assertions)]
     let installed = installed.into_iter().chain([PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),

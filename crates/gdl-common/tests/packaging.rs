@@ -331,8 +331,8 @@ fn refuses_a_prefix_that_no_exec_line_can_hold() {
     }
 }
 
-#[test]
-fn desktop_files_are_valid() {
+/// Passa o `desktop-file-validate` em cada `.desktop` de `dir` (pulado sem o programa).
+fn validate_desktop_dir(dir: &Path) {
     if Command::new("desktop-file-validate")
         .arg("--help")
         .output()
@@ -341,7 +341,7 @@ fn desktop_files_are_valid() {
         eprintln!("pulado: falta o desktop-file-validate");
         return;
     }
-    for entry in std::fs::read_dir(repo().join("packaging/desktop")).unwrap() {
+    for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         let out = Command::new("desktop-file-validate")
             .arg(&path)
@@ -350,6 +350,11 @@ fn desktop_files_are_valid() {
         let report = String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success(), "{}: {report}", path.display());
     }
+}
+
+#[test]
+fn desktop_files_are_valid() {
+    validate_desktop_dir(&repo().join("packaging/desktop"));
 }
 
 /// O que `scripts/stage-manifest.sh` lista para a variante (`default` ou `gerasync`).
@@ -375,5 +380,264 @@ fn default_stage_matches_golden() {
         stage_manifest("default"),
         golden,
         "a instalação da variante atual mudou"
+    );
+}
+
+/// Os três nomes da variante atual que não podem aparecer no GeraSync (fora o endereço do
+/// repositório, que é o mesmo nas duas).
+const OLD_NAMES: [&str; 3] = [
+    "GDriveDesktopLinux",
+    "gdrive-desktop-linux",
+    "gdrive_desktop_linux",
+];
+const REPO_URL: &str = "github.com/junior9283/gdrive-desktop-linux";
+
+/// A instalação do GeraSync em `<dir>/stage/usr`, como nos pacotes, com os programas de `bins`.
+fn gerasync_stage(dir: &Path, bins: &Path) -> PathBuf {
+    let stage = dir.join("stage");
+    install(&[
+        "--flavor",
+        "gerasync",
+        "--prefix",
+        "/usr",
+        "--destdir",
+        stage.to_str().unwrap(),
+        "--from",
+        bins.to_str().unwrap(),
+        "--no-dolphin",
+    ]);
+    stage.join("usr")
+}
+
+/// Todos os arquivos de `dir`, recursivamente.
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for path in std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()) {
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+fn names_old_app(text: &str) -> bool {
+    let text = text.replace(REPO_URL, "");
+    OLD_NAMES.iter().any(|name| text.contains(name))
+}
+
+#[test]
+fn gerasync_stage_has_no_old_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let usr = gerasync_stage(dir.path(), &fake_bins(dir.path()));
+
+    let files = files_under(&usr);
+    assert!(files.len() > 20, "{files:?}");
+    for path in files {
+        let relative = path.strip_prefix(&usr).unwrap().display().to_string();
+        assert!(!names_old_app(&relative), "{relative}");
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            assert!(!names_old_app(&text), "{relative}:\n{text}");
+        }
+    }
+}
+
+/// As duas variantes cabem no mesmo sistema: nenhum arquivo de uma sobrescreve o da outra.
+#[test]
+fn flavors_install_disjoint_files() {
+    let paths = |manifest: String| -> std::collections::BTreeSet<String> {
+        manifest
+            .lines()
+            .map(|l| l.split_once("  ").unwrap().1.to_owned())
+            .collect()
+    };
+    let default = paths(stage_manifest("default"));
+    let gerasync = paths(stage_manifest("gerasync"));
+    assert!(gerasync.len() == default.len(), "{gerasync:?}");
+    let shared: Vec<_> = default.intersection(&gerasync).collect();
+    assert!(shared.is_empty(), "{shared:?}");
+}
+
+/// O que é do serviço do Google (os tipos dos ponteiros) e o endereço do projeto não mudam.
+#[test]
+fn gerasync_keeps_repo_url_and_mime_types() {
+    let dir = tempfile::tempdir().unwrap();
+    let usr = gerasync_stage(dir.path(), &fake_bins(dir.path()));
+
+    let unit = read(usr.join("share/systemd/user/gerasyncd.service"));
+    assert!(
+        unit.contains("Documentation=https://github.com/junior9283/gdrive-desktop-linux\n"),
+        "{unit}"
+    );
+    assert!(
+        unit.contains("ExecStart=\"/usr/bin/gerasyncd\"\n"),
+        "{unit}"
+    );
+    let mime = read(usr.join("share/mime/packages/gerasync.xml"));
+    assert!(mime.contains("application/x-gdrive-document"), "{mime}");
+    assert!(
+        mime.contains("<comment>Google Drive link</comment>"),
+        "{mime}"
+    );
+    let desktop = read(usr.join("share/applications/io.github.junior9283.GeraSync.desktop"));
+    assert!(desktop.contains("Name=GeraSync\n"), "{desktop}");
+    assert!(
+        desktop.contains("Icon=io.github.junior9283.GeraSync\n"),
+        "{desktop}"
+    );
+    assert!(
+        usr.join("share/icons/hicolor/48x48/apps/io.github.junior9283.GeraSync.png")
+            .is_file()
+    );
+}
+
+#[test]
+fn gerasync_desktop_files_are_valid() {
+    let dir = tempfile::tempdir().unwrap();
+    let usr = gerasync_stage(dir.path(), &fake_bins(dir.path()));
+    validate_desktop_dir(&usr.join("share/applications"));
+}
+
+/// Roda o `package.sh` com `args` e um nfpm de mentira, que guarda a configuração de cada formato
+/// em `<saída>/<formato>.yaml` e cria um pacote vazio com o nome que o nfpm dá (versão 0).
+fn package(dir: &Path, args: &[&str], out: &Path) {
+    let nfpm = dir.join("nfpm");
+    std::fs::write(
+        &nfpm,
+        "#!/bin/sh\n\
+         while [ $# -gt 0 ]; do\n\
+           case \"$1\" in --config) c=$2 ;; --packager) p=$2 ;; --target) t=$2 ;; esac; shift\n\
+         done\n\
+         name=$(sed -n 's/^name: //p' \"$c\")\n\
+         cp \"$c\" \"$t/$p.yaml\"\n\
+         case $p in deb) f=${name}_0_amd64.deb ;; rpm) f=$name-0-1.x86_64.rpm ;;\n\
+           *) f=$name-0-1-x86_64.pkg.tar.zst ;; esac\n\
+         : > \"$t/$f\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&nfpm, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let status = Command::new("sh")
+        .arg(repo().join("scripts/package.sh"))
+        .args(args)
+        .arg(out)
+        .env("NFPM", &nfpm)
+        .status()
+        .unwrap();
+    assert!(status.success(), "package.sh {args:?}");
+}
+
+/// Os `.tar.gz` em `out`.
+fn tarballs(out: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(out)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().ends_with(".tar.gz"))
+        .collect()
+}
+
+/// As duas variantes saem na mesma pasta do release: o GeraSync com nome e página dele, e o
+/// SHA256SUMS com os arquivos das duas.
+#[test]
+fn both_flavors_package_into_the_same_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let bins = fake_bins(dir.path());
+    let out = dir.path().join("dist");
+    std::fs::create_dir_all(&out).unwrap();
+    let from = bins.to_str().unwrap();
+
+    package(dir.path(), &["--from", from], &out);
+    let default_deb = read(out.join("deb.yaml"));
+    package(dir.path(), &["--flavor", "gerasync", "--from", from], &out);
+
+    assert!(default_deb.contains("name: gdrive-desktop-linux\n"));
+    let deb = read(out.join("deb.yaml"));
+    assert!(deb.contains("name: gerasync\n"), "{deb}");
+    assert!(
+        deb.contains("homepage: https://junior9283.github.io/gerasync/\n"),
+        "{deb}"
+    );
+    assert!(
+        deb.contains("Google Drive"),
+        "a descrição diz o que o app é:\n{deb}"
+    );
+    assert!(deb.contains("dst: \"/usr/bin/gerasyncd\""), "{deb}");
+    assert!(
+        deb.contains("dst: \"/usr/share/gerasync/package\""),
+        "{deb}"
+    );
+    let sums = read(out.join("SHA256SUMS"));
+    for file in [
+        "gdrive-desktop-linux_0_amd64.deb",
+        "gerasync_0_amd64.deb",
+        "gerasync-0-1.x86_64.rpm",
+        "gerasync-0-1-x86_64.pkg.tar.zst",
+    ] {
+        assert_eq!(
+            sums.matches(&format!("  {file}\n")).count(),
+            1,
+            "{file}:\n{sums}"
+        );
+    }
+    let tarballs = tarballs(&out);
+    assert_eq!(tarballs.len(), 2, "{tarballs:?}");
+    assert!(tarballs.iter().any(|p| {
+        p.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("gerasync-")
+    }));
+}
+
+/// O `.tar.gz` do GeraSync instala o GeraSync: o install.sh dele passa a variante.
+#[test]
+fn gerasync_tarball_installs_gerasync() {
+    let dir = tempfile::tempdir().unwrap();
+    let bins = fake_bins(dir.path());
+    let out = dir.path().join("dist");
+    std::fs::create_dir_all(&out).unwrap();
+    package(
+        dir.path(),
+        &["--flavor", "gerasync", "--from", bins.to_str().unwrap()],
+        &out,
+    );
+    let tarball = tarballs(&out).pop().unwrap();
+    let unpacked = dir.path().join("unpacked");
+    std::fs::create_dir_all(&unpacked).unwrap();
+    let status = Command::new("tar")
+        .args(["-xzf", tarball.to_str().unwrap(), "-C"])
+        .arg(&unpacked)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let root = std::fs::read_dir(&unpacked)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let prefix = dir.path().join("pfx");
+
+    let out = Command::new("sh")
+        .arg(root.join("install.sh"))
+        .args([
+            "--prefix",
+            prefix.to_str().unwrap(),
+            "--no-activate",
+            "--no-dolphin",
+        ])
+        .output()
+        .unwrap();
+    succeeded(out);
+
+    assert!(prefix.join("bin/gerasync-tray").is_file());
+    assert!(prefix.join("share/gerasync/installed-files").is_file());
+    let uninstall = read(root.join("uninstall.sh"));
+    assert!(
+        uninstall.contains("/bin/gerasync\" uninstall"),
+        "{uninstall}"
     );
 }

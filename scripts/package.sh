@@ -3,41 +3,54 @@
 # openSUSE), .pkg.tar.zst (Arch, Manjaro) e um .tar.gz para qualquer distribuição, com o
 # install.sh que instala em ~/.local sem root.
 #
-#   scripts/package.sh [--from DIR] [--dolphin PASTA] <saída>
+#   scripts/package.sh [--flavor default|gerasync] [--from DIR] [--dolphin PASTA] <saída>
 #
-# --from usa os programas já compilados em DIR (sem ele, compila com `cargo build --release`).
+# --flavor gerasync monta os do GeraSync (o Client ID embutido): os mesmos arquivos passados pela
+# tabela packaging/gerasync/rename.sed, com nome e página dele. As duas variantes podem sair na
+# mesma <saída>: o SHA256SUMS ganha as linhas da variante, sem perder as da outra.
+# --from usa os programas já compilados em DIR (sem ele, compila com `cargo build --release`, ou
+# com o scripts/cargo-gerasync.sh no GeraSync).
 # --dolphin põe nos pacotes os plugins do Dolphin (menu e emblemas) da PASTA que o
 # integrations/dolphin/build.sh preenche; eles não vão no .tar.gz, que instala em ~/.local, fora
 # do caminho de plugins do Qt.
 # Os pacotes saem do nfpm (https://nfpm.goreleaser.com); NFPM troca o comando (ex.: um contêiner).
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
-from="" dolphin=""
+from="" dolphin="" flavor=default
 while [ $# -gt 1 ]; do
   case "$1" in
+    --flavor) flavor=$2; shift 2 ;;
     --from) from=$2; shift 2 ;;
     --dolphin) dolphin=$(cd "$2" && pwd); shift 2 ;;
     *) echo "argumento desconhecido: $1" >&2; exit 2 ;;
   esac
 done
-[ $# -eq 1 ] || { echo "uso: scripts/package.sh [--from DIR] [--dolphin PASTA] <saída>" >&2; exit 2; }
+[ $# -eq 1 ] || { echo "uso: scripts/package.sh [--flavor VARIANTE] [--from DIR] [--dolphin PASTA] <saída>" >&2; exit 2; }
+# rename: o texto da entrada como fica na variante (no GeraSync, passado pela tabela).
+case "$flavor" in
+  default) rename() { cat; } ; name=gdrive-desktop-linux cargo=cargo target=target/release ;;
+  gerasync)
+    rename() { sed -f "$repo/packaging/gerasync/rename.sed"; }
+    name=gerasync cargo="sh $repo/scripts/cargo-gerasync.sh" target=target/gerasync/release ;;
+  *) echo "variante desconhecida: $flavor" >&2; exit 2 ;;
+esac
 mkdir -p "$1"
 out=$(cd "$1" && pwd)
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo/Cargo.toml" | head -n 1)
-name=gdrive-desktop-linux
 
 if [ -z "$from" ]; then
-  (cd "$repo" && cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui -p gdl-mcp --bins)
-  from=$repo/target/release
+  (cd "$repo" && $cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui -p gdl-mcp --bins)
+  from=$repo/$target
 fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 # Os pacotes do sistema: os mesmos arquivos da instalação do usuário, em /usr.
-sh "$repo/scripts/install-dev.sh" --prefix /usr --destdir "$work/stage" --from "$from" >/dev/null
+sh "$repo/scripts/install-dev.sh" --flavor "$flavor" --prefix /usr --destdir "$work/stage" --from "$from" \
+  >/dev/null
 # Só os arquivos, um a um: as pastas (/usr, /usr/bin…) continuam sendo do sistema.
 {
-  cat "$repo/packaging/nfpm.yaml"
+  rename < "$repo/packaging/nfpm.yaml"
   echo "contents:"
   (cd "$work/stage" && find usr -type f | sort) | while read -r file; do
     mode=0644
@@ -53,8 +66,9 @@ sh "$repo/scripts/install-dev.sh" --prefix /usr --destdir "$work/stage" --from "
   done
   # Os plugins do Dolphin, na pasta de plugins do Qt de cada formato. Sem dependência do KDE: o
   # KIO só os carrega quando já está rodando (no Dolphin), e fora dele os arquivos ficam parados.
+  plugins=$(echo kfileitemaction/gdrive_desktop_linux_menu overlayicon/gdrive_desktop_linux_overlay | rename)
   [ -z "$dolphin" ] || for target in deb:/usr/lib/x86_64-linux-gnu rpm:/usr/lib64 archlinux:/usr/lib; do
-    for plugin in kfileitemaction/gdrive_desktop_linux_menu overlayicon/gdrive_desktop_linux_overlay; do
+    for plugin in $plugins; do
       printf '  - src: "%s"\n    dst: "%s/qt6/plugins/kf6/%s.so"\n    packager: %s\n    file_info:\n      mode: 0644\n' \
         "$dolphin/${plugin#*/}.so" "${target#*:}" "$plugin" "${target%%:*}"
     done
@@ -65,17 +79,29 @@ for packager in deb rpm archlinux; do
     --target "$out/"
 done
 
-# O .tar.gz: os programas (os mesmos dos pacotes) e o que o install-dev.sh precisa ao lado deles.
+# O .tar.gz: os programas (os mesmos dos pacotes) e o que o install-dev.sh precisa ao lado deles
+# (os arquivos de sempre e, no GeraSync, a tabela e o ícone dele, que o install-dev.sh aplica).
 dir="$work/$name-$version"
 mkdir -p "$dir/scripts" "$dir/packaging" "$dir/assets/icons" "$dir/integrations/gtk"
 cp -r "$work/stage/usr/bin" "$dir/"
 cp "$repo/scripts/install-dev.sh" "$dir/scripts/"
 cp -r "$repo/packaging/systemd" "$repo/packaging/dbus" "$repo/packaging/desktop" "$repo/packaging/mime" \
-  "$dir/packaging/"
+  "$repo/packaging/gerasync" "$dir/packaging/"
 cp -r "$repo/assets/icons/hicolor" "$dir/assets/icons/"
+[ "$flavor" = default ] || { mkdir -p "$dir/assets/gerasync/icons" && cp -r "$repo/assets/gerasync/icons/hicolor" "$dir/assets/gerasync/icons/"; }
 cp "$repo/integrations/gtk/gdrive_desktop_linux_menu.py" "$dir/integrations/gtk/"
-cp "$repo/LICENSE" "$repo/README.md" "$repo/packaging/install.sh" "$repo/packaging/uninstall.sh" "$dir/"
+cp "$repo/LICENSE" "$repo/README.md" "$dir/"
+for script in install.sh uninstall.sh; do
+  rename < "$repo/packaging/$script" > "$dir/$script"
+done
 tar -C "$work" -czf "$out/$name-$version-x86_64.tar.gz" "$name-$version"
 
-(cd "$out" && sha256sum -- *.deb *.rpm *.pkg.tar.zst *.tar.gz > SHA256SUMS)
+# As somas da variante entram no SHA256SUMS no lugar das antigas dela; as da outra ficam.
+sums=$(cd "$out" && sha256sum -- "$name"[_-]*.deb "$name"[_-]*.rpm "$name"[_-]*.pkg.tar.zst \
+  "$name-$version-x86_64.tar.gz")
+{
+  [ -f "$out/SHA256SUMS" ] && grep -v "  $name[_-][0-9]" "$out/SHA256SUMS" || true
+  echo "$sums"
+} | sort -k2 > "$out/SHA256SUMS.tmp"
+mv "$out/SHA256SUMS.tmp" "$out/SHA256SUMS"
 ls -1 "$out"

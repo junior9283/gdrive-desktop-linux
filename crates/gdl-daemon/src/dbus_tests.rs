@@ -373,8 +373,10 @@ async fn logout_never_deletes_lost_and_found_silently() {
     blocking(move || std::fs::write(path, b"editado aqui").unwrap()).await;
     h.fake.modify_remote(&id, b"editado na nuvem".to_vec());
     let engine = h.daemon.engine().await.unwrap();
-    wait_until("edição no Lost and Found", || {
-        engine.lost_and_found().list().len() == 1
+    // A edição entra no Lost and Found antes de sair da fila (a ordem segura); um logout nesse
+    // meio-tempo copia a mesma edição duas vezes, então o teste espera as duas coisas.
+    wait_until("edição no Lost and Found e fora da fila", || {
+        engine.lost_and_found().count() == 1 && engine.store().pending_items().unwrap().is_empty()
     })
     .await;
     drop(engine);

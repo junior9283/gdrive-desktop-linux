@@ -339,10 +339,12 @@ mod tests {
     fn signed_in_menu_follows_the_spec() {
         let i18n = I18n::new("pt_BR");
         let view = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
+        // O nome da pasta é o do app (no GeraSync, "Abrir a pasta do GeraSync").
+        let open_folder = i18n.tr("tray-open-folder", &[]);
         assert_eq!(
             labels(&view),
             [
-                "Abrir a pasta do Google Drive",
+                open_folder.as_str(),
                 "Abrir o Google Drive no navegador",
                 "Pesquisar",
                 "Pausar a sincronização",

@@ -1,7 +1,7 @@
 //! Os endereços que a bandeja e a janela abrem no navegador, numa tabela fixa: a janela pede pelo
 //! nome e nunca manda um endereço qualquer.
 
-const PROJECT: &str = "https://github.com/junior9283/gdrive-desktop-linux";
+use crate::brand::{OFFICIAL, PROJECT_URL as PROJECT, SITE_URL};
 
 /// O Meu Drive na web.
 pub const DRIVE_WEB: &str = "https://drive.google.com/drive/my-drive";
@@ -22,6 +22,10 @@ pub fn url(name: &str) -> Option<String> {
         "gemini" => "https://gemini.google.com/".into(),
         "create-account" => "https://accounts.google.com/signup".into(),
         "project" => PROJECT.into(),
+        // O GeraSync tem site próprio para estes, que é o que o Google confere na verificação.
+        "privacy" if OFFICIAL => format!("{SITE_URL}privacy.html"),
+        "terms" if OFFICIAL => format!("{SITE_URL}terms.html"),
+        "help" if OFFICIAL => SITE_URL.into(),
         "privacy" => doc("politica-de-privacidade.md"),
         "terms" => doc("termos-de-uso.md"),
         "faq" => doc("perguntas-frequentes.md"),
@@ -97,16 +101,31 @@ mod tests {
             url("create-account").as_deref(),
             Some("https://accounts.google.com/signup")
         );
+        #[cfg(not(gerasync))]
         assert!(url("terms").unwrap().ends_with("/docs/termos-de-uso.md"));
         assert_eq!(url("https://example.com"), None);
     }
 
-    /// Os documentos para onde os links apontam existem no repositório.
+    /// No GeraSync, ajuda, privacidade e termos ficam no site dele, que é o que o Google confere.
+    #[cfg(gerasync)]
+    #[test]
+    fn gerasync_links_point_to_its_site() {
+        let site = SITE_URL;
+        assert_eq!(url("help").unwrap(), site);
+        assert_eq!(url("privacy").unwrap(), format!("{site}privacy.html"));
+        assert_eq!(url("terms").unwrap(), format!("{site}terms.html"));
+    }
+
+    /// Os documentos do repositório para onde os links apontam existem (no GeraSync, alguns vão
+    /// para o site dele).
     #[test]
     fn project_documents_exist() {
         let docs = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs"));
-        for name in ["privacy", "terms", "faq", "help", "client-id-guide"] {
-            let url = url(name).unwrap();
+        let names = ["privacy", "terms", "faq", "help", "client-id-guide"];
+        for url in names.map(|name| url(name).unwrap()) {
+            if url.starts_with(SITE_URL) {
+                continue;
+            }
             let file = url.rsplit('/').next().unwrap();
             assert!(docs.join(file).is_file(), "{file}");
         }

@@ -4,7 +4,8 @@
 
 // `chave = valor` de cada mensagem; as linhas recuadas (e o `}` que fecha uma
 // seleção, que o Fluent aceita sem recuo) continuam o valor, com `\n`.
-// Comentários e linhas em branco ficam de fora.
+// Comentários e linhas em branco ficam de fora. Uma chave repetida fica com o último valor: é
+// assim que o `gerasync.ftl`, que o Rust põe depois do `ui.ftl`, troca os textos do GeraSync.
 export function parseFtl(source) {
   const messages = {};
   let key = null;

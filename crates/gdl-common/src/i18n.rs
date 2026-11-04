@@ -4,10 +4,36 @@ use fluent_bundle::concurrent::FluentBundle;
 use fluent_bundle::{FluentArgs, FluentResource};
 use unic_langid::LanguageIdentifier;
 
+/// O `gerasync.ftl` de `lang`, que no GeraSync troca o nome do app nos textos; vazio na variante
+/// de sempre.
+#[cfg(gerasync)]
+macro_rules! brand_ftl {
+    ($lang:literal) => {
+        include_str!(concat!("../../../locales/", $lang, "/gerasync.ftl"))
+    };
+}
+#[cfg(not(gerasync))]
+macro_rules! brand_ftl {
+    ($lang:literal) => {
+        ""
+    };
+}
+
 const PT_BR: &str = include_str!("../../../locales/pt-BR/main.ftl");
 const EN: &str = include_str!("../../../locales/en/main.ftl");
-const UI_PT_BR: &str = include_str!("../../../locales/pt-BR/ui.ftl");
-const UI_EN: &str = include_str!("../../../locales/en/ui.ftl");
+const BRAND_PT_BR: &str = brand_ftl!("pt-BR");
+const BRAND_EN: &str = brand_ftl!("en");
+// O `i18n.js` fica com o último valor de cada chave: o do `gerasync.ftl`, que vem depois.
+const UI_PT_BR: &str = concat!(
+    include_str!("../../../locales/pt-BR/ui.ftl"),
+    "\n",
+    brand_ftl!("pt-BR")
+);
+const UI_EN: &str = concat!(
+    include_str!("../../../locales/en/ui.ftl"),
+    "\n",
+    brand_ftl!("en")
+);
 
 /// Idioma do sistema, pelas variáveis `LC_ALL`, `LC_MESSAGES` e `LANG`, nessa ordem.
 pub fn env_lang() -> String {
@@ -41,7 +67,11 @@ impl I18n {
     /// `lang` no formato das variáveis `LANG`/`LC_MESSAGES`, como `pt_BR.UTF-8`.
     pub fn new(lang: &str) -> I18n {
         let id = language(lang);
-        let main = if id == "pt-BR" { PT_BR } else { EN };
+        let (main, brand) = if id == "pt-BR" {
+            (PT_BR, BRAND_PT_BR)
+        } else {
+            (EN, BRAND_EN)
+        };
         let langid: LanguageIdentifier = id.parse().expect("identificador de idioma fixo");
         let mut bundle = FluentBundle::new_concurrent(vec![langid]);
         bundle.set_use_isolating(false);
@@ -50,6 +80,8 @@ impl I18n {
         bundle
             .add_resource(resource)
             .expect("chaves .ftl sem duplicatas");
+        let brand = FluentResource::try_new(brand.to_string()).expect("gerasync.ftl válido");
+        bundle.add_resource_overriding(brand);
         I18n { bundle }
     }
 
@@ -116,6 +148,64 @@ mod tests {
         assert!(ui_source("pt-BR").contains("about-name ="));
         assert_eq!(I18n::new("pt_BR").tr("window-about", &[]), "Sobre");
         assert_eq!(language(""), "en");
+    }
+
+    const BASE_UI_PT_BR: &str = include_str!("../../../locales/pt-BR/ui.ftl");
+    const BASE_UI_EN: &str = include_str!("../../../locales/en/ui.ftl");
+
+    /// `(chave, primeira linha do valor)` de cada mensagem de um `.ftl`, na ordem.
+    fn entries(source: &str) -> impl Iterator<Item = (&str, &str)> {
+        source
+            .lines()
+            .filter(|l| !l.starts_with([' ', '#', '}']))
+            .filter_map(|l| l.split_once('=').map(|(k, v)| (k.trim(), v)))
+    }
+
+    fn keys(source: &str) -> Vec<&str> {
+        entries(source).map(|(key, _)| key).collect()
+    }
+
+    /// O `gerasync.ftl` só troca textos que existem: uma chave a mais seria um texto que nenhuma
+    /// tela pede.
+    #[test]
+    fn gerasync_overrides_only_known_keys() {
+        let langs = [
+            (
+                include_str!("../../../locales/pt-BR/gerasync.ftl"),
+                PT_BR,
+                BASE_UI_PT_BR,
+            ),
+            (
+                include_str!("../../../locales/en/gerasync.ftl"),
+                EN,
+                BASE_UI_EN,
+            ),
+        ];
+        for (brand, main, ui) in langs {
+            let known: Vec<&str> = keys(main).into_iter().chain(keys(ui)).collect();
+            let brand_keys = keys(brand);
+            assert!(!brand_keys.is_empty());
+            for key in brand_keys {
+                assert!(known.contains(&key), "{key}");
+            }
+        }
+    }
+
+    #[cfg(gerasync)]
+    #[test]
+    fn gerasync_messages_never_name_the_old_app() {
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            assert_eq!(i18n.tr("notify-title", &[]), crate::brand::DISPLAY_NAME);
+            // A janela fica com o último valor de cada chave (`parseFtl`, no `i18n.js`).
+            let ui: std::collections::HashMap<_, _> = entries(ui_source(language(lang))).collect();
+            for key in keys(if lang == "en" { EN } else { PT_BR }) {
+                assert!(!i18n.tr(key, &[]).contains("gdrive-desktop-linux"), "{key}");
+            }
+            for (key, value) in ui {
+                assert!(!value.contains("gdrive-desktop-linux"), "{lang} {key}");
+            }
+        }
     }
 
     #[test]

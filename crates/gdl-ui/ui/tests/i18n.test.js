@@ -61,3 +61,7 @@ test('os dois ui.ftl têm as mesmas chaves e formatam', () => {
   assert.deepEqual(Object.keys(pt).sort(), Object.keys(en).sort());
   assert.equal(new I18n(pt, 'pt-BR').t('about-version', { version: '1.2' }), 'Versão 1.2');
 });
+
+test('parseFtl fica com o último valor de uma chave repetida', () => {
+  assert.equal(parseFtl('about-name = antigo\nabout-name = GeraSync\n')['about-name'], 'GeraSync');
+});

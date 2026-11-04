@@ -106,7 +106,8 @@ fn open_screen(app: AppHandle, screen: String, arg: Option<String>) -> Result<()
 #[tauri::command]
 async fn open_issue(title: String, body: String) -> Result<bool, String> {
     let body = format!(
-        "{body}\n\n---\ngdrive-desktop-linux {} · {}",
+        "{body}\n\n---\n{} {} · {}",
+        gdl_common::brand::PACKAGE,
         env!("CARGO_PKG_VERSION"),
         gdl_common::os_name()
     );

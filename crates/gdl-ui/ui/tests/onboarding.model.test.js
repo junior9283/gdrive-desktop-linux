@@ -106,12 +106,12 @@ test('a tela de consentimento recebe as páginas do site do projeto', () => {
 });
 
 test('DisableOnboardingDialog deixa só os passos do login', () => {
-  assert.deepEqual(stepsFor(true), ['setup', 'sign-in', 'waiting']);
-  assert.deepEqual(stepsFor(false), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'folders', 'summary', 'offline']);
+  assert.deepEqual(stepsFor({ loginOnly: true }), ['setup', 'sign-in', 'waiting']);
+  assert.deepEqual(stepsFor(), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'folders', 'summary', 'offline']);
 });
 
 test('com DisableMirroredFolders, o primeiro uso não sugere pastas', () => {
-  assert.deepEqual(stepsFor(false, '', true), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'summary', 'offline']);
+  assert.deepEqual(stepsFor({ foldersOff: true }), ['setup', 'sign-in', 'waiting', 'intro', 'files', 'summary', 'offline']);
   const state = { ...firstState({ signedIn: true, loginOnly: false, foldersOff: true }), step: 'offline' };
   assert.equal(actions(state).primary, 'finish');
   assert.equal(nextStep(state, { type: 'continue' }).step, 'end');
@@ -162,7 +162,7 @@ const adding = () => firstState({ signedIn: true, loginOnly: false, mode: 'add' 
 test('adicionar outra conta pula o guia do Client ID e a apresentação', () => {
   const state = adding();
   assert.equal(state.step, 'add');
-  assert.deepEqual(stepsFor(false, 'add'), ['add', 'waiting']);
+  assert.deepEqual(stepsFor({ mode: 'add' }), ['add', 'waiting']);
   assert.deepEqual(actions(state), { skip: false, back: false, primary: 'continue' });
 
   const waiting = nextStep(state, { type: 'continue' });
@@ -189,7 +189,7 @@ test('entrar de novo: só o passo da conta e a espera, com o e-mail esperado', (
   const state = resuming();
   assert.equal(state.step, 'resume');
   assert.equal(state.expected, 'ana@example.com');
-  assert.deepEqual(stepsFor(false, 'resume'), ['resume', 'waiting']);
+  assert.deepEqual(stepsFor({ mode: 'resume' }), ['resume', 'waiting']);
   assert.deepEqual(actions(state), { skip: false, back: false, primary: 'continue' });
 
   const waiting = nextStep(state, { type: 'continue' });
@@ -234,4 +234,22 @@ test('slowLogin depois de 60 s esperando o navegador', () => {
   assert.equal(slowLogin(1000, 1000 + 59999), false);
   assert.equal(slowLogin(1000, 1000 + 60000), true);
   assert.equal(slowLogin(null, 1e12), false);
+});
+
+// GeraSync: o Client ID vem embutido, então o primeiro uso não tem o guia nem os campos.
+const official = (fields = {}) => ({ ...firstState({ signedIn: false, loginOnly: false, official: true }), ...fields });
+
+test('official onboarding skips the client steps', () => {
+  assert.ok(!stepsFor({ official: true }).includes('setup'));
+  assert.deepEqual(stepsFor({ loginOnly: true, official: true }), ['sign-in', 'waiting']);
+  assert.equal(official().step, 'sign-in');
+  assert.equal(nextStep(official(), { type: 'back' }).step, 'sign-in', 'não há guia para voltar');
+  assert.equal(actions(official()).back, false);
+});
+
+test('official sign-in needs no client id', () => {
+  const state = nextStep(official(), { type: 'continue' });
+  assert.equal(state.step, 'waiting');
+  assert.equal(state.error, null);
+  assert.equal(nextStep(state, { type: 'back' }).step, 'sign-in');
 });

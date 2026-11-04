@@ -5,7 +5,7 @@ import { prefValue } from '../api.js';
 import { attempt, card, choice, el, errorText, stylesheet, toast, toastError } from '../components.js';
 import { formatSize } from '../format.js';
 import { screenArg } from '../router.js';
-import { GUIDE, SLOW_LOGIN_MS, TROUBLES, actions, firstState, nextStep, slowLogin, stepsFor, summaryRows } from './onboarding/model.js';
+import { GUIDE, SLOW_LOGIN_MS, TROUBLES, actions, firstState, needsClient, nextStep, slowLogin, stepsFor, summaryRows } from './onboarding/model.js';
 import { refusalToast } from './folder-actions.js';
 import { configurator, folderName } from './preferences/folders.js';
 
@@ -32,6 +32,7 @@ export async function render(root, ctx) {
   if (!screen.state) {
     const [status, prefs] = await Promise.all([ctx.api.call('status'), ctx.api.call('preferences')]);
     screen.state = firstState({
+      official: ctx.official,
       signedIn: status.state !== 'signed-out',
       loginOnly: prefValue(prefs, 'DisableOnboardingDialog', false) === true,
       foldersOff: prefValue(prefs, 'DisableMirroredFolders', false) === true,
@@ -66,7 +67,7 @@ function beginLogin() {
   clearTimeout(screen.slowTimer);
   screen.slowTimer = setTimeout(() => screen.state.step === 'waiting' && draw(false), SLOW_LOGIN_MS);
   const { mode, expected, clientId, secret } = screen.state;
-  // Sem Client ID, o serviço usa o que a primeira conta guardou.
+  // Sem Client ID, o serviço usa o que a primeira conta guardou (no GeraSync, sempre o embutido).
   const credentials = mode ? { expected } : { client_id: clientId.trim(), client_secret: secret.trim() };
   screen.ctx.api
     .call('begin_login', credentials)
@@ -91,7 +92,7 @@ function draw(moved = true) {
     return;
   }
   const { t } = ctx;
-  const steps = stepsFor(state.loginOnly, state.mode, state.foldersOff);
+  const steps = stepsFor(state);
   const at = steps.indexOf(state.step);
   const list = el(
     'ol',
@@ -186,12 +187,15 @@ const STEPS = {
       });
       return el('label', { class: 'field' }, el('span', {}, label), input);
     };
-    return [
-      title(t('onboarding-sign-in-title')),
-      el('p', {}, t('onboarding-sign-in-text')),
+    const fields = !needsClient(state) ? [] : [
       field('client-id', 'clientId', t('onboarding-client-id'), 'text'),
       field('client-secret', 'secret', t('onboarding-client-secret'), 'password'),
       el('p', { class: 'meta' }, t('onboarding-client-note')),
+    ];
+    return [
+      title(t('onboarding-sign-in-title')),
+      el('p', {}, t('onboarding-sign-in-text')),
+      ...fields,
       error,
       el('button', { class: 'text create-account', onclick: () => attempt(api.openLink('create-account')) },
         t('onboarding-create-account')),

@@ -14,7 +14,7 @@ const READY = new Set([
 
 const screen = currentScreen(location.search);
 // Os textos e o código da tela chegam juntos.
-const [{ locale, source }, module] = await Promise.all([
+const [{ locale, source, official }, module] = await Promise.all([
   api.strings(),
   import(READY.has(screen) ? `./screens/${screen}.js` : './screens/pending.js'),
 ]);
@@ -31,7 +31,8 @@ const banner = el(
 );
 document.body.append(banner, root);
 
-const context = { api, locale, t: i18n.t };
+// `official`: GeraSync, com o Client ID embutido.
+const context = { api, locale, official, t: i18n.t };
 
 async function render() {
   try {

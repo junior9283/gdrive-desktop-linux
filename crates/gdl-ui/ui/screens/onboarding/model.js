@@ -1,8 +1,9 @@
 // A lógica do primeiro uso sem DOM: em que passo está, para onde cada botão (ou o fim do login)
 // leva e quais botões aparecem. Os erros saem como `[chave, argumentos]` do `ui.ftl`.
 
-// O login começa pelo guia do Client ID, que quem já tem um passa com Continuar.
-const LOGIN = ['setup', 'sign-in', 'waiting'];
+// O login começa pelo guia do Client ID, que quem já tem um passa com Continuar. No GeraSync
+// (`official`), o Client ID vem embutido: não há guia nem campos.
+const loginSteps = (official) => (official ? ['sign-in', 'waiting'] : ['setup', 'sign-in', 'waiting']);
 
 // O guia do Client ID (base: `docs/guia-client-id.md`): cada parte abre a sua página do Google
 // Cloud pelo nome do link (`gdl_common::links`); `copy` são os valores para colar lá, com o campo
@@ -41,20 +42,22 @@ const TOUR = ['intro', 'files', 'folders', 'summary', 'offline'];
 // Os passos mostrados: com `DisableOnboardingDialog`, só os do login; adicionando outra conta
 // (`mode` `add`) ou entrando de novo numa (`resume`), só o passo dela e a espera, sem o guia: as
 // credenciais já guardadas valem. Com `DisableMirroredFolders` (`foldersOff`), sem as pastas.
-export function stepsFor(loginOnly, mode = '', foldersOff = false) {
+// Recebe o estado (`firstState`) ou só os campos que importam.
+export function stepsFor({ loginOnly = false, mode = '', foldersOff = false, official = false } = {}) {
   if (mode) return [mode, 'waiting'];
-  if (loginOnly) return [...LOGIN];
-  return [...LOGIN, ...TOUR.filter((step) => !foldersOff || step !== 'folders')];
+  const login = loginSteps(official);
+  if (loginOnly) return login;
+  return [...login, ...TOUR.filter((step) => !foldersOff || step !== 'folders')];
 }
 
 // Onde começa: nos modos `add` e `resume`, no passo deles (`expected` é o e-mail da conta que
 // entra de novo); sem conta, no login; com a conta conectada, na apresentação (ou no fim, se ela
 // está desligada). `mount` é a pasta do Drive.
-export function firstState({ signedIn, loginOnly, mount = '', mode = '', expected = '', foldersOff = false }) {
-  const step = mode || (!signedIn ? 'setup' : loginOnly ? 'end' : 'intro');
+export function firstState({ signedIn, loginOnly, mount = '', mode = '', expected = '', foldersOff = false, official = false }) {
+  const step = mode || (!signedIn ? loginSteps(official)[0] : loginOnly ? 'end' : 'intro');
   return {
-    step, loginOnly, foldersOff, mode, expected, mount, clientId: '', secret: '', url: null, linkShown: false, error: null,
-    failed: false,
+    step, loginOnly, foldersOff, official, mode, expected, mount, clientId: '', secret: '', url: null, linkShown: false,
+    error: null, failed: false,
   };
 }
 
@@ -89,15 +92,20 @@ export function summaryRows({ email, mirror, mount, folders }) {
   ];
 }
 
+// O passo pede o Client ID e o segredo: o login fora do GeraSync.
+export function needsClient({ step, official }) {
+  return step === 'sign-in' && !official;
+}
+
 // O passo seguinte dentro de `steps`, ou o fim.
 function after(state) {
-  const steps = stepsFor(state.loginOnly, state.mode, state.foldersOff);
+  const steps = stepsFor(state);
   return steps[steps.indexOf(state.step) + 1] ?? 'end';
 }
 
 // O passo de `Voltar`, ou `null` sem volta (depois do login não se volta para ele).
-function previous({ step, mode }) {
-  for (const steps of [mode ? [mode, 'waiting'] : LOGIN, TOUR]) {
+function previous({ step, mode, official }) {
+  for (const steps of [mode ? [mode, 'waiting'] : loginSteps(official), TOUR]) {
     const i = steps.indexOf(step);
     if (i > 0) return steps[i - 1];
   }
@@ -126,7 +134,7 @@ export function nextStep(state, event) {
     case 'edit':
       return { ...state, [event.field]: event.value, error: null, failed: false };
     case 'continue':
-      if (state.step === 'sign-in' && (!state.clientId.trim() || !state.secret.trim())) {
+      if (needsClient(state) && (!state.clientId.trim() || !state.secret.trim())) {
         return { ...state, error: ['onboarding-missing-client'] };
       }
       return actions(state).primary ? go(after(state)) : state;

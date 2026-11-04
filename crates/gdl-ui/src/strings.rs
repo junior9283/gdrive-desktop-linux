@@ -9,6 +9,8 @@ pub struct UiStrings {
     pub locale: &'static str,
     /// O arquivo `ui.ftl` desse idioma.
     pub source: &'static str,
+    /// GeraSync: o Client ID vem embutido, e o primeiro uso não pede um.
+    pub official: bool,
 }
 
 impl UiStrings {
@@ -18,6 +20,7 @@ impl UiStrings {
         UiStrings {
             locale,
             source: gdl_common::i18n::ui_source(locale),
+            official: gdl_common::brand::OFFICIAL,
         }
     }
 }
@@ -25,6 +28,12 @@ impl UiStrings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strings_tell_the_screens_the_flavor() {
+        let json = serde_json::to_value(UiStrings::new("en")).unwrap();
+        assert_eq!(json["official"], gdl_common::brand::OFFICIAL);
+    }
 
     #[test]
     fn strings_follow_the_system_language() {

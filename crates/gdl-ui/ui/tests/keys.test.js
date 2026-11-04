@@ -33,7 +33,7 @@ test('toda chave usada nas telas existe nos dois idiomas', () => {
     'downloading', 'downloaded', 'trashing', 'trashed', 'restoring', 'restored',
   ]) used.add(`activity-${state}`);
   for (const link of ['help', 'privacy', 'terms', 'faq', 'drive-web']) used.add(`link-${link}`);
-  for (const step of [...stepsFor(false), ...stepsFor(false, 'add'), ...stepsFor(false, 'resume')]) used.add(`onboarding-step-${step}`);
+  for (const step of [...stepsFor(), ...stepsFor({ mode: 'add' }), ...stepsFor({ mode: 'resume' })]) used.add(`onboarding-step-${step}`);
   for (const reason of REASONS) used.add(`onboarding-login-failed-${reason}`);
   for (const { id, copy = [] } of GUIDE) {
     used.add(`onboarding-setup-${id}-title`).add(`onboarding-setup-${id}-text`);

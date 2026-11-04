@@ -1,7 +1,7 @@
 #!/bin/sh
 # Roda o cargo para a variante GeraSync: o --cfg gerasync (acrescentado ao RUSTFLAGS de quem
 # chama, que no CI já traz -D warnings), um target/ próprio (sem recompilar a variante de sempre a
-# cada troca) e a identidade da janela no Tauri.
+# cada troca) e a identidade e o ícone da janela no Tauri.
 #
 #   scripts/cargo-gerasync.sh <argumentos do cargo>
 #
@@ -11,5 +11,5 @@ set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 export RUSTFLAGS="${RUSTFLAGS:-} --cfg gerasync"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo/target/gerasync}"
-export TAURI_CONFIG='{"identifier":"io.github.junior9283.GeraSync","productName":"gerasync"}'
+export TAURI_CONFIG='{"identifier":"io.github.junior9283.GeraSync","productName":"gerasync","bundle":{"icon":["icons/gerasync.png"]}}'
 exec cargo "$@"

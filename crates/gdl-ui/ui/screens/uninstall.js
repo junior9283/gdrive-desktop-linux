@@ -2,13 +2,12 @@
 // andamento. Com os dados e uma conta conectada, primeiro a saída da conta (as mesmas escolhas
 // de "Desconectar conta" para os envios pendentes); depois a CLI tira os programas.
 
-import { el, errorText, stylesheet } from '../components.js';
+import { appLogo, el, errorText, stylesheet } from '../components.js';
 import { allAccounts, askLogout, signedOut } from './home/disconnect.js';
 
-const logo = () => el('img', { class: 'uninstall-logo', src: 'icons/app.png', alt: '' });
-
 export async function render(root, ctx) {
-  const { api, t } = ctx;
+  const { api, official, t } = ctx;
+  const logo = () => el('img', { class: 'uninstall-logo', src: appLogo(official), alt: '' });
   await stylesheet('screens/uninstall.css');
   const purge = el('input', { type: 'checkbox', name: 'purge' });
   const progress = el('p', { class: 'uninstall-progress', role: 'status' });

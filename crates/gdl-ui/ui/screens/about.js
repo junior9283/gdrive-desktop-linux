@@ -1,7 +1,7 @@
 // Sobre: versão, licença, o aviso de cliente não oficial, os links do projeto e os softwares de
 // terceiros (as bibliotecas Rust, geradas no build, e os recursos do front-end).
 
-import { el, stylesheet } from '../components.js';
+import { appLogo, el, stylesheet } from '../components.js';
 
 const PROJECT = 'https://github.com/junior9283/gdrive-desktop-linux';
 // Os recursos do front-end (as licenças completas estão em `third-party/`).
@@ -11,7 +11,7 @@ const FRONTEND = [
 ];
 const LINKS = ['help', 'privacy', 'terms'];
 
-export async function render(root, { api, t }) {
+export async function render(root, { api, official, t }) {
   const css = stylesheet('screens/about.css');
   const [version, crates] = await Promise.all([api.version(), api.thirdParty(), css]);
   const all = [...FRONTEND, ...crates];
@@ -19,7 +19,7 @@ export async function render(root, { api, t }) {
     el(
       'main',
       { class: 'about' },
-      el('img', { class: 'about-logo', src: 'icons/app.png', alt: '' }),
+      el('img', { class: 'about-logo', src: appLogo(official), alt: '' }),
       el('h1', {}, t('about-name')),
       el('p', { class: 'about-version' }, t('about-version', { version })),
       el('p', { class: 'about-license' }, t('about-license')),

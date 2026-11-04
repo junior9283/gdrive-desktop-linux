@@ -2,6 +2,9 @@
 
 const SVG = 'http://www.w3.org/2000/svg';
 
+// O logotipo do app nas telas (Sobre, Desinstalar): o do GeraSync (`official`) ou o de sempre.
+export const appLogo = (official) => (official ? 'icons/app-gerasync.png' : 'icons/app.png');
+
 // `el('p', { class: 'x', onclick }, 'texto', outroElemento)`.
 export function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);

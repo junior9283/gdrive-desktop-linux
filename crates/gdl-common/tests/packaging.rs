@@ -641,3 +641,30 @@ fn gerasync_tarball_installs_gerasync() {
         "{uninstall}"
     );
 }
+
+/// Largura e altura de um PNG (cabeçalho IHDR).
+fn png_size(path: &Path) -> (u32, u32) {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let be = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap());
+    (be(16), be(20))
+}
+
+/// O ícone do GeraSync em cada tamanho do tema, o da janela e o logotipo de 120 px do Console.
+#[test]
+fn gerasync_icons_have_their_sizes() {
+    let assets = repo().join("assets/gerasync");
+    for size in [16, 22, 24, 32, 48, 64, 128, 256, 512] {
+        let png = assets.join(format!(
+            "icons/hicolor/{size}x{size}/apps/io.github.junior9283.GeraSync.png"
+        ));
+        assert_eq!(png_size(&png), (size, size), "{}", png.display());
+    }
+    assert_eq!(png_size(&assets.join("logo-120.png")), (120, 120));
+    assert!(assets.join("app-icon.svg").is_file());
+    for window in [
+        "crates/gdl-ui/icons/gerasync.png",
+        "crates/gdl-ui/ui/icons/app-gerasync.png",
+    ] {
+        assert_eq!(png_size(&repo().join(window)), (256, 256), "{window}");
+    }
+}

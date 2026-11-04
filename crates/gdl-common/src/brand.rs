@@ -144,7 +144,9 @@ mod tests {
     #[test]
     fn cargo_script_gives_tauri_the_same_identity() {
         let script = include_str!("../../../scripts/cargo-gerasync.sh");
-        let config = format!(r#"{{"identifier":"{APP_ID}","productName":"{PACKAGE}"}}"#);
+        let config = format!(r#"{{"identifier":"{APP_ID}","productName":"{PACKAGE}","#);
         assert!(script.contains(&config), "{config}");
+        // O ícone da janela do GeraSync é o dele.
+        assert!(script.contains(r#""bundle":{"icon":["icons/gerasync.png"]}"#));
     }
 }

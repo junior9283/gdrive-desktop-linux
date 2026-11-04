@@ -105,9 +105,10 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 
 - **Atualizações vindas da nuvem:** chegam em segundos, mas não na hora. O app oficial usa um canal
   de notificação interno do Google que não está disponível para terceiros.
-- **Login:** nunca usa a identidade do app oficial, e o projeto não tem um app OAuth próprio: cada
-  usuário cria o próprio Client ID no Google Cloud, com o guia dentro do app ou o
-  [guia passo a passo](docs/guia-client-id.md).
+- **Login:** nunca usa a identidade do app oficial. Na variante gdrive-desktop-linux, cada usuário
+  cria o próprio Client ID no Google Cloud, com o guia dentro do app ou o
+  [guia passo a passo](docs/guia-client-id.md); o GeraSync usa o Client ID do projeto, embutido no
+  build.
 - **Avisos ao mover para pastas compartilhadas:** o app oficial pergunta antes de mover; uma pasta
   montada não tem como perguntar no meio de um `mv`, então o aviso vem logo depois, dizendo quem
   passou a ver o item (e pode ser desligado).
@@ -134,10 +135,28 @@ A lista completa e detalhada fica na especificação em [`docs/`](docs/).
 A especificação completa está em
 [`docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md`](docs/superpowers/specs/2026-10-25-gdrive-desktop-linux-design.md).
 
+## Duas variantes: gdrive-desktop-linux e GeraSync
+
+Cada release traz os instaladores de duas variantes do mesmo código. Escolha uma (ou as duas: elas
+convivem no mesmo computador, cada uma com a própria pasta, dados, serviço e ícone).
+
+| | **gdrive-desktop-linux** | **GeraSync** |
+|---|---|---|
+| Login | você cria o próprio Client ID no Google Cloud ([guia](docs/guia-client-id.md)) | instale e entre: o Client ID oficial vem embutido |
+| Arquivos do release | `gdrive-desktop-linux*` | `gerasync*` |
+| Pasta | `~/Google Drive` | `~/GeraSync` |
+| Site | esta página | [junior9283.github.io/gerasync](https://junior9283.github.io/gerasync/) |
+
+O GeraSync está em verificação pelo Google. Até ela terminar, a tela de login mostra o aviso de
+app não verificado (clique em Avançado e depois em Acessar o GeraSync) e vale o limite de 100 contas
+do Google para apps em verificação. O material do pedido fica em
+[`docs/verificacao-google/`](docs/verificacao-google/checklist.md).
+
 ## Como instalar
 
 **1. Instalar.** Baixe da [página de releases](https://github.com/junior9283/gdrive-desktop-linux/releases/latest)
-o arquivo da sua distribuição (64 bits, x86_64):
+o arquivo da sua distribuição (64 bits, x86_64). Os comandos abaixo são da variante de sempre; para
+o GeraSync, troque `gdrive-desktop-linux` por `gerasync` no nome do arquivo:
 
 | Distribuição | Arquivo | Como instalar |
 |---|---|---|
@@ -176,6 +195,12 @@ Thunar. Os plugins do Dolphin (menu e emblemas de estado) compilam à parte
 
 `scripts/package.sh dist` gera os mesmos instaladores do release (precisa do
 [nfpm](https://nfpm.goreleaser.com)).
+
+O GeraSync compila com `--flavor gerasync` nos dois scripts (`scripts/install-dev.sh --flavor
+gerasync`, `scripts/package.sh --flavor gerasync dist`) e precisa do Client ID nas variáveis
+`GERASYNC_CLIENT_ID` e `GERASYNC_CLIENT_SECRET`; para testar sem ele, `GERASYNC_ALLOW_FAKE_CREDS=1`
+usa um de mentira (que não loga). O `scripts/cargo-gerasync.sh` roda qualquer comando do cargo
+nessa variante (ex.: `scripts/cargo-gerasync.sh test --workspace`).
 
 </details>
 

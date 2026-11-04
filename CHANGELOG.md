@@ -7,6 +7,17 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Adicionado
+
+- **GeraSync**, uma segunda variante do app com o Client ID oficial embutido no build: instale e
+  entre, sem criar projeto no Google Cloud. Tem nome, ícone, site
+  ([junior9283.github.io/gerasync](https://junior9283.github.io/gerasync/)), pasta (`~/GeraSync`),
+  dados, serviço e integrações próprios, e convive com a variante de sempre no mesmo computador.
+  Cada release traz os instaladores das duas (`gdrive-desktop-linux*` e `gerasync*`). A variante de
+  sempre continua igual, byte a byte, nos arquivos que instala.
+- O CI compila e testa as duas variantes; o release só sai com o Client ID oficial nos segredos
+  do repositório.
+
 ### Corrigido
 
 - Dolphin: o menu do botão direito e as nuvens de estado sumiam quando o pacote `.rpm` era removido,

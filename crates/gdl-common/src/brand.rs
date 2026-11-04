@@ -13,7 +13,6 @@ macro_rules! brand {
         app_id: $app_id:literal,
         package: $package:literal,
         name: $name:literal,
-        bus: $bus:literal,
         path: $path:literal,
         site: $site:literal $(,)?
     ) => {
@@ -35,11 +34,12 @@ macro_rules! brand {
         pub const DISPLAY_NAME: &str = $name;
         /// A pasta montada em `~`.
         pub const MOUNT_DIR: &str = $name;
-        pub const BUS_NAME: &str = $bus;
+        /// O nome do serviço no D-Bus: o id do app com a versão da interface.
+        pub const BUS_NAME: &str = concat!($app_id, "1");
         pub const OBJECT_PATH: &str = $path;
-        pub const UI_BUS_NAME: &str = concat!($bus, ".Ui");
+        pub const UI_BUS_NAME: &str = concat!($app_id, "1.Ui");
         pub const UI_OBJECT_PATH: &str = concat!($path, "/Ui");
-        pub const TRAY_BUS_NAME: &str = concat!($bus, ".Tray");
+        pub const TRAY_BUS_NAME: &str = concat!($app_id, "1.Tray");
         /// A página do app (ajuda, privacidade e termos).
         pub const SITE_URL: &str = $site;
     };
@@ -51,7 +51,6 @@ brand! {
     app_id: "io.github.junior9283.GDriveDesktopLinux",
     package: "gdrive-desktop-linux",
     name: "Google Drive",
-    bus: "io.github.junior9283.GDriveDesktopLinux1",
     path: "/io/github/junior9283/GDriveDesktopLinux1",
     site: "https://junior9283.github.io/gdrive-desktop-linux/",
 }
@@ -62,7 +61,6 @@ brand! {
     app_id: "io.github.junior9283.GeraSync",
     package: "gerasync",
     name: "GeraSync",
-    bus: "io.github.junior9283.GeraSync1",
     path: "/io/github/junior9283/GeraSync1",
     site: "https://junior9283.github.io/gerasync/",
 }

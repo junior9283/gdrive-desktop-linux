@@ -26,15 +26,7 @@ while [ $# -gt 1 ]; do
   esac
 done
 [ $# -eq 1 ] || { echo "uso: scripts/package.sh [--flavor VARIANTE] [--from DIR] [--dolphin PASTA] <saída>" >&2; exit 2; }
-# rename: o texto da entrada como fica na variante (no GeraSync, passado pela tabela).
-case "$flavor" in
-  default) rename() { cat; } ; name=gdrive-desktop-linux cargo=cargo target=target/release ;;
-  gerasync)
-    rename() { sed -f "$repo/packaging/gerasync/rename.sed"; }
-    # Relativo ao $repo (o build roda dentro de cd "$repo"): o caminho dele pode ter espaços.
-    name=gerasync cargo="sh scripts/cargo-gerasync.sh" target=target/gerasync/release ;;
-  *) echo "variante desconhecida: $flavor" >&2; exit 2 ;;
-esac
+. "$repo/scripts/flavor.sh"
 mkdir -p "$1"
 out=$(cd "$1" && pwd)
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo/Cargo.toml" | head -n 1)
@@ -85,7 +77,7 @@ done
 dir="$work/$name-$version"
 mkdir -p "$dir/scripts" "$dir/packaging" "$dir/assets/icons" "$dir/integrations/gtk"
 cp -r "$work/stage/usr/bin" "$dir/"
-cp "$repo/scripts/install-dev.sh" "$dir/scripts/"
+cp "$repo/scripts/install-dev.sh" "$repo/scripts/flavor.sh" "$dir/scripts/"
 cp -r "$repo/packaging/systemd" "$repo/packaging/dbus" "$repo/packaging/desktop" "$repo/packaging/mime" \
   "$repo/packaging/gerasync" "$dir/packaging/"
 cp -r "$repo/assets/icons/hicolor" "$dir/assets/icons/"

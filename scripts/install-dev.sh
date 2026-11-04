@@ -37,13 +37,7 @@ while [ $# -gt 0 ]; do
     *) echo "argumento desconhecido: $1" >&2; exit 2 ;;
   esac
 done
-table="$repo/packaging/gerasync/rename.sed"
-# rename: o texto da entrada como fica na variante (no GeraSync, passado pela tabela).
-case "$flavor" in
-  default) rename() { cat; } ; package=gdrive-desktop-linux app_icons="$repo/assets/icons" ;;
-  gerasync) rename() { sed -f "$table"; } ; package=gerasync app_icons="$repo/assets/gerasync/icons" ;;
-  *) echo "variante desconhecida: $flavor" >&2; exit 2 ;;
-esac
+. "$repo/scripts/flavor.sh"
 # O caminho vai entre aspas no Exec do systemd, do D-Bus e do .desktop, onde " \ ` $ % não cabem
 # (a mesma lista do início automático, em crates/gdl-daemon/src/desktop.rs); | e & quebrariam o sed.
 case "$prefix" in
@@ -55,13 +49,8 @@ bin="$prefix/bin" share="$prefix/share"
 programs="gdrive-desktop-linuxd gdrive-desktop-linux gdrive-desktop-linux-tray gdrive-desktop-linux-ui gdrive-desktop-linux-mcp"
 
 if [ -z "$from" ] && ! $dry; then
-  cargo=cargo
-  # Relativo ao $repo (o build roda dentro de cd "$repo"): o caminho dele pode ter espaços.
-  [ "$flavor" = default ] || cargo="sh scripts/cargo-gerasync.sh"
   (cd "$repo" && $cargo build --release -p gdl-daemon -p gdl-cli -p gdl-tray -p gdl-ui -p gdl-mcp --bins)
 fi
-target=target/release
-[ "$flavor" = default ] || target=target/gerasync/release
 from=${from:-$repo/$target}
 
 # named <caminho>: o caminho instalado; o que vem depois do prefixo passa pela variante (o
@@ -157,7 +146,7 @@ if [ -z "$destdir" ] && ! $no_dolphin; then
       # O build.sh da variante já dá aos .so os nomes dela.
       install_as 755 "$dolphin/$(printf '%s\n' "${plugin##*/}" | rename).so" "$prefix/lib/qt6/plugins/kf6/$plugin.so"
     done
-    conf="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/50-$package.conf"
+    conf="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/50-$name.conf"
     echo "instala $conf"
     installed="$installed$conf
 "
@@ -171,7 +160,7 @@ fi
 
 # Os pacotes trazem um marcador do formato no lugar da lista (o gerenciador sabe o que é dele).
 if ! $dry && [ -z "$destdir" ]; then
-  printf '%s' "$installed" > "$share/$package/installed-files"
+  printf '%s' "$installed" > "$share/$name/installed-files"
 fi
 
 if $dry || ! $activate; then exit 0; fi

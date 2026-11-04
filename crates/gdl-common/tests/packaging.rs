@@ -392,21 +392,28 @@ const OLD_NAMES: [&str; 3] = [
 ];
 const REPO_URL: &str = "github.com/junior9283/gdrive-desktop-linux";
 
-/// A instalação do GeraSync em `<dir>/stage/usr`, como nos pacotes, com os programas de `bins`.
-fn gerasync_stage(dir: &Path, bins: &Path) -> PathBuf {
-    let stage = dir.join("stage");
-    install(&[
-        "--flavor",
-        "gerasync",
-        "--prefix",
-        "/usr",
-        "--destdir",
-        stage.to_str().unwrap(),
-        "--from",
-        bins.to_str().unwrap(),
-        "--no-dolphin",
-    ]);
-    stage.join("usr")
+/// A instalação do GeraSync como nos pacotes (`/usr`, programas de mentira), feita uma vez por
+/// execução: os testes só a leem.
+fn gerasync_stage() -> &'static Path {
+    static STAGE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    STAGE.get_or_init(|| {
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gerasync-stage");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let stage = dir.join("stage");
+        install(&[
+            "--flavor",
+            "gerasync",
+            "--prefix",
+            "/usr",
+            "--destdir",
+            stage.to_str().unwrap(),
+            "--from",
+            fake_bins(&dir).to_str().unwrap(),
+            "--no-dolphin",
+        ]);
+        stage.join("usr")
+    })
 }
 
 /// Todos os arquivos de `dir`, recursivamente.
@@ -432,8 +439,7 @@ fn names_old_app(text: &str) -> bool {
 
 #[test]
 fn gerasync_stage_has_no_old_names() {
-    let dir = tempfile::tempdir().unwrap();
-    let usr = gerasync_stage(dir.path(), &fake_bins(dir.path()));
+    let usr = gerasync_stage();
 
     let files = files_under(&usr);
     assert!(files.len() > 20, "{files:?}");
@@ -465,8 +471,7 @@ fn flavors_install_disjoint_files() {
 /// O que é do serviço do Google (os tipos dos ponteiros) e o endereço do projeto não mudam.
 #[test]
 fn gerasync_keeps_repo_url_and_mime_types() {
-    let dir = tempfile::tempdir().unwrap();
-    let usr = gerasync_stage(dir.path(), &fake_bins(dir.path()));
+    let usr = gerasync_stage();
 
     let unit = read(usr.join("share/systemd/user/gerasyncd.service"));
     assert!(
@@ -497,8 +502,7 @@ fn gerasync_keeps_repo_url_and_mime_types() {
 
 #[test]
 fn gerasync_desktop_files_are_valid() {
-    let dir = tempfile::tempdir().unwrap();
-    let usr = gerasync_stage(dir.path(), &fake_bins(dir.path()));
+    let usr = gerasync_stage();
     validate_desktop_dir(&usr.join("share/applications"));
 }
 

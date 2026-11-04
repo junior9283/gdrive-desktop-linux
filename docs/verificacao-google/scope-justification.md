@@ -47,7 +47,8 @@ Google's APIs.
   only in the system keyring (Secret Service), never in plain-text files.
 - File metadata and the content the user opened or pinned are cached on the user's computer only,
   and are removed when the user disconnects the account.
-- No data is sent to any server other than Google's APIs. There are no ads, no analytics and no
-  telemetry, and no person reads the user's data.
+- No user data is sent to any server other than Google's APIs. The only other request is a daily
+  check of the latest release version on the public GitHub API, which carries no user data. There
+  are no ads, no analytics and no telemetry, and no person reads the user's data.
 - Use of the data follows the Google API Services User Data Policy, including the Limited Use
   requirements. Privacy policy: https://junior9283.github.io/gerasync/privacy.html

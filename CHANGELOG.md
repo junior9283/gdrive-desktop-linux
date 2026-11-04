@@ -7,6 +7,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.3.0] - 2026-11-04
+
+Novidade: o GeraSync, uma segunda variante para baixar, que entra sem criar Client ID.
+
 ### Adicionado
 
 - **GeraSync**, uma segunda variante do app com o Client ID oficial embutido no build: instale e
@@ -653,7 +657,8 @@ está feito, ou registrado em "Diferenças inevitáveis" no README.
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.3...HEAD
+[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.3...v1.3.0
 [1.2.3]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.0...v1.2.1

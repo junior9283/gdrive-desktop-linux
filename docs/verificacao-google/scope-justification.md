@@ -1,6 +1,17 @@
 # Scope justification: `https://www.googleapis.com/auth/drive`
 
-Text for the "How will the scopes be used?" field of the restricted scope verification.
+Text for the "How will the scopes be used?" field of the restricted scope verification. The
+Console field takes at most 1000 characters: paste the short version there and keep the full text
+for the reviewer's questions by e-mail.
+
+## Short version (946 characters, the one in the Console)
+
+GeraSync for Google Drive is an open-source (GPL-3.0) Linux desktop client that shows the user's whole Google Drive (My Drive and shared drives) as a local folder and keeps it in sync. It needs the drive scope to list every file, including those created on the web or by other apps; download a file when the user opens it; upload the user's edits, renames, moves and deletions (to the Drive trash) to existing files; keep files marked offline up to date; back up chosen local folders; and share files and restore versions from the file manager. drive.file only covers files the app created or the user picked one by one, so the user's existing Drive would look empty; drive.readonly cannot upload changes. Everything runs on the user's computer: there is no GeraSync server, tokens are kept only in the system keyring, and there are no ads, analytics or telemetry. Data use follows the Google API Services User Data Policy, including Limited Use.
+
+Features selected in "What features will you use?": **Drive sync client** and **Drive backup**.
+Demo video (unlisted): https://youtu.be/d-jxEqwkXvQ
+
+## Full version
 
 ---
 

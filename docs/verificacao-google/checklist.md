@@ -52,7 +52,9 @@ o caminho é um domínio próprio, verificado por registro DNS, com o site apont
 
 - [ ] Adicionar os escopos `openid`, `.../auth/userinfo.email` e
   `https://www.googleapis.com/auth/drive`.
-- [ ] Justificativa do `drive`: colar `scope-justification.md`.
+- [ ] Recursos: **Drive sync client** e **Drive backup**.
+- [ ] Justificativa do `drive`: colar a versão curta de `scope-justification.md` (o campo aceita
+  1000 caracteres).
 - [ ] Link do vídeo: o vídeo não listado do YouTube gravado com `video-script.md`.
 
 ## 6. Cliente OAuth (Google Auth Platform → Clientes)
@@ -82,6 +84,9 @@ o caminho é um domínio próprio, verificado por registro DNS, com o site apont
 
 - [ ] Central de verificação → enviar a verificação da marca (nome, logotipo, domínio). Responder
   pelo e-mail de contato o que o Google perguntar; costuma sair em poucos dias.
+- [ ] Esperar 24 h depois de verificar a propriedade no Search Console: antes disso a checagem
+  automática recusa a página inicial como "not registered to you". O andamento fica em
+  `historico.md`.
 
 ## 9. Verificação do escopo restrito
 

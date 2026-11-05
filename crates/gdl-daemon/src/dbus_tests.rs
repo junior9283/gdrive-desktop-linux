@@ -971,6 +971,8 @@ async fn offline_files_over_dbus() {
         ("Pasta", "mixed")
     );
     assert!(in_root[0].is_folder);
+    // A pasta mostra os bytes off-line dentro dela, não o tamanho do Drive (zero nas pastas).
+    assert_eq!(in_root[0].size, 5);
     let summary = h.proxy.offline_summary("").await.unwrap();
     assert_eq!((summary.pinned_count, summary.pinned_bytes), (1, 5));
     assert_eq!(summary.cache_bytes, 5);

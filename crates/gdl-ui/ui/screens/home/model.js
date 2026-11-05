@@ -46,6 +46,10 @@ export function accountMenuFor(status) {
 // Ainda sem conta de pé: nenhuma conectada, ou o serviço reconectando as guardadas.
 export const withoutAccount = (state) => state === 'signed-out' || state === 'starting';
 
+// Sem conta de pé, o aviso substitui a visão aberta; com a conta de volta, a visão é lida de novo.
+export const statusRedrawsView = (before, after) =>
+  before !== after && (withoutAccount(before) || withoutAccount(after));
+
 // `{ title, subtitle, pause, signIn }` do cabeçalho; `pause` é a chave do botão (ou `null` sem
 // conta ou com a conta precisando entrar de novo, caso em que `signIn` pede o botão de entrar).
 export function headerFor(status, now, locale) {

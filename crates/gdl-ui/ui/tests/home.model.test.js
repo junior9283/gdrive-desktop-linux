@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { I18n, parseFtl } from '../i18n.js';
 import { formatSize } from '../format.js';
-import { notificationActions, accountMenuFor, drivesCard, headerFor, rowActions, offlineText, paginate, shownStatus, sortRows, splitArg } from '../screens/home/model.js';
+import { notificationActions, accountMenuFor, drivesCard, headerFor, rowActions, offlineText, paginate, shownStatus, sortRows, splitArg, statusRedrawsView } from '../screens/home/model.js';
 
 const load = (lang) =>
   new I18n(
@@ -199,4 +199,16 @@ test('notificationActions: a ação do aviso e, nas famílias ligadas que dá pa
   assert.deepEqual(notificationActions({ kind: 'resume-syncing', action_key: 'resume' }, mutable), ['resume', 'mute']);
   assert.deepEqual(notificationActions({ kind: 'quota-full', action_key: '' }, mutable), []);
   assert.deepEqual(notificationActions({ kind: 'lost-and-found', action_key: 'open-lost-found' }, mutable), ['open-lost-found']);
+});
+
+test('statusRedrawsView: a visão aberta dá lugar ao aviso quando a conta sai, e volta quando ela entra', () => {
+  // Desconectar com "Arquivos off-line" aberto deixava a lista da conta que saiu na tela.
+  assert.equal(statusRedrawsView('ok', 'signed-out'), true);
+  assert.equal(statusRedrawsView('syncing', 'starting'), true);
+  assert.equal(statusRedrawsView('signed-out', 'ok'), true);
+  assert.equal(statusRedrawsView('starting', 'signed-out'), true, 'o aviso muda de texto');
+  assert.equal(statusRedrawsView(undefined, 'signed-out'), true, 'a primeira leitura');
+  // Com a conta de pé, cada visão se atualiza pelos próprios eventos.
+  assert.equal(statusRedrawsView('ok', 'syncing'), false);
+  assert.equal(statusRedrawsView('signed-out', 'signed-out'), false);
 });

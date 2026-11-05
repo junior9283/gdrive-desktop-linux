@@ -3,7 +3,7 @@
 
 import { attempt, el, icon, stylesheet } from '../components.js';
 import { accountButton, accountMenu } from './home/account.js';
-import { headerFor, shownStatus, withoutAccount } from './home/model.js';
+import { headerFor, shownStatus, statusRedrawsView, withoutAccount } from './home/model.js';
 import { moreMenu, runArg } from './home/more.js';
 import { screenArg } from '../router.js';
 import * as activity from './home/activity.js';
@@ -159,7 +159,11 @@ async function flush() {
 
 // O cabeçalho primeiro: o selo e a visão dependem do `Status` novo.
 async function update({ status, badge, view }) {
-  if (status) await updateStatus();
+  if (status) {
+    const before = home.status?.state;
+    await updateStatus();
+    view ||= statusRedrawsView(before, home.status.state);
+  }
   await Promise.all([badge && updateBadge(), view && showView()]);
 }
 

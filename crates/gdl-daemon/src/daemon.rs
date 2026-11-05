@@ -1923,21 +1923,30 @@ impl Daemon {
             .pinned_children(folder.as_ref())
             .map_err(failed)?;
         let mut paths = DrivePaths::new(&engine, &mount, &self.layout);
-        Ok(items
+        items
             .into_iter()
-            .map(|item| OfflineEntry {
-                path: paths.of(&item),
-                is_folder: item.kind == ItemKind::Folder,
-                size: item.size,
-                pin: match item.pin {
-                    PinState::None => "mixed",
-                    PinState::Pinned | PinState::Inherited => "on",
-                }
-                .into(),
-                id: item.id.0,
-                name: item.local_name,
+            .map(|item| {
+                let is_folder = item.kind == ItemKind::Folder;
+                // A pasta do Drive não tem tamanho: vale o que está off-line dentro dela.
+                let size = if is_folder {
+                    engine.store().pinned_bytes_in(&item.id).map_err(failed)?
+                } else {
+                    item.size
+                };
+                Ok(OfflineEntry {
+                    path: paths.of(&item),
+                    is_folder,
+                    size,
+                    pin: match item.pin {
+                        PinState::None => "mixed",
+                        PinState::Pinned | PinState::Inherited => "on",
+                    }
+                    .into(),
+                    id: item.id.0,
+                    name: item.local_name,
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn unpin_item(&self, account: &str, item_id: &str) -> Result<(), ServiceError> {

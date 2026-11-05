@@ -778,6 +778,21 @@ impl Store {
         )?)
     }
 
+    /// Bytes dos arquivos off-line dentro de `folder`, em qualquer nível (a pasta do Drive não
+    /// tem tamanho). Sobe dos arquivos fixados, como `has_pinned_inside`.
+    pub fn pinned_bytes_in(&self, folder: &ItemId) -> Result<u64> {
+        Ok(self.conn().query_row(
+            "WITH RECURSIVE up(size, id) AS ( \
+                 SELECT size, parent FROM items \
+                 WHERE pin != 0 AND kind = 'file' AND trashed = 0 AND parent IS NOT NULL \
+                 UNION ALL SELECT up.size, i.parent FROM items i JOIN up ON i.id = up.id \
+                 WHERE i.parent IS NOT NULL) \
+             SELECT COALESCE(SUM(size), 0) FROM up WHERE id = ?1",
+            params![folder.0],
+            |r| r.get(0),
+        )?)
+    }
+
     /// Desfixa tudo ("Remover arquivos off-line") e devolve os itens que estavam fixados.
     pub fn unpin_all(&self) -> Result<Vec<ItemId>> {
         let conn = self.conn();
@@ -2385,6 +2400,27 @@ mod tests {
         assert!(!store.has_pinned_inside(&id("Pasta")).unwrap());
         assert!(store.pinned_children(None).unwrap().is_empty());
         assert_eq!(store.pinned_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn pinned_bytes_in_sums_the_offline_files_inside_a_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+        pinned_tree(&store);
+        // A pasta do Drive não tem tamanho: vale a soma dos arquivos off-line dentro dela.
+        assert_eq!(store.pinned_bytes_in(&id("Toda")).unwrap(), 5, "herdados");
+        assert_eq!(
+            store.pinned_bytes_in(&id("Pasta")).unwrap(),
+            10,
+            "sem solto.txt"
+        );
+        assert_eq!(
+            store.pinned_bytes_in(&id("root")).unwrap(),
+            15,
+            "em qualquer nível"
+        );
+        store.unpin_all().unwrap();
+        assert_eq!(store.pinned_bytes_in(&id("root")).unwrap(), 0);
     }
 
     #[test]

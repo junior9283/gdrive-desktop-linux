@@ -62,4 +62,4 @@ Google's APIs.
   check of the latest release version on the public GitHub API, which carries no user data. There
   are no ads, no analytics and no telemetry, and no person reads the user's data.
 - Use of the data follows the Google API Services User Data Policy, including the Limited Use
-  requirements. Privacy policy: https://junior9283.github.io/gerasync/privacy.html
+  requirements. Privacy policy: https://gerasync.solusapp.net/privacy.html

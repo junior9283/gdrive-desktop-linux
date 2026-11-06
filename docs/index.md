@@ -36,7 +36,7 @@ variantes do mesmo app; escolha a sua (elas também convivem no mesmo computador
 - **gdrive-desktop-linux** (arquivos `gdrive-desktop-linux*`): você usa um Client ID criado no seu
   próprio projeto do Google Cloud, como sempre.
 - **GeraSync** (arquivos `gerasync*`): instale e entre, com o Client ID oficial do projeto embutido.
-  Tem pasta (`~/GeraSync`), ícone e [site próprios](https://junior9283.github.io/gerasync/). Está em
+  Tem pasta (`~/GeraSync`), ícone e [site próprios](https://gerasync.solusapp.net/). Está em
   verificação pelo Google; até ela terminar, o login mostra o aviso de app não verificado.
 
 - [Código-fonte e instalação](https://github.com/junior9283/gdrive-desktop-linux)
@@ -53,4 +53,4 @@ variantes do mesmo app; escolha a sua (elas também convivem no mesmo computador
 > [Terms of use](termos-de-uso.md).
 > Each release also ships **GeraSync**, a variant with the project's own OAuth client built in
 > (install and sign in, no Google Cloud project needed): see
-> [junior9283.github.io/gerasync](https://junior9283.github.io/gerasync/).
+> [gerasync.solusapp.net](https://gerasync.solusapp.net/).

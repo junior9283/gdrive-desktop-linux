@@ -11,10 +11,10 @@ Valores usados em todo o pedido:
 | Nome do app | `GeraSync for Google Drive` |
 | E-mail de suporte e de contato | `gerasync@googlegroups.com` |
 | Logotipo (120 × 120) | `assets/gerasync/logo-120.png` |
-| Página inicial | `https://junior9283.github.io/gerasync/` |
-| Política de privacidade | `https://junior9283.github.io/gerasync/privacy.html` |
-| Termos de serviço | `https://junior9283.github.io/gerasync/terms.html` |
-| Domínio autorizado | `junior9283.github.io` |
+| Página inicial | `https://gerasync.solusapp.net/` |
+| Política de privacidade | `https://gerasync.solusapp.net/privacy.html` |
+| Termos de serviço | `https://gerasync.solusapp.net/terms.html` |
+| Domínio autorizado | `solusapp.net` |
 | Escopos | `openid`, `.../auth/userinfo.email`, `https://www.googleapis.com/auth/drive` |
 | Tipo do cliente | App para computador |
 | Segredos do repositório | `GERASYNC_CLIENT_ID`, `GERASYNC_CLIENT_SECRET` |
@@ -32,21 +32,21 @@ Valores usados em todo o pedido:
 
 - [ ] Nome do app, e-mail de suporte e logotipo da tabela acima.
 - [ ] Página inicial, política de privacidade e termos da tabela acima.
-- [ ] Domínio autorizado: `junior9283.github.io`.
+- [ ] Domínio autorizado: `solusapp.net`.
 - [ ] Contato do desenvolvedor: `gerasync@googlegroups.com`.
 
-## 4. Search Console (propriedade do domínio)
+## 4. Domínio e Search Console
 
 O domínio autorizado precisa estar confirmado no Search Console pela mesma conta dona do projeto.
+O site fica no subdomínio `gerasync.solusapp.net` (o motivo está em `historico.md`).
 
-- [ ] Search Console → Adicionar propriedade → **Prefixo do URL** → `https://junior9283.github.io/`.
-- [ ] Método **Tag HTML**: copiar só o valor de `content="..."` e me passar. Ele vai no
-  `<meta name="google-site-verification">` da página raiz (repositório
-  `junior9283/junior9283.github.io`) e da página do GeraSync.
-- [ ] Depois do push e de a página atualizar, clicar em **Verificar**.
-
-Se o Google recusar o `github.io` (há relatos de recusa de domínios de hospedagem de terceiros),
-o caminho é um domínio próprio, verificado por registro DNS, com o site apontado para ele.
+- [ ] Cloudflare, zona `solusapp.net`: TXT no `@` com o `google-site-verification=...` que o
+  Search Console mostra para a propriedade **Domínio** `solusapp.net`.
+- [ ] Cloudflare: CNAME `gerasync` → `junior9283.github.io`, **sem proxy** (nuvem cinza), para o
+  GitHub emitir o certificado.
+- [ ] Repositório `junior9283/gerasync`: arquivo `CNAME` com `gerasync.solusapp.net` e "Enforce
+  HTTPS" ligado nas configurações do Pages.
+- [ ] Search Console → propriedade **Domínio** `solusapp.net` → **Verificar**.
 
 ## 5. Acesso a dados (Google Auth Platform → Acesso a dados)
 

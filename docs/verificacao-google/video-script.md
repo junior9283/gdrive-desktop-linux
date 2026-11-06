@@ -16,7 +16,7 @@ captions in English.
 
 ## Scenes
 
-1. **The app.** Show the GeraSync home page (`https://junior9283.github.io/gerasync/`) and the
+1. **The app.** Show the GeraSync home page (`https://gerasync.solusapp.net/`) and the
    release download. Say: "GeraSync is a desktop client for Google Drive on Linux."
 2. **Sign in.** Open GeraSync. On the welcome screen click **Continue** until the browser opens the Google sign-in page.
 3. **Consent screen.** In the browser, before granting:

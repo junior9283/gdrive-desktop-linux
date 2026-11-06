@@ -62,7 +62,7 @@ brand! {
     package: "gerasync",
     name: "GeraSync",
     path: "/io/github/junior9283/GeraSync1",
-    site: "https://junior9283.github.io/gerasync/",
+    site: "https://gerasync.solusapp.net/",
 }
 
 #[cfg(test)]
@@ -115,7 +115,7 @@ mod tests {
         assert_eq!(UI_BUS_NAME, "io.github.junior9283.GeraSync1.Ui");
         assert_eq!(UI_OBJECT_PATH, "/io/github/junior9283/GeraSync1/Ui");
         assert_eq!(TRAY_BUS_NAME, "io.github.junior9283.GeraSync1.Tray");
-        assert_eq!(SITE_URL, "https://junior9283.github.io/gerasync/");
+        assert_eq!(SITE_URL, "https://gerasync.solusapp.net/");
         for value in [
             APP_ID,
             PACKAGE,

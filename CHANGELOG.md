@@ -7,6 +7,17 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Alterado
+
+- GeraSync: o site passa a ser [gerasync.solusapp.net](https://gerasync.solusapp.net/), num
+  domínio próprio, como pede a verificação do Google; o endereço antigo redireciona para ele.
+
+### Corrigido
+
+- Arquivos off-line: a pasta fixada mostra o tamanho do que está off-line dentro dela, não mais
+  "0 bytes".
+- Depois de desconectar a conta, a janela troca a visão aberta pelo aviso de entrar de novo.
+
 ## [1.3.1] - 2026-11-04
 
 Correções do GeraSync e da saída da conta.

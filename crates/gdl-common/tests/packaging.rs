@@ -561,7 +561,7 @@ fn both_flavors_package_into_the_same_folder() {
     let deb = read(out.join("deb.yaml"));
     assert!(deb.contains("name: gerasync\n"), "{deb}");
     assert!(
-        deb.contains("homepage: https://junior9283.github.io/gerasync/\n"),
+        deb.contains("homepage: https://gerasync.solusapp.net/\n"),
         "{deb}"
     );
     assert!(

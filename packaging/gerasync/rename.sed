@@ -9,7 +9,7 @@ s|github\.com/junior9283/gdrive-desktop-linux|@@REPO@@|g
 /<comment/s/Google Drive/@@DRIVE@@/g
 s/^  Cliente não oficial do Google Drive para Linux\.$/  GeraSync: cliente não oficial do @@DRIVE@@ para Linux./
 # A página do pacote (nfpm) é o site do GeraSync.
-s|^homepage: .*|homepage: https://junior9283.github.io/gerasync/|
+s|^homepage: .*|homepage: https://gerasync.solusapp.net/|
 # O ID do app (D-Bus, .desktop, ícone) e os nomes de classe dos menus.
 s/GDriveDesktopLinux/GeraSync/g
 s/gdrive-desktop-linux/gerasync/g

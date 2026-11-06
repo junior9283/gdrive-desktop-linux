@@ -23,12 +23,20 @@ O que já foi feito no Google, com data, para retomar sem refazer. Os passos est
   a propriedade foi adicionada em 04/11.
 - A verificação do escopo (Verification Center → Data access) só abre depois da marca verificada.
 
+## 2026-11-06
+
+- "I have fixed the issues" → Proceed: recusado de novo com a mesma mensagem, mesmo com a
+  propriedade verificada havia mais de 24 h pela conta dona do projeto. O Google não aceita o
+  `github.io` (o domínio é do GitHub).
+- Decisão: site no subdomínio `gerasync.solusapp.net`, do domínio `solusapp.net` (Cloudflare), que
+  já é do usuário. Propriedade **Domínio** `solusapp.net` criada no Search Console, à espera do
+  TXT no DNS.
+
 ## Próximo passo
 
-- A partir de 2026-11-06: Branding → View issues → **I have fixed the issues** → Proceed. Se recusar
-  de novo com a propriedade já verificada há mais de 24 h, escolher **I believe the issues found
-  are incorrect** e explicar que `https://junior9283.github.io/` está verificada no Search Console
-  pela mesma conta (prefixo do URL que cobre `/gerasync/`).
+- Seção 4 do `checklist.md`: DNS, domínio no GitHub Pages e verificação de `solusapp.net`.
+- Branding: página inicial, privacidade e termos em `https://gerasync.solusapp.net/` e domínio
+  autorizado `solusapp.net`. Esperar 24 h e rodar **Verify branding**.
 - Com a marca verificada: Verification Center → **Prepare for verification** do escopo `drive`.
 
 ## Observações

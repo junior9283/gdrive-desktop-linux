@@ -145,7 +145,7 @@ convivem no mesmo computador, cada uma com a própria pasta, dados, serviço e �
 | Login | você cria o próprio Client ID no Google Cloud ([guia](docs/guia-client-id.md)) | instale e entre: o Client ID oficial vem embutido |
 | Arquivos do release | `gdrive-desktop-linux*` | `gerasync*` |
 | Pasta | `~/Google Drive` | `~/GeraSync` |
-| Site | esta página | [junior9283.github.io/gerasync](https://junior9283.github.io/gerasync/) |
+| Site | esta página | [gerasync.solusapp.net](https://gerasync.solusapp.net/) |
 
 O GeraSync está em verificação pelo Google. Até ela terminar, a tela de login mostra o aviso de
 app não verificado (clique em Avançado e depois em Acessar o GeraSync) e vale o limite de 100 contas

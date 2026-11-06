@@ -141,4 +141,4 @@ Com "Enviar relatórios de erro automaticamente" ligado nas Preferências, depoi
 issue com o relatório; quem envia é você.
 
 Veja também as [perguntas frequentes](perguntas-frequentes.md) e as issues em
-<https://github.com/junior9283/gdrive-desktop-linux/issues>.
+<https://github.com/tzanella/gdrive-desktop-linux/issues>.

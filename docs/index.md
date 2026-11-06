@@ -24,7 +24,7 @@ você mesmo cria no seu projeto do Google Cloud (e, uma vez por dia, pergunta ao
 última versão do app). O projeto não tem servidores e não recebe nenhum
 dado seu. Ele não tem ligação com o Google nem é aprovado por ele.
 
-- [Código-fonte e instalação](https://github.com/junior9283/gdrive-desktop-linux)
+- [Código-fonte e instalação](https://github.com/tzanella/gdrive-desktop-linux)
 - [Política de Privacidade](politica-de-privacidade.md)
 - [Termos de uso](termos-de-uso.md)
 - [Guia do Client ID](guia-client-id.md)

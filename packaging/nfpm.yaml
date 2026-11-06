@@ -8,9 +8,9 @@ platform: linux
 version: ${VERSION}
 section: net
 priority: optional
-maintainer: junior9283 <eng.geraldo@outlook.com>
-vendor: junior9283
-homepage: https://github.com/junior9283/gdrive-desktop-linux
+maintainer: Túlio Zanella <tuliocadilhaczanella@gmail.com>
+vendor: tzanella
+homepage: https://github.com/tzanella/gdrive-desktop-linux
 license: GPL-3.0-only
 description: |-
   Cliente não oficial do Google Drive para Linux.

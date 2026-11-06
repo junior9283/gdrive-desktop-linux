@@ -1,7 +1,7 @@
 //! Os endereços que a bandeja e a janela abrem no navegador, numa tabela fixa: a janela pede pelo
 //! nome e nunca manda um endereço qualquer.
 
-const PROJECT: &str = "https://github.com/junior9283/gdrive-desktop-linux";
+const PROJECT: &str = "https://github.com/tzanella/gdrive-desktop-linux";
 
 /// O Meu Drive na web.
 pub const DRIVE_WEB: &str = "https://drive.google.com/drive/my-drive";
@@ -39,7 +39,7 @@ pub fn url(name: &str) -> Option<String> {
 
 /// A última release do projeto na API do GitHub (o aviso de nova versão).
 pub const LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/junior9283/gdrive-desktop-linux/releases/latest";
+    "https://api.github.com/repos/tzanella/gdrive-desktop-linux/releases/latest";
 
 /// A página da release `version` (`X.Y.Z`), com as novidades.
 pub fn release_notes(version: &str) -> String {

@@ -660,7 +660,9 @@ está feito, ou registrado em "Diferenças inevitáveis" no README.
 - `.gitignore` que impede a entrada de binários de terceiros e de material de engenharia reversa.
 - Este CHANGELOG e a política de versionamento.
 
-[Não lançado]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.3...HEAD
+[Não lançado]: https://github.com/tzanella/gdrive-desktop-linux/compare/v1.2.5...HEAD
+[1.2.5]: https://github.com/tzanella/gdrive-desktop-linux/compare/v1.2.4...v1.2.5
+[1.2.4]: https://github.com/tzanella/gdrive-desktop-linux/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/junior9283/gdrive-desktop-linux/compare/v1.2.0...v1.2.1

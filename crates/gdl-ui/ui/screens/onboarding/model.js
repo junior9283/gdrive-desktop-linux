@@ -7,7 +7,7 @@ const LOGIN = ['setup', 'sign-in', 'waiting'];
 // O guia do Client ID (base: `docs/guia-client-id.md`): cada parte abre a sua página do Google
 // Cloud pelo nome do link (`gdl_common::links`); `copy` são os valores para colar lá, com o campo
 // (`label`) onde vão.
-const SITE = 'https://junior9283.github.io/gdrive-desktop-linux/';
+const SITE = 'https://tzanella.github.io/gdrive-desktop-linux/';
 export const GUIDE = [
   { id: 'project', link: 'gcp-new-project' },
   { id: 'drive-api', link: 'gcp-drive-api' },

@@ -3933,7 +3933,7 @@ async fn crash_is_offered_once_when_reporting_is_on() {
         .unwrap();
     wait_until("a issue aberta", || h.opened().len() == before + 1).await;
     let url = &h.opened()[before];
-    let issues = "https://github.com/junior9283/gdrive-desktop-linux/issues/new?";
+    let issues = "https://github.com/tzanella/gdrive-desktop-linux/issues/new?";
     assert!(url.starts_with(issues), "{url}");
     assert!(url.contains("falhou"), "o relatório vai no texto: {url}");
     assert!(!url.contains("ya29") && !url.contains("ana%40"), "{url}");

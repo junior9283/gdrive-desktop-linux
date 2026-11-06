@@ -20,4 +20,4 @@ Os arquivos apagados vão para a lixeira do Drive (a pasta oculta `.Lixeira do D
 pasta do Drive) e podem ser restaurados de lá ou pela web.
 
 **Onde ficam os registros para relatar um problema?**
-Rode `journalctl --user -u gdrive-desktop-linuxd` para ver os registros do serviço. Abra um relato em <https://github.com/junior9283/gdrive-desktop-linux/issues>.
+Rode `journalctl --user -u gdrive-desktop-linuxd` para ver os registros do serviço. Abra um relato em <https://github.com/tzanella/gdrive-desktop-linux/issues>.

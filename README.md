@@ -136,7 +136,7 @@ A especificação completa está em
 
 ## Como instalar
 
-**1. Instalar.** Baixe da [página de releases](https://github.com/junior9283/gdrive-desktop-linux/releases/latest)
+**1. Instalar.** Baixe da [página de releases](https://github.com/tzanella/gdrive-desktop-linux/releases/latest)
 o arquivo da sua distribuição (64 bits, x86_64):
 
 | Distribuição | Arquivo | Como instalar |
@@ -307,6 +307,10 @@ todo e lida com os seus arquivos.
 
 Este projeto não tem vínculo com o Google LLC nem é endossado por ele. "Google Drive" e "Google
 Fotos" são marcas registradas do Google LLC e são citadas aqui apenas para indicar compatibilidade.
+
+## Créditos e Origem
+
+Este repositório é mantido por [Túlio Zanella (@tzanella)](https://github.com/tzanella). O repositório original do projeto é [junior9283/gdrive-desktop-linux](https://github.com/junior9283/gdrive-desktop-linux) e os devidos créditos por toda a concepção e implementação original são de [junior9283](https://github.com/junior9283).
 
 ## Licença
 

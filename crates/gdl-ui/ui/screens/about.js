@@ -3,7 +3,7 @@
 
 import { el, stylesheet } from '../components.js';
 
-const PROJECT = 'https://github.com/junior9283/gdrive-desktop-linux';
+const PROJECT = 'https://github.com/tzanella/gdrive-desktop-linux';
 // Os recursos do front-end (as licenças completas estão em `third-party/`).
 const FRONTEND = [
   { name: 'Inter', version: '4.1', license: 'OFL-1.1' },

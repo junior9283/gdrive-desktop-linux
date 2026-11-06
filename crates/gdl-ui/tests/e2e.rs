@@ -1301,7 +1301,7 @@ async fn feedback_screen_opens_a_prefilled_issue() {
 
     assert_eq!(blocked, json!(true), "sem descrição não envia");
     assert!(
-        url.starts_with("https://github.com/junior9283/gdrive-desktop-linux/issues/new?"),
+        url.starts_with("https://github.com/tzanella/gdrive-desktop-linux/issues/new?"),
         "{url}"
     );
     assert!(

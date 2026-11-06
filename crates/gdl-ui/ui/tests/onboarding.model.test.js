@@ -94,12 +94,12 @@ test('os escopos para copiar são os que o login pede', () => {
 // projeto (GitHub Pages, a pasta docs/) serve para qualquer pessoa.
 test('a tela de consentimento recebe as páginas do site do projeto', () => {
   const copy = GUIDE.find((s) => s.id === 'branding').copy;
-  const site = 'https://junior9283.github.io/gdrive-desktop-linux/';
+  const site = 'https://tzanella.github.io/gdrive-desktop-linux/';
   assert.deepEqual(copy, [
     { label: 'homepage', text: site },
     { label: 'privacy', text: `${site}politica-de-privacidade.html` },
     { label: 'terms', text: `${site}termos-de-uso.html` },
-    { label: 'domain', text: 'junior9283.github.io' },
+    { label: 'domain', text: 'tzanella.github.io' },
   ]);
   for (const page of ['politica-de-privacidade', 'termos-de-uso']) assert.ok(repo(`docs/${page}.md`));
   assert.match(repo('docs/index.md'), /politica-de-privacidade\.md/);

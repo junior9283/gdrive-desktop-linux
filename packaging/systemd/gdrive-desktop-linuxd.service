@@ -1,6 +1,6 @@
 [Unit]
 Description=Google Drive para Linux
-Documentation=https://github.com/junior9283/gdrive-desktop-linux
+Documentation=https://github.com/tzanella/gdrive-desktop-linux
 After=graphical-session.target
 
 [Service]

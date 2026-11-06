@@ -29,14 +29,19 @@ O que já foi feito no Google, com data, para retomar sem refazer. Os passos est
   propriedade verificada havia mais de 24 h pela conta dona do projeto. O Google não aceita o
   `github.io` (o domínio é do GitHub).
 - Decisão: site no subdomínio `gerasync.solusapp.net`, do domínio `solusapp.net` (Cloudflare), que
-  já é do usuário. Propriedade **Domínio** `solusapp.net` criada no Search Console, à espera do
-  TXT no DNS.
+  já é do usuário.
+- Cloudflare (`solusapp.net`): TXT de verificação do Google no `@` e CNAME `gerasync` →
+  `junior9283.github.io` sem proxy. Search Console: propriedade **Domínio** `solusapp.net`
+  verificada ("Ownership auto verified").
+- GitHub Pages do repositório `gerasync`: domínio `gerasync.solusapp.net` com HTTPS obrigatório; o
+  endereço antigo redireciona (301).
+- Branding salvo com a página inicial, a privacidade e os termos em `https://gerasync.solusapp.net/`
+  e o domínio autorizado `solusapp.net`.
 
 ## Próximo passo
 
-- Seção 4 do `checklist.md`: DNS, domínio no GitHub Pages e verificação de `solusapp.net`.
-- Branding: página inicial, privacidade e termos em `https://gerasync.solusapp.net/` e domínio
-  autorizado `solusapp.net`. Esperar 24 h e rodar **Verify branding**.
+- A partir de 2026-11-07: Branding → View issues → **I have fixed the issues** → Proceed (24 h
+  depois de verificar a propriedade `solusapp.net`).
 - Com a marca verificada: Verification Center → **Prepare for verification** do escopo `drive`.
 
 ## Observações

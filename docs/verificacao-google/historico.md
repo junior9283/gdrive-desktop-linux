@@ -38,11 +38,19 @@ O que já foi feito no Google, com data, para retomar sem refazer. Os passos est
 - Branding salvo com a página inicial, a privacidade e os termos em `https://gerasync.solusapp.net/`
   e o domínio autorizado `solusapp.net`.
 
+- Sem esperar as 24 h, "I have fixed the issues" → Proceed com o Branding novo: **marca
+  verificada** e publicada ("Your branding has been verified and is being shown to users").
+- **Pedido do escopo `drive` enviado** (Verification Center → Prepare for verification → Confirm).
+  "Additional info": código e pacotes no GitHub, um único cliente desktop e a troca de endereço
+  da página (o vídeo mostra o antigo, que redireciona). Questionário: "No" nas quatro perguntas e
+  os dois termos aceitos, inclusive o de que escopo restrito exige a avaliação **CASA**, renovada
+  todo ano. Status: "Your app's data access is under review".
+
 ## Próximo passo
 
-- A partir de 2026-11-07: Branding → View issues → **I have fixed the issues** → Proceed (24 h
-  depois de verificar a propriedade `solusapp.net`).
-- Com a marca verificada: Verification Center → **Prepare for verification** do escopo `drive`.
+- Acompanhar o e-mail `gerasync@googlegroups.com` e Verification Center → View verification
+  progress. Responder o que o revisor pedir; para a CASA, ver `casa-answer.md` e decidir com o
+  usuário se faz a avaliação (custo de laboratório credenciado, renovação anual).
 
 ## Observações
 

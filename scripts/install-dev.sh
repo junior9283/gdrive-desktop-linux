@@ -5,7 +5,7 @@
 # gerenciadores de arquivos GTK e os plugins do Dolphin (menu e emblemas).
 #
 #   scripts/install-dev.sh [--flavor default|gerasync] [--prefix DIR] [--destdir DIR] [--from DIR]
-#                          [--dry-run] [--no-activate] [--dolphin DIR | --no-dolphin]
+#                          [--dry-run] [--no-activate] [--dolphin DIR | --no-dolphin] [--tarball]
 #
 # --flavor gerasync instala o GeraSync (o Client ID embutido no build): os mesmos arquivos, com os
 # nomes e o conteúdo passados pela tabela packaging/gerasync/rename.sed, e o ícone dele. As duas
@@ -17,6 +17,8 @@
 # preenche); sem ele, na instalação em ~/.local feita do código-fonte, o instalador compila os
 # plugins (precisa de CMake, ECM, Qt 6 e KIO 6; sem isso, avisa e segue sem eles);
 # --no-dolphin não instala os plugins.
+# --tarball marca a instalação como vinda do .tar.gz do release (o install.sh dele passa): é por
+# esse marcador que o app sabe que pode se atualizar sozinho.
 # --from usa os programas já compilados em DIR (sem ele, compila com `cargo build --release`);
 # --dry-run só lista o que instalaria; --no-activate não avisa o systemd nem o D-Bus nem atualiza
 # os bancos de tipos e de aplicativos; --destdir grava em DIR/<prefixo> os arquivos que vão funcionar
@@ -24,6 +26,7 @@
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 prefix="$HOME/.local" destdir="" from="" dolphin="" no_dolphin=false dry=false activate=true flavor=default
+tarball=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=$2; shift 2 ;;
@@ -34,6 +37,7 @@ while [ $# -gt 0 ]; do
     --dry-run) dry=true; shift ;;
     --flavor) flavor=$2; shift 2 ;;
     --no-activate) activate=false; shift ;;
+    --tarball) tarball=true; shift ;;
     *) echo "argumento desconhecido: $1" >&2; exit 2 ;;
   esac
 done
@@ -160,6 +164,11 @@ fi
 
 # Os pacotes trazem um marcador do formato no lugar da lista (o gerenciador sabe o que é dele).
 if ! $dry && [ -z "$destdir" ]; then
+  if $tarball; then
+    : > "$share/$name/tarball"
+    installed="$installed$share/$name/tarball
+"
+  fi
   printf '%s' "$installed" > "$share/$name/installed-files"
 fi
 

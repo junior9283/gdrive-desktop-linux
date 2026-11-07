@@ -7,6 +7,7 @@ pub mod crash;
 pub mod fs;
 pub mod gdocs;
 pub mod i18n;
+pub mod install;
 pub mod links;
 pub mod names;
 pub mod paths;

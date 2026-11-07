@@ -15,6 +15,17 @@ pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
+/// O programa em execução, canonicalizado na primeira chamada e o mesmo depois disso (chame
+/// cedo, na partida): depois que uma atualização troca o arquivo, `/proc/self/exe` aponta para o
+/// antigo, apagado, e é este caminho que volta a rodar.
+pub fn startup_exe() -> &'static Path {
+    static EXE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    EXE.get_or_init(|| {
+        let exe = std::env::current_exe().unwrap_or_default();
+        exe.canonicalize().unwrap_or(exe)
+    })
+}
+
 /// A pasta deste executável (os outros programas do app ficam ao lado).
 pub fn exe_dir() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
@@ -127,6 +138,14 @@ impl Paths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_exe_is_fixed_and_absolute() {
+        let first = startup_exe();
+        assert!(first.is_absolute(), "{first:?}");
+        assert!(first.exists(), "{first:?}");
+        assert_eq!(startup_exe(), first);
+    }
 
     #[test]
     fn user_dir_reads_user_dirs_dirs() {

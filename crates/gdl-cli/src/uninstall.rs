@@ -7,37 +7,9 @@ use std::path::{Component, Path, PathBuf};
 
 use gdl_common::fs::remove_file_if_exists;
 
-/// O nome do pacote nos três formatos.
 use gdl_common::brand::PACKAGE;
-
-/// Como o app foi instalado.
-#[derive(Debug, PartialEq)]
-pub enum Install {
-    /// Por um pacote: `deb`, `rpm` ou `archlinux` (o marcador que cada pacote traz).
-    Package(String),
-    /// Pelo `install.sh`/`install-dev.sh` no prefixo, com a lista do que instalou.
-    User { prefix: PathBuf, manifest: PathBuf },
-}
-
-/// A pasta do app em `<prefixo>/share`, ao lado de `<prefixo>/bin`.
-fn own_share(prefix: &Path) -> PathBuf {
-    prefix.join("share").join(PACKAGE)
-}
-
-/// Como foram instalados os programas da pasta `bin`; `None` fora de uma instalação (rodando
-/// do código-fonte, por exemplo).
-pub fn detect(bin: &Path) -> Option<Install> {
-    let prefix = bin.parent()?;
-    let share = own_share(prefix);
-    if let Ok(kind) = std::fs::read_to_string(share.join("package")) {
-        return Some(Install::Package(kind.trim().to_owned()));
-    }
-    let manifest = share.join("installed-files");
-    manifest.is_file().then(|| Install::User {
-        prefix: prefix.to_path_buf(),
-        manifest,
-    })
-}
+use gdl_common::install::own_share;
+pub use gdl_common::install::{Install, detect};
 
 /// O comando (com o `pkexec`, que pede a senha de administrador) que remove o pacote. A
 /// ferramenta de baixo nível de cada formato serve a todas as distribuições dele (o `rpm` ao
@@ -114,38 +86,6 @@ pub fn refresh(prefix: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn package_marker_wins_over_the_list() {
-        let dir = tempfile::tempdir().unwrap();
-        let share = own_share(dir.path());
-        std::fs::create_dir_all(&share).unwrap();
-        std::fs::write(share.join("installed-files"), "").unwrap();
-        std::fs::write(share.join("package"), "rpm\n").unwrap();
-
-        let install = detect(&dir.path().join("bin"));
-
-        assert_eq!(install, Some(Install::Package("rpm".into())));
-    }
-
-    #[test]
-    fn list_means_a_user_install_and_nothing_means_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let bin = dir.path().join("bin");
-        assert_eq!(detect(&bin), None);
-
-        let share = own_share(dir.path());
-        std::fs::create_dir_all(&share).unwrap();
-        std::fs::write(share.join("installed-files"), "").unwrap();
-
-        assert_eq!(
-            detect(&bin),
-            Some(Install::User {
-                prefix: dir.path().to_path_buf(),
-                manifest: share.join("installed-files"),
-            })
-        );
-    }
 
     #[test]
     fn each_format_removes_its_package_with_pkexec() {

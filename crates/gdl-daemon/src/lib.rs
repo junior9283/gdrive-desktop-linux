@@ -16,6 +16,7 @@ pub mod mount;
 pub mod notify;
 pub mod official;
 pub mod updates;
+pub mod upgrade;
 
 pub use daemon::{Api, Config, Daemon};
 

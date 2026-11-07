@@ -171,6 +171,8 @@ fn installs_with_the_paths_of_the_prefix() {
         let body = read(prefix.join(file));
         assert!(body.contains(&line), "{file}: {line}\n{body}");
     }
+    // Do código-fonte, sem o marcador do .tar.gz: o app não se atualiza sozinho.
+    assert!(!prefix.join("share/gdrive-desktop-linux/tarball").exists());
 }
 
 /// Os pacotes: tudo em `<destdir>/usr`, apontando para `/usr`, sem avisar o systemd nem o D-Bus
@@ -639,6 +641,11 @@ fn gerasync_tarball_installs_gerasync() {
 
     assert!(prefix.join("bin/gerasync-tray").is_file());
     assert!(prefix.join("share/gerasync/installed-files").is_file());
+    // O marcador que diz ao app que ele pode se atualizar sozinho (e que a desinstalação apaga).
+    let marker = prefix.join("share/gerasync/tarball");
+    assert!(marker.is_file());
+    let listed = read(prefix.join("share/gerasync/installed-files"));
+    assert!(listed.contains(marker.to_str().unwrap()), "{listed}");
     let uninstall = read(root.join("uninstall.sh"));
     assert!(
         uninstall.contains("/bin/gerasync\" uninstall"),

@@ -273,7 +273,9 @@ async fn uninstall(proxy: &ServiceProxy<'_>, purge: bool, yes: bool, i18n: &I18n
                 }
             }
         }
-        Install::User { prefix, manifest } => {
+        Install::User {
+            prefix, manifest, ..
+        } => {
             uninstall::remove_listed(prefix, manifest).map_err(failed)?;
             uninstall::refresh(prefix);
         }

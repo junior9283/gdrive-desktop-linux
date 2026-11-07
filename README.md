@@ -313,7 +313,9 @@ Cada etapa sai funcionando antes da próxima.
 | 0.11 | Últimos itens da janela, da bandeja e das Preferências; tour de boas-vindas; limites do Drive com mensagem própria |
 | 1.0 | Paridade com a versão Windows, item a item na [matriz de paridade](docs/paridade.md) |
 | 1.1 | Pendências da 1.0: corridas raras corrigidas e emblema de erro nas pastas do computador |
-| 1.2 | Robustez: a desmontagem, a troca de pasta e os avisos não esperam sem fim; erros de permissão nas pastas do computador com texto próprio ← **estamos aqui** |
+| 1.2 | Robustez: a desmontagem, a troca de pasta e os avisos não esperam sem fim; erros de permissão nas pastas do computador com texto próprio |
+| 1.3 | GeraSync, a segunda variante, que entra sem criar Client ID |
+| 1.4 | Atualização automática: **Atualizar agora** ou **Depois**, com releases assinados ← **estamos aqui** |
 
 ## Versionamento
 

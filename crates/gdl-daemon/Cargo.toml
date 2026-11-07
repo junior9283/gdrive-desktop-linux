@@ -25,6 +25,7 @@ regex.workspace = true
 rustix = { workspace = true, features = ["fs", "process", "system"] }
 ron.workspace = true
 sha2.workspace = true
+minisign-verify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
@@ -46,6 +47,7 @@ name = "e2e-daemon"
 required-features = ["testing"]
 
 [dev-dependencies]
+minisign.workspace = true
 gdl-fake-drive.workspace = true
 gdl-mcp.workspace = true
 reqwest.workspace = true

@@ -45,6 +45,10 @@ pub fn url(name: &str) -> Option<String> {
 pub const LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/junior9283/gdrive-desktop-linux/releases/latest";
 
+/// A chave pública minisign (base64) que assina o `SHA256SUMS` de cada release. Vazia, nenhuma
+/// assinatura confere e o app não se atualiza sozinho (só mostra "Ver novidades").
+pub const RELEASE_PUBLIC_KEY: &str = "";
+
 /// A página da release `version` (`X.Y.Z`), com as novidades.
 pub fn release_notes(version: &str) -> String {
     format!("{PROJECT}/releases/tag/v{version}")

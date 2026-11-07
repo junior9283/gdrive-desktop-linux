@@ -30,6 +30,12 @@ jobs:
         env:
           GERASYNC_CLIENT_ID: ${{ secrets.GERASYNC_CLIENT_ID }}
           GERASYNC_CLIENT_SECRET: ${{ secrets.GERASYNC_CLIENT_SECRET }}
+      # Numa tag, sem a chave da assinatura o release não sai: falha aqui, não depois dos builds.
+      - name: A chave da assinatura
+        if: github.ref_type == 'tag'
+        run: test -n "$MINISIGN_SECRET_KEY" || { echo "falta o segredo MINISIGN_SECRET_KEY" >&2; exit 1; }
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
       - name: Dependências
         run: integrations/debian-deps.sh
       # As duas variantes na mesma pasta: os .so têm nomes diferentes.
@@ -149,6 +155,14 @@ jobs:
         with:
           name: dist
           path: dist
+      # O app só instala sozinho uma versão cujo SHA256SUMS confere com esta assinatura.
+      - name: Assina o SHA256SUMS
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y minisign
+          sh scripts/sign-sums.sh dist
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}

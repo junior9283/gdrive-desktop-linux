@@ -162,6 +162,18 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn release_signature_from_the_cli_checks_with_the_project_key() {
+        // Assinado pelo `scripts/sign-sums.sh` (a CLI do minisign) com a chave do projeto.
+        let sums = include_bytes!("../../tests/fixtures/release/SHA256SUMS");
+        let signature = include_bytes!("../../tests/fixtures/release/SHA256SUMS.minisig");
+        let key = gdl_common::links::RELEASE_PUBLIC_KEY;
+        assert_eq!(
+            expected_sha256(sums, signature, key, "pkg.rpm").unwrap(),
+            sha256_hex(b"pacote\n")
+        );
+    }
+
+    #[test]
     fn sha256_hex_matches_sha256sum() {
         assert_eq!(
             sha256_hex(b"abc"),

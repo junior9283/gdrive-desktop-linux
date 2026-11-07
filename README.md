@@ -165,7 +165,18 @@ o GeraSync, troque `gdrive-desktop-linux` por `gerasync` no nome do arquivo:
 | Arch, Manjaro, EndeavourOS, CachyOS | `.pkg.tar.zst` | `sudo pacman -U ./gdrive-desktop-linux-*.pkg.tar.zst` |
 | Qualquer outra | `.tar.gz` | instale o FUSE 3 e o WebKitGTK 4.1 da distribuição; depois `tar -xzf gdrive-desktop-linux-*.tar.gz` e `./gdrive-desktop-linux-*/install.sh` (instala em `~/.local`, sem root) |
 
-O `SHA256SUMS` do release confere os arquivos baixados (`sha256sum -c --ignore-missing SHA256SUMS`).
+O `SHA256SUMS` do release confere os arquivos baixados (`sha256sum -c --ignore-missing SHA256SUMS`),
+e o `SHA256SUMS.minisig` confere o próprio `SHA256SUMS` com a chave do projeto (a mesma que o app
+usa antes de se atualizar sozinho):
+
+```bash
+minisign -Vm SHA256SUMS -P RWRno1ThiriVL29Enbhi5Bip6NzWREAS8tnXWHAd9jx7bS1JF1V5okTK
+```
+
+**Atualizações.** Uma vez por dia o app procura uma versão nova no GitHub. Achando, oferece
+**Atualizar agora** ou **Depois** (na notificação, no menu da bandeja e na tela Sobre): ele baixa o
+pacote do seu formato, confere a assinatura e instala (os pacotes do sistema pedem a senha de
+administrador; o `.tar.gz` não). Quem compilou o código recebe só o aviso e o link da versão.
 
 <details>
 <summary>Ou compilar o código</summary>

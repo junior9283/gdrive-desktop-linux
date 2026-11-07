@@ -131,37 +131,14 @@ mod tests {
     use crate::daemon::releases::{DOWNLOAD_DIR, STATE_FILE};
     use crate::daemon::{Exit, UpdateStep};
     use crate::notify::{LATER, START_UPDATE};
+    use crate::testutil::deb;
     use crate::testutil::wait_until;
     use crate::upgrade::InstallKind;
     use crate::upgrade::install::InstallOutcome;
-    use crate::upgrade::offer::{SIGNATURE, SUMS};
     use crate::upgrade::verify::sha256_hex;
-    use crate::upgrade::verify::tests::{sign_for_harness, sums_of};
 
     const FAILED: &str = "Não deu para atualizar";
     const UPDATED: &str = "Atualizado para a versão";
-
-    /// O `.deb` desta variante na versão `tag`.
-    fn deb(tag: &str) -> String {
-        InstallKind::Deb
-            .package_name(version(tag).unwrap())
-            .unwrap()
-    }
-
-    /// Publica a release `tag` com o pacote `served`, as somas (do conteúdo `listed`) e a
-    /// assinatura da chave que o `Harness` confia.
-    fn publish(h: &Harness, tag: &str, listed: &[u8], served: &[u8]) {
-        let sums = sums_of(&[(&deb(tag), listed)]);
-        let signature = sign_for_harness(&sums);
-        h.fake.set_release(
-            Some(tag),
-            vec![
-                (deb(tag), served.to_vec()),
-                (SUMS.into(), sums),
-                (SIGNATURE.into(), signature),
-            ],
-        );
-    }
 
     fn named(h: &Harness, summary: &str) -> Vec<crate::testutil::Note> {
         h.notes()
@@ -184,16 +161,10 @@ mod tests {
         h.paths().cache_dir.join(DOWNLOAD_DIR)
     }
 
-    /// A release `v99.0.0` assinada, já consultada (a oferta instalável).
-    async fn offered(h: &Harness) {
-        publish(h, "v99.0.0", b"p", b"p");
-        h.daemon.check_release().await;
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn offer_has_update_now_and_later() {
         let h = Harness::new().await;
-        publish(&h, "v99.0.0", b"pacote", b"pacote");
+        h.publish_release("v99.0.0", b"pacote", b"pacote");
 
         h.daemon.check_release().await;
 
@@ -224,7 +195,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn restart_does_not_repeat_offer() {
         let mut h = Harness::new().await;
-        publish(&h, "v99.0.0", b"p", b"p");
+        h.publish_release("v99.0.0", b"p", b"p");
 
         h.daemon.check_release().await;
         h.daemon.check_release().await;
@@ -232,7 +203,7 @@ mod tests {
         h.daemon.check_release().await;
 
         assert_eq!(announced(&h).len(), 1, "{:?}", h.notes());
-        publish(&h, "v99.0.1", b"p", b"p");
+        h.publish_release("v99.0.1", b"p", b"p");
         h.daemon.check_release().await;
         assert_eq!(announced(&h).len(), 2, "a versão seguinte avisa logo");
     }
@@ -240,7 +211,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn offer_repeats_after_a_day() {
         let h = Harness::new().await;
-        offered(&h).await;
+        h.offer_release().await;
         let day_ago = gdl_common::time::now_ms() - 25 * 60 * 60 * 1000;
         let state = serde_json::json!({ "version": "99.0.0", "offered_ms": day_ago });
         write_saved(&h, state);
@@ -256,7 +227,7 @@ mod tests {
         let h = Harness::new().await;
         std::fs::create_dir_all(&h.paths().state_dir).unwrap();
         std::fs::write(h.paths().state_dir.join("versao-avisada"), "99.0.0").unwrap();
-        publish(&h, "v99.0.0", b"p", b"p");
+        h.publish_release("v99.0.0", b"p", b"p");
 
         h.daemon.check_release().await;
 
@@ -272,7 +243,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn later_only_dismisses() {
         let h = Harness::new().await;
-        offered(&h).await;
+        h.offer_release().await;
 
         h.daemon.run_action("", LATER).await.unwrap();
 
@@ -284,7 +255,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn update_installs_and_upgrades() {
         let h = Harness::new().await;
-        publish(&h, "v99.0.0", b"pacote", b"pacote");
+        h.publish_release("v99.0.0", b"pacote", b"pacote");
         h.daemon.check_release().await;
 
         h.daemon.run_action("", START_UPDATE).await.unwrap();
@@ -345,7 +316,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn bad_download_fails_safely() {
         let h = Harness::new().await;
-        publish(&h, "v99.0.0", b"pacote", b"<html>erro</html>");
+        h.publish_release("v99.0.0", b"pacote", b"<html>erro</html>");
         h.daemon.check_release().await;
 
         h.daemon.update_now().await.unwrap();
@@ -360,7 +331,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn installer_failure_is_reported() {
         let h = Harness::new().await;
-        offered(&h).await;
+        h.offer_release().await;
         *h.installer.result.lock().unwrap() =
             Err(crate::upgrade::UpgradeError::Install("saiu com 100".into()));
 
@@ -374,7 +345,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn canceled_password_is_quiet() {
         let h = Harness::new().await;
-        offered(&h).await;
+        h.offer_release().await;
         *h.installer.result.lock().unwrap() = Ok(InstallOutcome::Canceled);
 
         h.daemon.update_now().await.unwrap();
@@ -388,7 +359,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn second_start_is_ignored() {
         let h = Harness::new().await;
-        offered(&h).await;
+        h.offer_release().await;
 
         let (first, second) = tokio::join!(h.daemon.update_now(), h.daemon.update_now());
 
@@ -399,7 +370,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn source_install_opens_release_page() {
         let h = Harness::with_install_kind(InstallKind::Source).await;
-        offered(&h).await;
+        h.offer_release().await;
         let actions = &announced(&h)[0].actions;
         assert!(!actions.iter().any(|a| a == START_UPDATE), "{actions:?}");
 

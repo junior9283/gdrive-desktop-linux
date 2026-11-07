@@ -7,11 +7,12 @@ use gdl_ipc::{
     AccountInfo, ActivityItem, DeviceItem, FolderCheck, FolderItem, LocalFolder, MenuEntry,
     MirrorCheck, NotificationItem, NotificationSetting, OfflineEntry, OfflineSummary, PathStatus,
     Pref, SearchResult, ServiceError, SharedDriveItem, SharedItem, Sharing, Status, SyncErrorItem,
-    Versions,
+    UpdateInfo, Versions,
 };
 use zbus::object_server::SignalEmitter;
 
 use crate::daemon::Daemon;
+use crate::updates::text;
 
 /// Objeto publicado em `OBJECT_PATH`.
 pub struct Service {
@@ -480,6 +481,31 @@ impl Service {
         self.daemon.generate_diagnostics().await
     }
 
+    /// A versão do serviço que está rodando.
+    fn service_version(&self) -> String {
+        env!("CARGO_PKG_VERSION").into()
+    }
+
+    /// A versão nova oferecida e o passo da atualização.
+    fn update_info(&self) -> UpdateInfo {
+        let (offer, step) = self.daemon.update_state();
+        UpdateInfo {
+            version: offer.as_ref().map(|o| text(o.version)).unwrap_or_default(),
+            can_install: offer.is_some_and(|o| o.files.is_some()),
+            step: step.as_str().into(),
+        }
+    }
+
+    /// "Atualizar agora": começa e volta logo.
+    fn start_update(&self) -> Result<(), ServiceError> {
+        self.daemon.start_update()
+    }
+
+    /// "Ver novidades".
+    fn open_release(&self) -> Result<(), ServiceError> {
+        self.daemon.open_release()
+    }
+
     /// Reinicia o serviço (para as preferências que pedem isso).
     fn restart(&self) {
         self.daemon.restart();
@@ -500,6 +526,9 @@ impl Service {
 
     #[zbus(signal)]
     pub async fn status_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn update_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 
     #[zbus(signal)]
     pub async fn activity_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;

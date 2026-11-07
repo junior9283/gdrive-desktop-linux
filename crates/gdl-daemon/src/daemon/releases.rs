@@ -126,28 +126,48 @@ impl Daemon {
         (state.offer.clone(), state.step)
     }
 
-    /// "Atualizar agora": baixa, confere e instala a versão oferecida; com a instalação feita,
-    /// pede para trocar de programa (`Exit::Upgrade`). Sem os arquivos para instalar sozinho,
-    /// abre a página da release. Volta quando termina; outra chamada no meio é recusada.
+    /// "Atualizar agora": reserva a atualização e a roda em segundo plano (o andamento sai em
+    /// `UpdateChanged` e nos avisos). Sem versão oferecida, `NotFound`; já atualizando, `Refused`.
+    pub fn start_update(self: &Arc<Self>) -> Result<(), ServiceError> {
+        let offer = self.reserve_update()?;
+        let daemon = self.clone();
+        tokio::spawn(async move { daemon.run_update(offer).await });
+        Ok(())
+    }
+
+    /// `start_update` esperando o fim.
+    #[cfg(test)]
     pub async fn update_now(self: &Arc<Self>) -> Result<(), ServiceError> {
-        let offer = {
-            let mut state = self.update.lock().unwrap();
-            let offer = state
-                .offer
-                .clone()
-                .ok_or_else(|| ServiceError::NotFound("versão nova".into()))?;
-            if offer.files.is_some() {
-                if state.step != UpdateStep::Available {
-                    return Err(ServiceError::Refused("updating".into()));
-                }
-                state.step = UpdateStep::Downloading;
+        let offer = self.reserve_update()?;
+        self.run_update(offer).await;
+        Ok(())
+    }
+
+    /// A versão oferecida; com os arquivos para instalar, já marca `Downloading`, e outra
+    /// reserva no meio é recusada.
+    fn reserve_update(&self) -> Result<Offer, ServiceError> {
+        let mut state = self.update.lock().unwrap();
+        let offer = state
+            .offer
+            .clone()
+            .ok_or_else(|| ServiceError::NotFound("versão nova".into()))?;
+        if offer.files.is_some() {
+            if state.step != UpdateStep::Available {
+                return Err(ServiceError::Refused("updating".into()));
             }
-            offer
-        };
+            state.step = UpdateStep::Downloading;
+        }
+        Ok(offer)
+    }
+
+    /// Baixa, confere e instala a versão reservada; com a instalação feita, pede para trocar de
+    /// programa (`Exit::Upgrade`). Sem os arquivos para instalar sozinho, abre a página da
+    /// release.
+    async fn run_update(self: &Arc<Self>, offer: Offer) {
         let target = text(offer.version);
         let Some(files) = &offer.files else {
             self.open(release_notes(&target));
-            return Ok(());
+            return;
         };
         self.update_changed(UpdateStep::Downloading, &target).await;
         let dir = self.config.paths.cache_dir.join(DOWNLOAD_DIR);
@@ -160,7 +180,7 @@ impl Daemon {
             Ok(InstallOutcome::Done) => {
                 tracing::info!(versao = %target, "atualização instalada; trocando de programa");
                 self.exit.send_replace(Some(Exit::Upgrade));
-                return Ok(());
+                return;
             }
             // A oferta volta, no lugar do aviso de progresso.
             Ok(InstallOutcome::Canceled) => notify::new_version(&target, true, &self.i18n),
@@ -172,7 +192,6 @@ impl Daemon {
         self.set_installing(None);
         self.set_step(UpdateStep::Available).await;
         self.notify(&note).await;
-        Ok(())
     }
 
     async fn download_and_install(
@@ -215,7 +234,7 @@ impl Daemon {
     }
 
     /// "Ver novidades": a página da última versão oferecida.
-    pub(super) fn open_release(&self) -> Result<(), ServiceError> {
+    pub(crate) fn open_release(&self) -> Result<(), ServiceError> {
         let saved = self.saved_update();
         let offered = version(&saved.version)
             .ok_or_else(|| ServiceError::NotFound("versão avisada".into()))?;
@@ -250,10 +269,6 @@ impl Daemon {
         self.set_step(step).await;
         self.notify(&notify::update_progress(step, target, &self.i18n))
             .await;
-    }
-
-    async fn emit_update_changed(&self) {
-        self.emit_status_changed().await;
     }
 
     fn state_file(&self) -> PathBuf {

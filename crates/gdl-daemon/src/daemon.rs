@@ -961,15 +961,7 @@ impl Daemon {
     ) -> Result<(), ServiceError> {
         let folder = match key {
             // Baixar e instalar demora: o clique volta logo e o progresso vem nos avisos.
-            START_UPDATE => {
-                let daemon = self.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = daemon.update_now().await {
-                        tracing::info!(erro = %e, "atualização não começou");
-                    }
-                });
-                return Ok(());
-            }
+            START_UPDATE => return self.start_update(),
             // "Depois": o aviso só fecha; a oferta volta na consulta depois de `every`.
             LATER => return Ok(()),
             // Só o aviso de atividade suspeita libera a suspeita da conta dele; a pausa do usuário
@@ -1108,6 +1100,12 @@ impl Daemon {
     async fn emit_status_changed(&self) {
         if let Some(emitter) = self.emitter() {
             let _ = Service::status_changed(&emitter).await;
+        }
+    }
+
+    async fn emit_update_changed(&self) {
+        if let Some(emitter) = self.emitter() {
+            let _ = Service::update_changed(&emitter).await;
         }
     }
 

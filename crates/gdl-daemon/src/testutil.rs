@@ -104,6 +104,13 @@ impl FakeNetworkManager {
 pub(crate) const COMPUTER_ID: &str = "0123456789abcdef";
 pub(crate) const COMPUTER_NAME: &str = "Computador de teste";
 
+/// O `.deb` desta variante na versão `tag`.
+pub(crate) fn deb(tag: &str) -> String {
+    InstallKind::Deb
+        .package_name(crate::updates::version(tag).unwrap())
+        .unwrap()
+}
+
 /// O instalador dos testes: anota cada chamada (formato, pacote, soma) e devolve `result`.
 pub(crate) struct FakeInstaller {
     pub result: Mutex<Result<InstallOutcome, UpgradeError>>,
@@ -304,6 +311,30 @@ impl Harness {
     /// `Meu Drive` dentro da montagem padrão.
     pub fn drive(&self) -> PathBuf {
         self.home.join(MOUNT_DIR).join("Meu Drive")
+    }
+
+    /// Publica no Drive simulado a release `tag` com o `.deb` `served`, o `SHA256SUMS` (do
+    /// conteúdo `listed`) e a assinatura da chave que o serviço do teste confia.
+    pub fn publish_release(&self, tag: &str, listed: &[u8], served: &[u8]) {
+        use crate::upgrade::offer::{SIGNATURE, SUMS};
+        use crate::upgrade::verify::tests::{sign_for_harness, sums_of};
+        let name = deb(tag);
+        let sums = sums_of(&[(&name, listed)]);
+        let signature = sign_for_harness(&sums);
+        self.fake.set_release(
+            Some(tag),
+            vec![
+                (name, served.to_vec()),
+                (SUMS.into(), sums),
+                (SIGNATURE.into(), signature),
+            ],
+        );
+    }
+
+    /// A release `v99.0.0` assinada, já consultada (a oferta instalável).
+    pub async fn offer_release(&self) {
+        self.publish_release("v99.0.0", b"p", b"p");
+        self.daemon.check_release().await;
     }
 
     /// O que o serviço mandou abrir no navegador ou no gerenciador de arquivos, em ordem.

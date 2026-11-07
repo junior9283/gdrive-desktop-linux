@@ -4350,3 +4350,75 @@ async fn status_changed_is_signaled_when_the_last_upload_ends() {
     .await;
     tray.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_info_reports_offer() {
+    let h = Harness::new().await;
+    let none = h.proxy.update_info().await.unwrap();
+    assert_eq!((none.version.as_str(), none.can_install), ("", false));
+    assert_eq!(none.step, "available");
+
+    h.offer_release().await;
+
+    let info = h.proxy.update_info().await.unwrap();
+    assert_eq!(info.version, "99.0.0");
+    assert!(info.can_install);
+    assert_eq!(info.step, "available");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn start_update_over_dbus_runs_installer() {
+    let h = Harness::new().await;
+    let missing = h.proxy.start_update().await.unwrap_err();
+    assert!(matches!(missing, ServiceError::NotFound(_)), "{missing:?}");
+    h.offer_release().await;
+
+    h.proxy.start_update().await.unwrap();
+
+    wait_until("a troca de programa", || {
+        h.daemon.requested_exit() == Some(crate::daemon::Exit::Upgrade)
+    })
+    .await;
+    assert_eq!(h.installer.calls().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_changed_signal_on_step_change() {
+    use futures_util::StreamExt;
+    let h = Harness::new().await;
+    let mut changed = h.proxy.receive_update_changed().await.unwrap();
+    h.publish_release("v99.0.0", b"p", b"p");
+
+    let mut next = async |what: &str| {
+        tokio::time::timeout(Duration::from_secs(5), changed.next())
+            .await
+            .unwrap_or_else(|_| panic!("{what}"));
+    };
+
+    h.daemon.check_release().await;
+    next("o sinal da oferta").await;
+    h.proxy.start_update().await.unwrap();
+    next("o sinal do passo").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn service_version_is_the_package_version() {
+    let h = Harness::new().await;
+    assert_eq!(
+        h.proxy.service_version().await.unwrap(),
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_release_over_dbus_opens_the_page() {
+    let h = Harness::new().await;
+    h.offer_release().await;
+
+    h.proxy.open_release().await.unwrap();
+
+    wait_until("a página da release", || {
+        h.opened().iter().any(|u| u.contains("v99.0.0"))
+    })
+    .await;
+}

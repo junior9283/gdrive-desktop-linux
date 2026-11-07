@@ -249,6 +249,10 @@ impl Bridge {
             "verbose_logging" => j!(s.verbose_logging()),
             "set_verbose_logging" => j!(s.set_verbose_logging(a.bool("on")?)),
             "generate_diagnostics" => j!(s.generate_diagnostics()),
+            "service_version" => j!(s.service_version()),
+            "update_info" => j!(s.update_info()),
+            "start_update" => j!(s.start_update()),
+            "open_release" => j!(s.open_release()),
             "restart" => j!(s.restart()),
             "quit" => j!(s.quit()),
             _ => return Err(UiError::new("UnknownMethod", method)),
@@ -288,8 +292,9 @@ impl Bridge {
     /// Repassa os sinais do serviço para `emit` enquanto a conexão durar.
     pub async fn forward_signals(&self, emit: Emit) -> zbus::Result<()> {
         let s = &self.service;
-        let (status, activity, notifications, preferences, folders, login) = futures_util::try_join!(
+        let (status, update, activity, notifications, preferences, folders, login) = futures_util::try_join!(
             s.receive_status_changed(),
+            s.receive_update_changed(),
             s.receive_activity_changed(),
             s.receive_notifications_changed(),
             s.receive_preferences_changed(),
@@ -305,6 +310,7 @@ impl Bridge {
         });
         let streams: Vec<BoxStream<'static, (&'static str, Value)>> = vec![
             status.map(named("status-changed")).boxed(),
+            update.map(named("update-changed")).boxed(),
             activity.map(named("activity-changed")).boxed(),
             notifications.map(named("notifications-changed")).boxed(),
             preferences.map(named("preferences-changed")).boxed(),
@@ -383,7 +389,7 @@ mod tests {
     use std::sync::Mutex;
 
     use gdl_ipc::testing::{PrivateBus, p2p_pair};
-    use gdl_ipc::{BUS_NAME, OBJECT_PATH, SearchResult, Status};
+    use gdl_ipc::{BUS_NAME, OBJECT_PATH, SearchResult, Status, UpdateInfo};
     use zbus::object_server::SignalEmitter;
 
     use super::*;
@@ -432,8 +438,33 @@ mod tests {
             Ok(format!("{client_id}|{client_secret}|{expected}"))
         }
 
+        fn update_info(&self) -> UpdateInfo {
+            UpdateInfo {
+                version: "9.9.9".into(),
+                can_install: true,
+                step: "available".into(),
+            }
+        }
+
+        fn start_update(&self) -> Result<(), ServiceError> {
+            Err(ServiceError::Refused("updating".into()))
+        }
+
         #[zbus(signal)]
         async fn status_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+        #[zbus(signal)]
+        async fn update_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+    }
+
+    /// Espera (até 2 s) o primeiro evento chegar em `seen`.
+    async fn wait_seen(seen: &Mutex<Vec<&'static str>>) {
+        for _ in 0..200 {
+            if !seen.lock().unwrap().is_empty() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     async fn bridge_with_fake() -> (Connection, Bridge) {
@@ -546,13 +577,35 @@ mod tests {
             .await
             .unwrap();
 
-        for _ in 0..200 {
-            if !seen.lock().unwrap().is_empty() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        wait_seen(&seen).await;
         assert_eq!(*seen.lock().unwrap(), ["status-changed"]);
+    }
+
+    #[tokio::test]
+    async fn update_calls_and_signal_reach_the_window() {
+        let (server, bridge) = bridge_with_fake().await;
+        let info = bridge.call("update_info", json!({})).await.unwrap();
+        assert_eq!(info["version"], "9.9.9");
+        assert_eq!(info["can_install"], true);
+        let e = bridge.call("start_update", json!({})).await.unwrap_err();
+        assert_eq!(e.name, "Refused");
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let emit: Emit = Arc::new({
+            let seen = seen.clone();
+            move |name, _| seen.lock().unwrap().push(name)
+        });
+        bridge.forward_signals(emit).await.unwrap();
+        let iface = server
+            .object_server()
+            .interface::<_, FakeService>(OBJECT_PATH)
+            .await
+            .unwrap();
+        FakeService::update_changed(iface.signal_emitter())
+            .await
+            .unwrap();
+        wait_seen(&seen).await;
+        assert_eq!(*seen.lock().unwrap(), ["update-changed"]);
     }
 
     #[tokio::test]

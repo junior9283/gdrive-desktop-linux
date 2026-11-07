@@ -38,6 +38,9 @@ pub type Emit = Arc<dyn Fn(&'static str, Value) + Send + Sync>;
 pub struct Bridge {
     service: ServiceProxy<'static>,
     up: AtomicBool,
+    /// O serviço voltou depois de uma queda e o relógio de `watch` ainda não tratou a volta
+    /// (qualquer chamada pode trazê-lo de volta, pela ativação do D-Bus).
+    returned: AtomicBool,
 }
 
 /// Os argumentos da chamada, um objeto JSON com os nomes dos parâmetros.
@@ -110,6 +113,7 @@ impl Bridge {
         Ok(Bridge {
             service: ServiceProxy::new(conn).await?,
             up: AtomicBool::new(true),
+            returned: AtomicBool::new(false),
         })
     }
 
@@ -285,7 +289,10 @@ impl Bridge {
     fn settle<T>(&self, reply: Result<T, ServiceError>) -> Result<T, UiError> {
         let reply = reply.map_err(ui_error);
         let down = matches!(&reply, Err(e) if e.name == UNAVAILABLE);
-        self.up.store(!down, Ordering::Relaxed);
+        let was_up = self.up.swap(!down, Ordering::Relaxed);
+        if !was_up && !down {
+            self.returned.store(true, Ordering::Relaxed);
+        }
         reply
     }
 
@@ -333,10 +340,11 @@ impl Bridge {
         gdl_common::relaunch::outdated_for(&version).then_some(version)
     }
 
-    /// Enquanto o serviço estiver fora, tenta a cada `every`; quando ele volta, emite
-    /// `service-up` (as telas recarregam o que mostram), depois de passar a versão dele a
-    /// `on_outdated` se for outra (uma atualização o trocou de programa). Quando o nome do serviço perde o dono,
-    /// emite `service-down` na hora (as telas mostram o aviso sem esperar uma chamada falhar).
+    /// Enquanto o serviço estiver fora, tenta a cada `every`; quando ele volta (por esta tentativa
+    /// ou por uma chamada das telas), emite `service-up` (as telas recarregam o que mostram),
+    /// depois de passar a versão dele a `on_outdated` se for outra (uma atualização o trocou de
+    /// programa). Quando o nome do serviço perde o dono, emite `service-down` na hora (as telas
+    /// mostram o aviso sem esperar uma chamada falhar).
     pub async fn watch(
         self: Arc<Self>,
         every: Duration,
@@ -352,11 +360,10 @@ impl Bridge {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    if self.is_up() {
-                        continue;
+                    if !self.is_up() {
+                        let _ = self.call("status", Value::Null).await;
                     }
-                    let _ = self.call("status", Value::Null).await;
-                    if self.is_up() {
+                    if self.returned.swap(false, Ordering::Relaxed) {
                         if let Some(version) = self.outdated_service().await {
                             on_outdated(version);
                         }
@@ -639,6 +646,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_failed_call_also_counts_as_down() {
+        let bus = PrivateBus::start();
+        let bridge = Arc::new(Bridge::new(&bus.connect().await).await.unwrap());
+        let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let emit: Emit = Arc::new(move |name, _| {
+            let _ = tx.send(name);
+        });
+        // O relógio já roda quando a queda aparece, numa chamada das telas (sem sinal do
+        // barramento).
+        tokio::spawn(
+            bridge
+                .clone()
+                .watch(Duration::from_millis(50), emit, |_| {}),
+        );
+        let e = bridge.call("status", Value::Null).await.unwrap_err();
+        assert_eq!(e.name, UNAVAILABLE);
+
+        let service = bus.connect().await;
+        service
+            .object_server()
+            .at(OBJECT_PATH, FakeService)
+            .await
+            .unwrap();
+        service.request_name(BUS_NAME).await.unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(5), events.recv()).await;
+        assert_eq!(event.ok().flatten(), Some("service-up"));
+    }
+
+    #[tokio::test]
     async fn service_down_gives_unavailable() {
         let bus = PrivateBus::start();
         let bridge = Arc::new(Bridge::new(&bus.connect().await).await.unwrap());
@@ -680,5 +716,14 @@ mod tests {
         let event = tokio::time::timeout(Duration::from_secs(5), up.recv()).await;
         assert_eq!(event.ok().flatten(), Some("service-down"));
         assert!(!bridge.is_up());
+
+        // Volta (numa atualização, outro programa) e uma tela chama antes do relógio: a
+        // volta ainda confere a versão e avisa as telas.
+        service.request_name(BUS_NAME).await.unwrap();
+        let _ = bridge.call("status", Value::Null).await;
+        assert!(bridge.is_up(), "a chamada já achou o serviço");
+        let event = tokio::time::timeout(Duration::from_secs(5), up.recv()).await;
+        assert_eq!(event.ok().flatten(), Some("service-up"));
+        assert_eq!(outdated.try_recv().ok().as_deref(), Some("99.0.0"));
     }
 }

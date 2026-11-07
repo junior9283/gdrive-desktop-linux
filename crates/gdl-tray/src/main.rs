@@ -338,7 +338,12 @@ async fn run() -> Result<(), Error> {
             _ = retry.tick(), if app.status.is_none() => app.refresh().await,
             Some(_) = changes.next() => app.refresh().await,
             Some(_) = update_changes.next() => app.refresh().await,
-            Some(_) = lost.next() => app.refresh().await,
+            // Esquece o estado antes: a releitura pode subir o serviço novo (ativação do D-Bus),
+            // e a volta dele confere a versão.
+            Some(_) = lost.next() => {
+                app.status = None;
+                app.refresh().await;
+            }
             Some(_) = quitting.next() => break,
             Some(_) = prefs_changed.next() => {
                 let wanted = search_trigger();

@@ -62,12 +62,18 @@ async fn serve() -> ExitCode {
     if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
         eprintln!("{}: log indisponível: {e}", DAEMON);
     }
-    // `Restart` sobe o serviço de novo aqui mesmo, sem depender do systemd.
+    // Fora do systemd, `Restart` sobe o serviço de novo aqui mesmo.
     loop {
-        match run(&log).await {
+        let exit = run(&log).await;
+        if matches!(exit, Ok(Exit::Restart | Exit::Upgrade))
+            && std::env::var_os("INVOCATION_ID").is_some()
+        {
+            return restart_through_systemd();
+        }
+        match exit {
             Ok(Exit::Restart) => tracing::info!("reiniciando o serviço"),
             // O programa no disco é o da versão nova: ele toma o lugar deste processo, com os
-            // mesmos argumentos (o systemd e o D-Bus seguem com o mesmo PID).
+            // mesmos argumentos.
             Ok(Exit::Upgrade) => {
                 let error = gdl_common::relaunch::exec_startup_exe(None);
                 tracing::error!(erro = %error, "não deu para rodar a versão nova; reiniciando esta");
@@ -158,4 +164,43 @@ async fn run(log: &logging::LogHandle) -> Result<Exit, Box<dyn std::error::Error
         .await?;
     conn.release_name(BUS_NAME).await?;
     Ok(exit)
+}
+
+/// Sob o systemd, o reinício passa por ele: a unidade é `Type=dbus`, e ele mata quem tomar o
+/// lugar deste processo depois que o nome some do D-Bus. Com o pedido aceito, quem sobe o
+/// serviço é o job de reinício; se não, a saída com erro faz o `Restart=on-failure` subir.
+fn restart_through_systemd() -> ExitCode {
+    tracing::info!("reiniciando o serviço pelo systemd");
+    match systemd_restart().status() {
+        Ok(status) if status.success() => ExitCode::SUCCESS,
+        done => {
+            tracing::error!(?done, "o systemd não aceitou o reinício");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn systemd_restart() -> std::process::Command {
+    let mut command = std::process::Command::new("systemctl");
+    command.args([
+        "--user",
+        "--no-block",
+        "restart",
+        &format!("{DAEMON}.service"),
+    ]);
+    command
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn under_systemd_restarts_through_it() {
+        let command = systemd_restart();
+        assert_eq!(command.get_program(), "systemctl");
+        let unit = format!("{DAEMON}.service");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["--user", "--no-block", "restart", unit.as_str()]);
+    }
 }

@@ -30,7 +30,8 @@ pub trait Installer: Send + Sync {
 
 /// O passo como root: `sh -c ROOT_SCRIPT sh <pacote> <sha256> <gerenciador e argumentos>`.
 /// Copia o pacote para uma pasta temporária do root, confere a soma da cópia e roda o
-/// gerenciador com ela no fim; a pasta some na saída.
+/// gerenciador com ela no fim; a pasta some na saída. Não sai com 126 nem 127, os códigos do
+/// `pkexec` sem autorização (ver `outcome`).
 pub const ROOT_SCRIPT: &str = r#"set -eu
 src=$1 sum=$2
 shift 2
@@ -39,7 +40,7 @@ trap 'rm -rf "$dir"' EXIT
 file="$dir/${src##*/}"
 cp -- "$src" "$file"
 echo "$sum  $file" | sha256sum -c --status -
-"$@" "$file"
+"$@" "$file" || { c=$?; case $c in 126|127) exit 125 ;; esac; exit "$c"; }
 "#;
 
 /// A linha de comando que instala `package` (caminho absoluto, já conferido, com a soma
@@ -89,16 +90,23 @@ fn unpack(tarball: &Path) -> std::io::Result<()> {
     tar::Archive::new(flate2::read::GzDecoder::new(file)).unpack(dir)
 }
 
-/// O resultado de um instalador que saiu com `code` e escreveu `stderr`.
-pub fn outcome(code: Option<i32>, stderr: &str) -> Result<InstallOutcome, UpgradeError> {
+/// O resultado de um instalador que saiu com `code` e escreveu `stderr`; `pkexec`: ele rodou
+/// pelo `pkexec`.
+pub fn outcome(
+    code: Option<i32>,
+    stderr: &str,
+    pkexec: bool,
+) -> Result<InstallOutcome, UpgradeError> {
     let tail = || {
         let lines: Vec<&str> = stderr.lines().collect();
         lines[lines.len().saturating_sub(TAIL_LINES)..].join("\n")
     };
     match code {
         Some(0) => Ok(InstallOutcome::Done),
-        // O pkexec: a janela de senha foi fechada.
-        Some(126) => Ok(InstallOutcome::Canceled),
+        // A janela de senha fechada: 126, ou 127 "Not authorized" (o agente do Plasma). O 127
+        // sem agente do polkit continua falha.
+        Some(126) if pkexec => Ok(InstallOutcome::Canceled),
+        Some(127) if pkexec && stderr.contains("Not authorized") => Ok(InstallOutcome::Canceled),
         Some(code) => Err(UpgradeError::Install(format!(
             "saiu com {code}: {}",
             tail()
@@ -131,15 +139,18 @@ impl Installer for SystemInstaller {
         }
         let command = command_for(kind, package, sha256, in_path)
             .ok_or_else(|| UpgradeError::Install("sem instalador para este formato".into()))?;
-        let output = tokio::process::Command::new(&command[0])
+        let mut installer = tokio::process::Command::new(&command[0]);
+        installer
             .args(&command[1..])
-            .stdout(std::process::Stdio::null())
-            .output()
-            .await
-            .map_err(failed)?;
+            .stdout(std::process::Stdio::null());
+        if kind.needs_root() {
+            // As mensagens do pkexec em inglês: `outcome` procura "Not authorized".
+            installer.env("LC_ALL", "C");
+        }
+        let output = installer.output().await.map_err(failed)?;
         let stderr = String::from_utf8_lossy(&output.stderr);
         tracing::debug!(saida = %stderr, "instalador da atualização");
-        outcome(output.status.code(), &stderr)
+        outcome(output.status.code(), &stderr, kind.needs_root())
     }
 }
 
@@ -241,6 +252,25 @@ mod tests {
         assert_eq!(got, None, "o gerenciador não roda");
     }
 
+    /// 126 e 127 só podem vir do próprio `pkexec` (a senha cancelada): os do gerenciador viram
+    /// 125, e os outros passam como estão.
+    #[test]
+    fn root_script_never_exits_like_pkexec() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("app.deb");
+        std::fs::write(&package, b"pacote").unwrap();
+        let sum = crate::upgrade::verify::sha256_hex(b"pacote");
+        for (manager, want) in [(126, 125), (127, 125), (100, 100)] {
+            let status = std::process::Command::new("sh")
+                .args(["-c", ROOT_SCRIPT, "sh"])
+                .arg(&package)
+                .args([&sum, "sh", "-c", &format!("exit {manager}")])
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(want), "gerenciador saiu com {manager}");
+        }
+    }
+
     #[test]
     fn tarball_runs_its_install_sh_in_the_same_prefix() {
         let tar = InstallKind::Tar {
@@ -260,22 +290,34 @@ mod tests {
 
     #[test]
     fn pkexec_cancel_is_not_an_error() {
-        assert_eq!(outcome(Some(0), ""), Ok(InstallOutcome::Done));
-        assert_eq!(outcome(Some(126), ""), Ok(InstallOutcome::Canceled));
-        // 127: sem autorização ou sem agente do polkit (decisão da Tarefa 0): falha.
+        let pkexec = |code, stderr| outcome(Some(code), stderr, true);
+        assert_eq!(pkexec(0, ""), Ok(InstallOutcome::Done));
+        assert_eq!(pkexec(126, ""), Ok(InstallOutcome::Canceled));
+        // A janela de senha cancelada no Plasma (polkit-kde-agent), visto no teste manual.
+        let cancel = "Error executing command as another user: Not authorized\n\n\
+                      This incident has been reported.\n";
+        assert_eq!(pkexec(127, cancel), Ok(InstallOutcome::Canceled));
+        // 127 sem agente do polkit (decisão da Tarefa 0): falha.
+        let no_agent = "Error executing command as another user: No authentication agent found.";
         assert!(matches!(
-            outcome(Some(127), "Error executing command as another user"),
-            Err(UpgradeError::Install(m)) if m.contains("another user")
+            pkexec(127, no_agent),
+            Err(UpgradeError::Install(m)) if m.contains("agent")
         ));
+        // Sem o pkexec (o install.sh do .tar.gz), 126 e 127 são falhas do instalador.
+        assert!(outcome(Some(126), "", false).is_err());
+        assert!(outcome(Some(127), cancel, false).is_err());
         let long: String = (1..=30).map(|i| format!("linha {i}\n")).collect();
-        let Err(UpgradeError::Install(message)) = outcome(Some(100), &long) else {
+        let Err(UpgradeError::Install(message)) = pkexec(100, &long) else {
             panic!("falha esperada");
         };
         assert!(
             message.contains("linha 30") && !message.contains("linha 1\n"),
             "{message}"
         );
-        assert!(matches!(outcome(None, ""), Err(UpgradeError::Install(_))));
+        assert!(matches!(
+            outcome(None, "", true),
+            Err(UpgradeError::Install(_))
+        ));
     }
 
     /// Um `.tar.gz` como o do release, com um `install.sh` que grava os argumentos em `args` e

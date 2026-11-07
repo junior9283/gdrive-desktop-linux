@@ -11,6 +11,12 @@ about-unofficial = Unofficial Google Drive client: this project is not affiliate
 about-third-party = Third-party software ({ $count })
 about-license-file = license file in the package
 about-project = Project page: { $url }
+about-update-available = Version { $version } is available
+about-update-now = Update now
+about-update-release = See what's new
+about-update-downloading = Downloading version { $version }…
+about-update-password = Enter the administrator password to install version { $version }.
+about-update-installing = Installing version { $version }… The app restarts by itself.
 
 action-pause = Pause
 action-resume = Resume

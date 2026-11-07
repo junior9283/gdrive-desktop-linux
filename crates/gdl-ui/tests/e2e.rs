@@ -1465,12 +1465,8 @@ async fn screenshots_for_the_readme() {
             "arquivos-off-line",
         ),
         ("preferences", "p.path", "Google Drive", "preferencias"),
-        (
-            "about",
-            ".about-version",
-            env!("CARGO_PKG_VERSION"),
-            "sobre",
-        ),
+        // Com a versão nova que o serviço do e2e oferece nas imagens.
+        ("about", ".about-update", "Atualizar agora", "sobre"),
         ("uninstall", ".uninstall", "", "desinstalar"),
         ("feedback", ".feedback", "", "feedback"),
         (

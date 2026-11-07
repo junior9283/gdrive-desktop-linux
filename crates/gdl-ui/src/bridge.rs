@@ -326,10 +326,23 @@ impl Bridge {
         Ok(())
     }
 
+    /// A versão do serviço, se ele for de outra versão que esta janela (ver
+    /// `gdl_common::relaunch::outdated_for`); `None` sem serviço ou na mesma versão.
+    pub async fn outdated_service(&self) -> Option<String> {
+        let version = self.service.service_version().await.ok()?;
+        gdl_common::relaunch::outdated_for(&version).then_some(version)
+    }
+
     /// Enquanto o serviço estiver fora, tenta a cada `every`; quando ele volta, emite
-    /// `service-up` (as telas recarregam o que mostram). Quando o nome do serviço perde o dono,
+    /// `service-up` (as telas recarregam o que mostram), depois de passar a versão dele a
+    /// `on_outdated` se for outra (uma atualização o trocou de programa). Quando o nome do serviço perde o dono,
     /// emite `service-down` na hora (as telas mostram o aviso sem esperar uma chamada falhar).
-    pub async fn watch(self: Arc<Self>, every: Duration, emit: Emit) {
+    pub async fn watch(
+        self: Arc<Self>,
+        every: Duration,
+        emit: Emit,
+        on_outdated: impl Fn(String) + Send + 'static,
+    ) {
         let mut ticker = tokio::time::interval(every);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // Sem os avisos do barramento, a queda só aparece quando uma chamada falhar.
@@ -344,6 +357,9 @@ impl Bridge {
                     }
                     let _ = self.call("status", Value::Null).await;
                     if self.is_up() {
+                        if let Some(version) = self.outdated_service().await {
+                            on_outdated(version);
+                        }
                         emit("service-up", Value::Null);
                     }
                 }
@@ -448,6 +464,10 @@ mod tests {
 
         fn start_update(&self) -> Result<(), ServiceError> {
             Err(ServiceError::Refused("updating".into()))
+        }
+
+        fn service_version(&self) -> String {
+            "99.0.0".into()
         }
 
         #[zbus(signal)]
@@ -609,6 +629,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn another_service_version_is_outdated() {
+        let (_server, bridge) = bridge_with_fake().await;
+        assert_eq!(bridge.outdated_service().await.as_deref(), Some("99.0.0"));
+
+        let bus = PrivateBus::start();
+        let alone = Bridge::new(&bus.connect().await).await.unwrap();
+        assert_eq!(alone.outdated_service().await, None, "sem serviço");
+    }
+
+    #[tokio::test]
     async fn service_down_gives_unavailable() {
         let bus = PrivateBus::start();
         let bridge = Arc::new(Bridge::new(&bus.connect().await).await.unwrap());
@@ -622,7 +652,15 @@ mod tests {
         let emit: Emit = Arc::new(move |name, _| {
             let _ = tx.send(name);
         });
-        tokio::spawn(bridge.clone().watch(Duration::from_millis(50), emit));
+        let (outdated_tx, mut outdated) = tokio::sync::mpsc::unbounded_channel();
+        let on_outdated = move |version| {
+            let _ = outdated_tx.send(version);
+        };
+        tokio::spawn(
+            bridge
+                .clone()
+                .watch(Duration::from_millis(50), emit, on_outdated),
+        );
         let service = bus.connect().await;
         service
             .object_server()
@@ -634,6 +672,8 @@ mod tests {
         let event = tokio::time::timeout(Duration::from_secs(5), up.recv()).await;
         assert_eq!(event.ok().flatten(), Some("service-up"));
         assert!(bridge.is_up());
+        // O serviço falso diz ser a 99.0.0: a janela seria trocada pelo programa novo.
+        assert_eq!(outdated.try_recv().ok().as_deref(), Some("99.0.0"));
 
         // O serviço sai: o aviso vem do barramento, sem nenhuma chamada falhar antes.
         service.release_name(BUS_NAME).await.unwrap();

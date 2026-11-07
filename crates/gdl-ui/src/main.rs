@@ -228,7 +228,17 @@ async fn start(request: &str) -> zbus::Result<Option<(Bridge, Requests)>> {
     }
 }
 
+/// O serviço voltou na versão `version` (outra): troca este processo pelo programa novo (com os
+/// mesmos argumentos: a primeira tela de novo).
+fn restart_in_new_program(version: String) {
+    tracing::info!(versao = %version, "o serviço foi atualizado; reiniciando a janela");
+    let error = gdl_common::relaunch::exec_startup_exe(Some(&version));
+    tracing::error!(erro = %error, "não deu para reiniciar a janela");
+}
+
 fn main() -> ExitCode {
+    // Antes de qualquer troca do pacote: depois dela, `/proc/self/exe` aponta o arquivo apagado.
+    gdl_common::paths::startup_exe();
     gdl_common::crash::install(gdl_common::brand::UI_PROGRAM);
     // Antes do GTK: vira a classe das janelas (o app_id no Wayland), pela qual a barra de tarefas
     // e a barra de título acham o `.desktop` e o ícone.
@@ -294,7 +304,7 @@ fn main() -> ExitCode {
                     }
                 }
             });
-            tauri::async_runtime::spawn(bridge.watch(RECONNECT, emit));
+            tauri::async_runtime::spawn(bridge.watch(RECONNECT, emit, restart_in_new_program));
             tauri::async_runtime::spawn(async move {
                 while let Some(name) = requests.recv().await {
                     if let Err(e) = show_request(&handle, &name) {

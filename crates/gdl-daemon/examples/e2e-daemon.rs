@@ -9,12 +9,19 @@
 //! O "navegador" anota em `$GDL_E2E_OPENED` cada endereço ou caminho que o serviço abre. SIGUSR1
 //! enche o armazenamento do Drive simulado (todo pedido recebe `storageQuotaExceeded`) e SIGUSR2
 //! o libera; feito, o estado (`full` ou `free`) vai para `$GDL_E2E_QUOTA`.
+//!
+//! Para as imagens do README (`$GDL_SCREENSHOTS`), oferece uma versão nova assinada (a faixa da
+//! tela Sobre). O instalador daqui recusa tudo: o e2e nunca instala nada.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use gdl_common::paths::Paths;
+use gdl_daemon::updates::{text, version};
+use gdl_daemon::upgrade::install::{InstallOutcome, Installer};
+use gdl_daemon::upgrade::offer::{SIGNATURE, SUMS};
+use gdl_daemon::upgrade::{InstallKind, UpgradeError};
 use gdl_daemon::{Api, Config, Daemon, Service};
 use gdl_drive::client::Backoff;
 use gdl_drive::oauth::OAuthEndpoints;
@@ -25,6 +32,48 @@ use gdl_ipc::{BUS_NAME, OBJECT_PATH, ServiceProxy};
 use tokio::signal::unix::{SignalKind, signal};
 
 type Error = Box<dyn std::error::Error>;
+
+/// O instalador do e2e: recusa (nenhum teste instala de verdade).
+struct NoInstaller;
+
+#[async_trait::async_trait]
+impl Installer for NoInstaller {
+    async fn install(
+        &self,
+        _kind: &InstallKind,
+        _package: &std::path::Path,
+        _sha256: &str,
+    ) -> Result<InstallOutcome, UpgradeError> {
+        Err(UpgradeError::Install("e2e".into()))
+    }
+}
+
+/// Publica no Drive simulado a versão seguinte (minor + 1) com o `.rpm`, o `SHA256SUMS` e a
+/// assinatura de `pair`.
+fn publish_next_release(fake: &FakeDrive, pair: &minisign::KeyPair) -> Result<(), Error> {
+    use sha2::Digest;
+    let (major, minor, _) = version(env!("CARGO_PKG_VERSION")).ok_or("versão do pacote")?;
+    let next = (major, minor + 1, 0);
+    let name = InstallKind::Rpm
+        .package_name(next)
+        .ok_or("sem pacote nesta arquitetura")?;
+    let package = b"pacote".to_vec();
+    let hash: String = sha2::Sha256::digest(&package)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let sums = format!("{hash}  {name}\n");
+    let signature = minisign::sign(Some(&pair.pk), &pair.sk, sums.as_bytes(), None, None)?;
+    fake.set_release(
+        Some(&format!("v{}", text(next))),
+        vec![
+            (name, package),
+            (SUMS.into(), sums.into_bytes()),
+            (SIGNATURE.into(), signature.into_string().into_bytes()),
+        ],
+    );
+    Ok(())
+}
 
 /// A conta que o próximo login (depois do primeiro) traz.
 const ANA: &str = "ana@example.com";
@@ -60,6 +109,9 @@ async fn main() -> Result<(), Error> {
         paths.etc_dir.join("policies.toml"),
         "AutoStartOnLogin = false\n",
     )?;
+    // Só nas imagens do README: uma versão nova assinada por esta chave (a faixa da tela Sobre).
+    let screenshots = std::env::var_os("GDL_SCREENSHOTS").is_some();
+    let release_key = minisign::KeyPair::generate_unencrypted_keypair()?;
     let daemon = Daemon::new(Config {
         paths,
         lang: gdl_common::i18n::env_lang(),
@@ -92,11 +144,11 @@ async fn main() -> Result<(), Error> {
             url: fake.releases_url(),
             first: std::time::Duration::from_secs(3600),
             every: std::time::Duration::from_secs(3600),
-            // Sem chave: o e2e nunca instala nada.
-            public_key: String::new(),
+            public_key: release_key.pk.to_base64(),
         },
-        install_kind: gdl_daemon::upgrade::InstallKind::Source,
-        installer: Arc::new(gdl_daemon::upgrade::install::SystemInstaller),
+        // Fora das imagens não há versão nova; com ela, o instalador daqui recusa.
+        install_kind: InstallKind::Rpm,
+        installer: Arc::new(NoInstaller),
     })?;
     let conn = zbus::connection::Builder::session()?
         .serve_at(OBJECT_PATH, Service::new(daemon.clone()))?
@@ -133,6 +185,10 @@ async fn main() -> Result<(), Error> {
         .ok;
     if !signal_ok {
         return Err("o login falhou".into());
+    }
+    if screenshots {
+        publish_next_release(&fake, &release_key)?;
+        daemon.check_release().await;
     }
     // Uma segunda conta, para quem adiciona outra pela janela: o próximo login entra nela.
     ana.add_file(&ana.root_id(), "da-ana.txt", b"oi".to_vec());

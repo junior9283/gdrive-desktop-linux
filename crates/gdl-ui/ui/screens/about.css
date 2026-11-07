@@ -16,6 +16,28 @@
   color: var(--md-on-surface-variant);
 }
 
+/* A versão nova: o texto e, parada, "Atualizar agora" e "Ver novidades". */
+.about-update {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  border-radius: var(--md-shape-medium);
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+.about-update p {
+  margin: 0;
+}
+
+.about-update-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .about-unofficial {
   padding: 12px 16px;
   border-radius: var(--md-shape-medium);

@@ -11,6 +11,12 @@ about-unofficial = Cliente não oficial do Google Drive: este projeto não tem l
 about-third-party = Softwares de terceiros ({ $count })
 about-license-file = licença no pacote
 about-project = Página do projeto: { $url }
+about-update-available = Versão { $version } disponível
+about-update-now = Atualizar agora
+about-update-release = Ver novidades
+about-update-downloading = Baixando a versão { $version }…
+about-update-password = Digite a senha de administrador para instalar a versão { $version }.
+about-update-installing = Instalando a versão { $version }… O app reinicia sozinho.
 
 action-pause = Pausar
 action-resume = Retomar

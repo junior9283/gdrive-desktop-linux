@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFtl } from '../i18n.js';
+import { AVAILABLE_TEXT, STEP_TEXTS } from '../screens/about/model.js';
 import { CATEGORIES } from '../screens/errors/model.js';
 import { GUIDE, REASONS, TROUBLES, stepsFor } from '../screens/onboarding/model.js';
 import { ROLES, generalKinds } from '../screens/share/model.js';
@@ -45,6 +46,7 @@ test('toda chave usada nas telas existe nos dois idiomas', () => {
   for (const role of [...ROLES, 'owner', 'remove']) used.add(`share-role-${role}`);
   for (const kind of generalKinds('x')) used.add(`share-general-${kind}`).add(`share-general-${kind}-text`);
   for (const action of ['download', 'restore', 'keep', 'unkeep']) used.add(`versions-${action}`);
+  for (const key of [...Object.values(STEP_TEXTS), AVAILABLE_TEXT]) used.add(key);
   for (const block of ['stream', 'sync', 'offline']) {
     used.add(`onboarding-intro-${block}-title`).add(`onboarding-intro-${block}-text`);
   }

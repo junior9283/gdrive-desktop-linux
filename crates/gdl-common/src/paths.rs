@@ -90,6 +90,8 @@ pub struct Paths {
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub state_dir: PathBuf,
+    /// O que dá para baixar de novo (`$XDG_CACHE_HOME/<pacote>`): a atualização baixada.
+    pub cache_dir: PathBuf,
     pub etc_dir: PathBuf,
 }
 
@@ -130,6 +132,7 @@ impl Paths {
             config_dir: config.join(PACKAGE),
             data_dir: data.join(PACKAGE),
             state_dir: state.join(PACKAGE),
+            cache_dir: cache.join(PACKAGE),
             etc_dir: etc.join(PACKAGE),
         }
     }

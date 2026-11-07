@@ -25,6 +25,14 @@ pub enum InstallKind {
 pub const TAR_SUFFIX: &str = "-x86_64.tar.gz";
 
 impl InstallKind {
+    /// Instala pelo gerenciador de pacotes do sistema, com a senha do `pkexec`.
+    pub fn needs_root(&self) -> bool {
+        matches!(
+            self,
+            InstallKind::Deb | InstallKind::Rpm | InstallKind::Arch
+        )
+    }
+
     /// O nome do pacote desta variante neste formato, no release `version` (os nomes que o
     /// `scripts/package.sh` gera); `None` quando não há pacote para esta instalação (os releases
     /// só trazem x86_64).
@@ -98,6 +106,18 @@ mod tests {
         );
         assert_eq!(name(&tar), Some(format!("{p}-1.4.0-x86_64.tar.gz")));
         assert_eq!(name(&InstallKind::Source), None);
+    }
+
+    #[test]
+    fn only_system_packages_need_root() {
+        assert!(InstallKind::Deb.needs_root());
+        assert!(InstallKind::Rpm.needs_root());
+        assert!(InstallKind::Arch.needs_root());
+        let tar = InstallKind::Tar {
+            prefix: "/x".into(),
+        };
+        assert!(!tar.needs_root());
+        assert!(!InstallKind::Source.needs_root());
     }
 
     #[test]

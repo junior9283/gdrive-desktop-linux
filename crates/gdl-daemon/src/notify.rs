@@ -10,6 +10,9 @@ use std::sync::Mutex;
 use gdl_common::i18n::I18n;
 use gdl_engine::events::{DeniedAction, EngineEvent, LostReason};
 use gdl_store::folders::{PairState, StopReason};
+
+use crate::daemon::UpdateStep;
+use crate::upgrade::UpgradeError;
 use zbus::Connection;
 use zbus::zvariant::Value;
 
@@ -42,6 +45,10 @@ pub const RECOGNIZE_ACTIVITY: &str = "recognize-activity";
 pub const OPEN_WINDOW: &str = "default";
 /// Ação do aviso de nova versão que abre a página da release.
 pub const OPEN_RELEASE: &str = "open-release";
+/// "Atualizar agora": baixa, confere e instala a versão nova.
+pub const START_UPDATE: &str = "start-update";
+/// "Depois": só fecha o aviso de versão nova.
+pub const LATER: &str = "update-later";
 /// Ação do aviso de falha que abre a *issue* com o relatório; fechar é "Não enviar".
 pub const SEND_CRASH_REPORT: &str = "send-crash-report";
 
@@ -324,6 +331,9 @@ pub fn extra_actions(note: &Notification, i18n: &I18n) -> Vec<(&'static str, Str
             (DEVICE_ALWAYS, i18n.tr("notify-device-always", &[])),
             (DEVICE_IGNORE, i18n.tr("notify-device-ignore", &[])),
         ],
+        "new-version" if matches!(note.action, Some((START_UPDATE, _))) => {
+            vec![(LATER, i18n.tr("notify-update-later", &[]))]
+        }
         _ => vec![],
     };
     if OPTIONAL_KINDS.contains(&note.kind_id) {
@@ -369,16 +379,87 @@ pub fn items_trashed(count: usize, i18n: &I18n) -> Notification {
     }
 }
 
-/// Saiu a versão `version` (`X.Y.Z`): "Ver novidades" abre a página da release.
-pub fn new_version(version: &str, i18n: &I18n) -> Notification {
+/// Um aviso da família da versão nova: todos ocupam o mesmo lugar (a oferta, o progresso, o
+/// resultado), um substituindo o outro.
+fn version_note(
+    summary: String,
+    body: String,
+    action: Option<(&'static str, String)>,
+) -> Notification {
     Notification {
         kind_id: "new-version",
-        summary: i18n.tr("notify-new-version-title", &[]),
-        body: i18n.tr("notify-new-version-body", &[("version", version)]),
-        action: Some((OPEN_RELEASE, i18n.tr("notify-new-version-action", &[]))),
+        summary,
+        body,
+        action,
         replaces_key: Some("new-version".into()),
         account: String::new(),
     }
+}
+
+/// "Ver novidades": a página da última versão oferecida.
+fn see_release(i18n: &I18n) -> Option<(&'static str, String)> {
+    Some((OPEN_RELEASE, i18n.tr("notify-new-version-action", &[])))
+}
+
+/// Saiu a versão `version` (`X.Y.Z`). `can_install`: "Atualizar agora" (e "Depois", em
+/// `extra_actions`); senão, "Ver novidades" abre a página da release.
+pub fn new_version(version: &str, can_install: bool, i18n: &I18n) -> Notification {
+    let action = if can_install {
+        Some((START_UPDATE, i18n.tr("notify-update-now", &[])))
+    } else {
+        see_release(i18n)
+    };
+    version_note(
+        i18n.tr("notify-new-version-title", &[]),
+        i18n.tr("notify-new-version-body", &[("version", version)]),
+        action,
+    )
+}
+
+/// Onde está a atualização para `version`.
+pub fn update_progress(step: UpdateStep, version: &str, i18n: &I18n) -> Notification {
+    let body = match step {
+        UpdateStep::Downloading => "notify-update-downloading",
+        UpdateStep::WaitingPassword => "notify-update-password",
+        UpdateStep::Installing | UpdateStep::Available => "notify-update-installing",
+    };
+    version_note(
+        i18n.tr("notify-update-progress-title", &[("version", version)]),
+        i18n.tr(body, &[]),
+        None,
+    )
+}
+
+/// A atualização não aconteceu (a oferta continua para tentar de novo).
+pub fn update_failed(error: &UpgradeError, i18n: &I18n) -> Notification {
+    let body = match error {
+        UpgradeError::Network => "notify-update-failed-network",
+        UpgradeError::Verify(_) => "notify-update-failed-verify",
+        UpgradeError::Install(_) | UpgradeError::Busy => "notify-update-failed-install",
+    };
+    failed_note(body, i18n)
+}
+
+/// O serviço partiu, mas não na versão pedida ao instalador.
+pub fn update_not_applied(i18n: &I18n) -> Notification {
+    failed_note("notify-update-failed-install", i18n)
+}
+
+fn failed_note(body: &str, i18n: &I18n) -> Notification {
+    version_note(
+        i18n.tr("notify-update-failed-title", &[]),
+        i18n.tr(body, &[]),
+        see_release(i18n),
+    )
+}
+
+/// O serviço partiu na versão `version`, que a atualização instalou.
+pub fn updated(version: &str, i18n: &I18n) -> Notification {
+    version_note(
+        i18n.tr("notify-updated-title", &[("version", version)]),
+        i18n.tr("notify-updated-body", &[]),
+        see_release(i18n),
+    )
 }
 
 /// Um programa do app fechou de forma inesperada: oferece enviar o relatório.
@@ -738,12 +819,56 @@ mod tests {
     #[test]
     fn new_version_note_opens_the_release() {
         for lang in ["pt_BR", "en"] {
-            let note = new_version("1.2.3", &I18n::new(lang));
+            let i18n = I18n::new(lang);
+            let note = new_version("1.2.3", false, &i18n);
             assert!(note.body.contains("1.2.3"), "{lang}: {note:?}");
             assert!(!note.summary.starts_with("notify-"), "{lang}: {note:?}");
-            let (key, label) = note.action.unwrap();
+            let (key, label) = note.action.clone().unwrap();
             assert_eq!(key, OPEN_RELEASE);
             assert!(!label.starts_with("notify-"), "{lang}");
+            assert!(extra_actions(&note, &i18n).is_empty());
+        }
+    }
+
+    #[test]
+    fn installable_version_offers_update_now_and_later() {
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            let note = new_version("1.2.3", true, &i18n);
+            assert_eq!(note.action.as_ref().unwrap().0, START_UPDATE);
+            let extra = extra_actions(&note, &i18n);
+            assert_eq!(extra.len(), 1, "{lang}");
+            assert_eq!(extra[0].0, LATER);
+            assert!(!extra[0].1.starts_with("notify-"), "{lang}");
+        }
+    }
+
+    /// Todos os textos da atualização existem nos dois idiomas e trocam o mesmo aviso.
+    #[test]
+    fn update_notes_are_translated_and_replace_each_other() {
+        let steps = [
+            UpdateStep::Downloading,
+            UpdateStep::WaitingPassword,
+            UpdateStep::Installing,
+        ];
+        let errors = [
+            UpgradeError::Network,
+            UpgradeError::Verify(crate::upgrade::verify::VerifyError::Mismatch),
+            UpgradeError::Install("x".into()),
+        ];
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            let notes = steps
+                .iter()
+                .map(|s| update_progress(*s, "1.2.3", &i18n))
+                .chain(errors.iter().map(|e| update_failed(e, &i18n)))
+                .chain([updated("1.2.3", &i18n), update_not_applied(&i18n)]);
+            for note in notes {
+                assert!(!note.summary.starts_with("notify-"), "{lang}: {note:?}");
+                assert!(!note.body.starts_with("notify-"), "{lang}: {note:?}");
+                assert_eq!(note.replaces_key.as_deref(), Some("new-version"));
+            }
+            assert!(updated("1.2.3", &i18n).summary.contains("1.2.3"));
         }
     }
 

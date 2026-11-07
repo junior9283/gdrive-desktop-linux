@@ -51,9 +51,10 @@ use crate::menu::{self, Action};
 use crate::metered::{NetworkManagerProxy, is_metered};
 use crate::mount;
 use crate::notify::{
-    self, ALLOW_SYNC, DEVICE_ALWAYS, DEVICE_IGNORE, MOVE_LOST_FOUND, MUTE, Notification, Notifier,
-    OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE, OPEN_WINDOW, OPTIONAL_KINDS,
-    RECOGNIZE_ACTIVITY, RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT, SIGN_IN,
+    self, ALLOW_SYNC, DEVICE_ALWAYS, DEVICE_IGNORE, LATER, MOVE_LOST_FOUND, MUTE, Notification,
+    Notifier, OPEN_CANCELED, OPEN_FOLDERS, OPEN_LOST_FOUND, OPEN_RELEASE, OPEN_WINDOW,
+    OPTIONAL_KINDS, RECOGNIZE_ACTIVITY, RESUME, REVIEW_ACTIVITY, SEND_CRASH_REPORT, SIGN_IN,
+    START_UPDATE,
 };
 
 /// Quanto o login espera o retorno do navegador.
@@ -128,6 +129,9 @@ pub struct Config {
     /// passada antiga.
     pub unmount_limit: Duration,
     pub updates: crate::updates::UpdateCheck,
+    /// Como os programas foram instalados (o pacote que a atualização baixa).
+    pub install_kind: crate::upgrade::InstallKind,
+    pub installer: Arc<dyn crate::upgrade::install::Installer>,
 }
 
 /// A conta conectada. Ao sair, desmonta e depois para o motor: os campos caem na ordem em que
@@ -158,7 +162,8 @@ mod folders;
 mod lost_found;
 mod mcp;
 mod mirror;
-mod releases;
+pub(crate) mod releases;
+pub use releases::UpdateStep;
 mod sharing;
 
 pub use folders::Computer;
@@ -333,6 +338,8 @@ pub enum Exit {
     Quit,
     /// O `main` sobe o serviço de novo no mesmo processo, relendo as preferências.
     Restart,
+    /// Uma atualização foi instalada: o `main` passa a rodar o programa novo (`exec`).
+    Upgrade,
 }
 
 pub struct Daemon {
@@ -373,6 +380,8 @@ pub struct Daemon {
     resuming: AtomicBool,
     /// O controle do registro detalhado (sem ele, nos testes e exemplos, o registro não muda).
     log: OnceLock<crate::logging::LogHandle>,
+    /// A versão nova oferecida e o passo da atualização.
+    update: Mutex<releases::UpdateState>,
 }
 
 /// Uma linha do arquivo `accounts`.
@@ -454,6 +463,7 @@ impl Daemon {
             notifier: OnceLock::new(),
             login: Mutex::default(),
             log: OnceLock::new(),
+            update: Mutex::default(),
         }))
     }
 
@@ -944,8 +954,24 @@ impl Daemon {
     }
 
     /// A ação `key` de um aviso, na conta `account` dele.
-    pub(crate) async fn run_action(&self, account: &str, key: &str) -> Result<(), ServiceError> {
+    pub(crate) async fn run_action(
+        self: &Arc<Self>,
+        account: &str,
+        key: &str,
+    ) -> Result<(), ServiceError> {
         let folder = match key {
+            // Baixar e instalar demora: o clique volta logo e o progresso vem nos avisos.
+            START_UPDATE => {
+                let daemon = self.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = daemon.update_now().await {
+                        tracing::info!(erro = %e, "atualização não começou");
+                    }
+                });
+                return Ok(());
+            }
+            // "Depois": o aviso só fecha; a oferta volta na consulta depois de `every`.
+            LATER => return Ok(()),
             // Só o aviso de atividade suspeita libera a suspeita da conta dele; a pausa do usuário
             // é do app inteiro, como "Retomar" no menu, e não desfaz a suspeita de nenhuma conta.
             RESUME | ALLOW_SYNC => {
@@ -1017,7 +1043,11 @@ impl Daemon {
     }
 
     /// O botão `key` do aviso `id` do histórico: executa a ação e marca o aviso como lido.
-    pub async fn invoke_notification_action(&self, id: u64, key: &str) -> Result<(), ServiceError> {
+    pub async fn invoke_notification_action(
+        self: &Arc<Self>,
+        id: u64,
+        key: &str,
+    ) -> Result<(), ServiceError> {
         let note = self
             .history
             .get(id)
@@ -2752,10 +2782,7 @@ fn unsynced(engine: &Engine) -> gdl_engine::Result<usize> {
 /// Apaga `dir` inteira, menos as pastas de `keep` (e as pastas no caminho até elas).
 fn remove_all_but(dir: &Path, keep: &[PathBuf]) -> std::io::Result<()> {
     if !keep.iter().any(|k| k.starts_with(dir)) {
-        return match std::fs::remove_dir_all(dir) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            result => result,
-        };
+        return gdl_common::fs::remove_dir_if_exists(dir);
     }
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();

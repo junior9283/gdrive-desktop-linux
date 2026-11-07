@@ -211,10 +211,7 @@ mod tests {
         let package = dir.path().join("app_1.4.0_amd64.deb");
         std::fs::write(&package, body).unwrap();
         let log = dir.path().join("recebido");
-        let manager = format!(
-            "{{ cat \"$1\"; echo; echo \"$1\"; }} > '{}'",
-            log.display()
-        );
+        let manager = format!("{{ cat \"$1\"; echo; echo \"$1\"; }} > '{}'", log.display());
         let status = std::process::Command::new("sh")
             .args(["-c", ROOT_SCRIPT, "sh"])
             .arg(&package)

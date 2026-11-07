@@ -55,6 +55,8 @@ fn main() -> ExitCode {
 
 #[tokio::main]
 async fn serve() -> ExitCode {
+    // Antes de qualquer atualização trocar o arquivo: é este caminho que volta a rodar.
+    gdl_common::paths::startup_exe();
     let state_dir = Paths::from_env().state_dir;
     let (subscriber, log) = logging::subscriber(&state_dir, gdl_common::time::now_ms());
     if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
@@ -64,6 +66,15 @@ async fn serve() -> ExitCode {
     loop {
         match run(&log).await {
             Ok(Exit::Restart) => tracing::info!("reiniciando o serviço"),
+            // O programa no disco é o da versão nova: ele toma o lugar deste processo, com os
+            // mesmos argumentos (o systemd e o D-Bus seguem com o mesmo PID).
+            Ok(Exit::Upgrade) => {
+                use std::os::unix::process::CommandExt;
+                let error = std::process::Command::new(gdl_common::paths::startup_exe())
+                    .args(std::env::args_os().skip(1))
+                    .exec();
+                tracing::error!(erro = %error, "não deu para rodar a versão nova; reiniciando esta");
+            }
             Ok(Exit::Quit) => return ExitCode::SUCCESS,
             Err(e) => {
                 tracing::error!(erro = %e, "o serviço parou");
@@ -90,6 +101,12 @@ async fn run(log: &logging::LogHandle) -> Result<Exit, Box<dyn std::error::Error
         folder_timing: Default::default(),
         unmount_limit: gdl_daemon::daemon::UNMOUNT_LIMIT,
         updates: gdl_daemon::updates::UpdateCheck::github(),
+        install_kind: gdl_daemon::upgrade::install_kind(
+            gdl_common::paths::startup_exe()
+                .parent()
+                .unwrap_or(std::path::Path::new("/")),
+        ),
+        installer: Arc::new(gdl_daemon::upgrade::install::SystemInstaller),
     };
     let daemon = Daemon::new(config)?;
     daemon.set_log(log.clone());
@@ -106,6 +123,7 @@ async fn run(log: &logging::LogHandle) -> Result<Exit, Box<dyn std::error::Error
     }
     daemon.attach(conn.clone()).await?;
     daemon.offer_crash_reports().await;
+    daemon.announce_upgrade().await;
     daemon.watch_releases();
     // A conexão limitada (NetworkManager) e os dispositivos (UDisks2) vêm do barramento do
     // sistema.

@@ -92,7 +92,11 @@ async fn main() -> Result<(), Error> {
             url: fake.releases_url(),
             first: std::time::Duration::from_secs(3600),
             every: std::time::Duration::from_secs(3600),
+            // Sem chave: o e2e nunca instala nada.
+            public_key: String::new(),
         },
+        install_kind: gdl_daemon::upgrade::InstallKind::Source,
+        installer: Arc::new(gdl_daemon::upgrade::install::SystemInstaller),
     })?;
     let conn = zbus::connection::Builder::session()?
         .serve_at(OBJECT_PATH, Service::new(daemon.clone()))?

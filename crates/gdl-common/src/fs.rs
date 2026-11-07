@@ -31,6 +31,14 @@ pub fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Apaga a pasta e o que tem dentro; já não existir não é erro.
+pub fn remove_dir_if_exists(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

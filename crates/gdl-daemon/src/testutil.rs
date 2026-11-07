@@ -24,6 +24,8 @@ use crate::devices::UDISKS_PATH;
 use crate::fake_udisks;
 use crate::metered::NETWORK_MANAGER_PATH;
 use crate::notify::NOTIFICATIONS_PATH;
+use crate::upgrade::install::{InstallOutcome, Installer};
+use crate::upgrade::{InstallKind, UpgradeError};
 use gdl_ipc::{OBJECT_PATH, ServiceProxy};
 
 /// Notificação recebida pelo serviço falso.
@@ -102,8 +104,46 @@ impl FakeNetworkManager {
 pub(crate) const COMPUTER_ID: &str = "0123456789abcdef";
 pub(crate) const COMPUTER_NAME: &str = "Computador de teste";
 
+/// O instalador dos testes: anota cada chamada (formato, pacote, soma) e devolve `result`.
+pub(crate) struct FakeInstaller {
+    pub result: Mutex<Result<InstallOutcome, UpgradeError>>,
+    pub calls: Mutex<Vec<(InstallKind, PathBuf, String)>>,
+}
+
+impl Default for FakeInstaller {
+    fn default() -> Self {
+        FakeInstaller {
+            result: Mutex::new(Ok(InstallOutcome::Done)),
+            calls: Mutex::default(),
+        }
+    }
+}
+
+impl FakeInstaller {
+    pub fn calls(&self) -> Vec<(InstallKind, PathBuf, String)> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl Installer for FakeInstaller {
+    async fn install(
+        &self,
+        kind: &InstallKind,
+        package: &Path,
+        sha256: &str,
+    ) -> Result<InstallOutcome, UpgradeError> {
+        let call = (kind.clone(), package.to_path_buf(), sha256.to_string());
+        self.calls.lock().unwrap().push(call);
+        self.result.lock().unwrap().clone()
+    }
+}
+
 pub(crate) struct Harness {
     pub fake: FakeDrive,
+    pub installer: Arc<FakeInstaller>,
+    /// Como o serviço acha que foi instalado (`Config::install_kind`), mantido nos reinícios.
+    install_kind: InstallKind,
     pub daemon: Arc<Daemon>,
     pub proxy: ServiceProxy<'static>,
     pub tokens: Arc<MemoryStore>,
@@ -121,17 +161,29 @@ impl Harness {
 
     /// `policy`: conteúdo do `policies.toml` do administrador.
     pub async fn with_policy(policy: &str) -> Harness {
+        Harness::with(policy, InstallKind::Deb).await
+    }
+
+    /// Instalado como `kind` (o padrão dos testes é o `.deb`).
+    pub async fn with_install_kind(kind: InstallKind) -> Harness {
+        Harness::with("", kind).await
+    }
+
+    async fn with(policy: &str, install_kind: InstallKind) -> Harness {
         let fake = FakeDrive::start().await;
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir_all(&home).unwrap();
         let tokens = Arc::new(MemoryStore::default());
         let notes = Arc::new(Mutex::new(Vec::new()));
+        let installer = Arc::new(FakeInstaller::default());
         write_policy(dir.path(), policy);
-        let (daemon, proxy, client, server) =
-            serve(config(&fake, dir.path(), &tokens), &notes).await;
+        let config = config(&fake, dir.path(), &tokens, &installer, &install_kind);
+        let (daemon, proxy, client, server) = serve(config, &notes).await;
         Harness {
             fake,
+            installer,
+            install_kind,
             daemon,
             proxy,
             tokens,
@@ -157,7 +209,13 @@ impl Harness {
             write_policy(self.dir.path(), policy);
         }
         let (daemon, proxy, client, server) = serve(
-            config(&self.fake, self.dir.path(), &self.tokens),
+            config(
+                &self.fake,
+                self.dir.path(),
+                &self.tokens,
+                &self.installer,
+                &self.install_kind,
+            ),
             &self.notes,
         )
         .await;
@@ -376,7 +434,13 @@ fn launcher(root: &Path) -> PathBuf {
 }
 
 /// Configuração do serviço sobre o Drive simulado e a pasta `root` do teste.
-fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
+fn config(
+    fake: &FakeDrive,
+    root: &Path,
+    tokens: &Arc<MemoryStore>,
+    installer: &Arc<FakeInstaller>,
+    install_kind: &InstallKind,
+) -> Config {
     let launcher = launcher(root);
     Config {
         paths: Paths::for_test(root),
@@ -422,7 +486,10 @@ fn config(fake: &FakeDrive, root: &Path, tokens: &Arc<MemoryStore>) -> Config {
             url: fake.releases_url(),
             first: Duration::from_secs(3600),
             every: Duration::from_secs(3600),
+            public_key: crate::upgrade::verify::tests::test_public_key(),
         },
+        install_kind: install_kind.clone(),
+        installer: installer.clone(),
     }
 }
 

@@ -118,6 +118,23 @@ pub(crate) mod tests {
     use crate::upgrade::offer::{SIGNATURE, SUMS};
     use minisign::KeyPair;
 
+    /// O par de chaves que o `Harness` confia (`UpdateCheck::public_key`).
+    fn test_pair() -> &'static KeyPair {
+        static PAIR: std::sync::OnceLock<KeyPair> = std::sync::OnceLock::new();
+        PAIR.get_or_init(|| KeyPair::generate_unencrypted_keypair().unwrap())
+    }
+
+    pub(crate) fn test_public_key() -> String {
+        test_pair().pk.to_base64()
+    }
+
+    /// A assinatura de `data` com a chave que o `Harness` confia.
+    pub(crate) fn sign_for_harness(data: &[u8]) -> Vec<u8> {
+        let pair = test_pair();
+        let signature = minisign::sign(Some(&pair.pk), &pair.sk, data, None, None).unwrap();
+        signature.into_string().into_bytes()
+    }
+
     /// Um par de chaves só de teste: a pública (base64) e a assinatura de `data`.
     pub(crate) fn signed(data: &[u8]) -> (String, Vec<u8>) {
         let pair = KeyPair::generate_unencrypted_keypair().unwrap();

@@ -139,8 +139,18 @@ pub struct UpdateInfo {
     pub version: String,
     /// O app baixa e instala sozinho ("Atualizar agora"); senão, só "Ver novidades".
     pub can_install: bool,
-    /// `available`, `downloading`, `waiting-password` ou `installing`.
+    /// Um de `update_step`.
     pub step: String,
+}
+
+/// Os valores de `UpdateInfo::step`.
+pub mod update_step {
+    /// Parada: há (ou não) uma versão oferecida.
+    pub const AVAILABLE: &str = "available";
+    pub const DOWNLOADING: &str = "downloading";
+    /// O `pkexec` está pedindo a senha.
+    pub const WAITING_PASSWORD: &str = "waiting-password";
+    pub const INSTALLING: &str = "installing";
 }
 
 /// Um aviso do histórico (`Notifications`), o mais novo primeiro.

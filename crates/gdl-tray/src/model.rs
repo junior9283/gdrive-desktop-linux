@@ -2,7 +2,7 @@
 //! sem área de trabalho.
 
 use gdl_common::i18n::I18n;
-use gdl_ipc::Status;
+use gdl_ipc::{Status, UpdateInfo, update_step};
 
 /// Quadros da animação de "sincronizando".
 pub const SYNC_ICONS: [&str; 4] = [
@@ -42,12 +42,19 @@ pub enum Action {
     /// Liga ou desliga o registro detalhado.
     SetVerbose(bool),
     StartService,
+    /// "Atualizar agora" (sem instalar sozinho, o serviço abre a página da versão).
+    StartUpdate,
     Quit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuItem {
-    Item { label: String, action: Action },
+    Item {
+        label: String,
+        action: Action,
+    },
+    /// Só o texto, sem clique (o passo da atualização).
+    Disabled(String),
     Separator,
 }
 
@@ -145,6 +152,34 @@ impl TrayView {
         }
     }
 
+    /// Com uma versão nova oferecida, o item dela no topo: "Atualizar para…" ou, durante a
+    /// atualização, o passo (sem clique).
+    pub fn with_update(mut self, update: &UpdateInfo, i18n: &I18n) -> TrayView {
+        if update.version.is_empty() {
+            return self;
+        }
+        let args = [("version", update.version.as_str())];
+        let disabled = |key: &str| MenuItem::Disabled(i18n.tr(key, &args));
+        let first = match update.step.as_str() {
+            update_step::DOWNLOADING => disabled("tray-update-downloading"),
+            update_step::WAITING_PASSWORD => disabled("tray-update-password"),
+            update_step::INSTALLING => disabled("tray-update-installing"),
+            _ => {
+                let key = if update.can_install {
+                    "tray-update"
+                } else {
+                    "tray-update-see"
+                };
+                MenuItem::Item {
+                    label: i18n.tr(key, &args),
+                    action: Action::StartUpdate,
+                }
+            }
+        };
+        self.items.splice(0..0, [first, MenuItem::Separator]);
+        self
+    }
+
     /// O serviço não respondeu: como sem login, mais "Iniciar o serviço".
     pub fn service_down(i18n: &I18n) -> TrayView {
         signed_out(i18n, "tray-no-service", true)
@@ -184,7 +219,7 @@ fn signed_out(i18n: &I18n, tooltip: &str, service_down: bool) -> TrayView {
 
 #[cfg(test)]
 mod tests {
-    use gdl_ipc::AccountSummary;
+    use gdl_ipc::{AccountSummary, UpdateInfo};
 
     use super::*;
 
@@ -203,7 +238,7 @@ mod tests {
         view.items
             .iter()
             .map(|i| match i {
-                MenuItem::Item { label, .. } => label.as_str(),
+                MenuItem::Item { label, .. } | MenuItem::Disabled(label) => label.as_str(),
                 MenuItem::Separator => "---",
             })
             .collect()
@@ -384,10 +419,97 @@ mod tests {
         })
     }
 
+    fn synced(i18n: &I18n) -> TrayView {
+        TrayView::from_status(&status("synced", 0, 0), false, i18n)
+    }
+
+    fn offer(version: &str, step: &str) -> UpdateInfo {
+        UpdateInfo {
+            version: version.into(),
+            can_install: true,
+            step: step.into(),
+        }
+    }
+
+    #[test]
+    fn update_item_on_top_when_offered() {
+        for (lang, label) in [
+            ("pt_BR", "Atualizar para a versão 9.9.9"),
+            ("en", "Update to version 9.9.9"),
+        ] {
+            let i18n = I18n::new(lang);
+            let plain = synced(&i18n);
+            let view = plain
+                .clone()
+                .with_update(&offer("9.9.9", "available"), &i18n);
+            assert_eq!(
+                view.items[0],
+                MenuItem::Item {
+                    label: label.into(),
+                    action: Action::StartUpdate
+                }
+            );
+            assert_eq!(view.items[1], MenuItem::Separator);
+            assert_eq!(view.items[2..], plain.items[..]);
+        }
+    }
+
+    #[test]
+    fn no_update_item_without_offer() {
+        let i18n = I18n::new("pt_BR");
+        let plain = synced(&i18n);
+        let view = plain.clone().with_update(&UpdateInfo::default(), &i18n);
+        assert_eq!(view, plain);
+    }
+
+    #[test]
+    fn update_item_in_signed_out_menu() {
+        let i18n = I18n::new("pt_BR");
+        let out = TrayView::from_status(&status("signed-out", 0, 0), false, &i18n)
+            .with_update(&offer("9.9.9", "available"), &i18n);
+        assert_eq!(
+            action_of(&out, "Atualizar para a versão 9.9.9"),
+            Some(Action::StartUpdate)
+        );
+    }
+
+    /// Sem instalar sozinho, o item leva à página da versão (o serviço abre).
+    #[test]
+    fn update_item_without_install_says_see_release() {
+        let i18n = I18n::new("pt_BR");
+        let update = UpdateInfo {
+            can_install: false,
+            ..offer("9.9.9", "available")
+        };
+        let view = synced(&i18n).with_update(&update, &i18n);
+        assert_eq!(
+            action_of(&view, "Ver a versão 9.9.9"),
+            Some(Action::StartUpdate)
+        );
+    }
+
+    #[test]
+    fn update_item_disabled_while_installing() {
+        for lang in ["pt_BR", "en"] {
+            let i18n = I18n::new(lang);
+            let mut seen = Vec::new();
+            for step in ["downloading", "waiting-password", "installing"] {
+                let view = synced(&i18n).with_update(&offer("9.9.9", step), &i18n);
+                let MenuItem::Disabled(label) = &view.items[0] else {
+                    panic!("{lang} {step}: {:?}", view.items[0]);
+                };
+                assert!(!label.starts_with("tray-"), "{lang} {step}: {label}");
+                seen.push(label.clone());
+            }
+            seen.dedup();
+            assert_eq!(seen.len(), 3, "um texto por passo: {seen:?}");
+        }
+    }
+
     #[test]
     fn menu_has_every_more_options_item() {
         let i18n = I18n::new("en");
-        let view = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
+        let view = synced(&i18n);
         assert_eq!(
             action_of(&view, "Manage shared drives"),
             Some(Action::Open("shared-drives"))
@@ -417,7 +539,7 @@ mod tests {
     fn tray_confirming_items_open_the_window() {
         // A bandeja não tem diálogo: o que pede confirmação abre a janela com ele.
         let i18n = I18n::new("pt_BR");
-        let view = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
+        let view = synced(&i18n);
         assert_eq!(
             action_of(&view, "Redefinir as preferências"),
             Some(Action::Open("home:reset-preferences"))
@@ -441,7 +563,7 @@ mod tests {
         let paused = TrayView::from_status(&waiting, false, &i18n);
         assert_eq!(action_of(&paused, "Sair"), Some(Action::Open("home:quit")));
         // Sem nada pendente, sai direto.
-        let idle = TrayView::from_status(&status("synced", 0, 0), false, &i18n);
+        let idle = synced(&i18n);
         assert_eq!(action_of(&idle, "Sair"), Some(Action::Quit));
     }
 

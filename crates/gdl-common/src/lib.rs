@@ -11,6 +11,7 @@ pub mod install;
 pub mod links;
 pub mod names;
 pub mod paths;
+pub mod relaunch;
 pub mod temp_files;
 pub mod time;
 

@@ -235,6 +235,11 @@ tray-quit = Quit
 tray-sign-in = Sign in
 tray-start-service = Start the service
 tray-hotkey-search = Open Google Drive search
+tray-update = Update to version { $version }
+tray-update-see = See version { $version }
+tray-update-downloading = Downloading version { $version }…
+tray-update-password = Waiting for the password to install…
+tray-update-installing = Installing version { $version }…
 
 # Window titles (gdl-ui)
 window-home = Google Drive

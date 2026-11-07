@@ -10,7 +10,8 @@ use gdl_common::config::{Preferences, default_web_browser, load_preferences};
 use gdl_common::i18n::I18n;
 use gdl_common::links::DRIVE_WEB;
 use gdl_common::paths::Paths;
-use gdl_common::paths::exe_dir;
+use gdl_common::paths::{exe_dir, startup_exe};
+use gdl_common::relaunch::{exec_startup_exe, outdated_for};
 use gdl_ipc::launcher::Launcher;
 use gdl_ipc::{BUS_NAME, ServiceProxy, Status};
 use gdl_tray::hotkey::{DEFAULT_TRIGGER, Hotkey};
@@ -72,6 +73,12 @@ impl ksni::Tray for Tray {
             .iter()
             .map(|item| match item {
                 MenuItem::Separator => ksni::MenuItem::Separator,
+                MenuItem::Disabled(label) => ksni::menu::StandardItem {
+                    label: label.clone(),
+                    enabled: false,
+                    ..Default::default()
+                }
+                .into(),
                 MenuItem::Item { label, action } => {
                     let action = *action;
                     ksni::menu::StandardItem {
@@ -131,6 +138,8 @@ struct App {
     /// O que a bandeja mostra agora.
     view: TrayView,
     onboarding_checked: bool,
+    /// O serviço voltou em outra versão: a bandeja sai do laço e se reinicia no programa novo.
+    restart: Option<String>,
 }
 
 impl App {
@@ -138,13 +147,27 @@ impl App {
     /// o primeiro uso (salvo `DisableOnboardingDialog`).
     async fn refresh(&mut self) {
         // O registro detalhado pode mudar pela janela: é lido junto, a cada vez.
-        let (status, verbose) =
-            tokio::join!(self.service.status(""), self.service.verbose_logging());
+        let (status, verbose, update) = tokio::join!(
+            self.service.status(""),
+            self.service.verbose_logging(),
+            self.service.update_info()
+        );
+        // Ao achar o serviço (na partida e quando ele volta, numa atualização), confere a versão.
+        let came_back = self.status.is_none() && status.is_ok();
         self.status = status.ok();
+        if came_back
+            && let Ok(version) = self.service.service_version().await
+            && outdated_for(&version)
+        {
+            tracing::info!(versao = %version, "o serviço foi atualizado; reiniciando a bandeja");
+            self.restart = Some(version);
+            return;
+        }
         let verbose = verbose.unwrap_or(false);
         let signed_out = self.status.as_ref().is_some_and(is_signed_out);
         let view = match &self.status {
-            Some(status) => TrayView::from_status(status, verbose, &self.i18n),
+            Some(status) => TrayView::from_status(status, verbose, &self.i18n)
+                .with_update(&update.unwrap_or_default(), &self.i18n),
             None => TrayView::service_down(&self.i18n),
         };
         if view != self.view {
@@ -189,6 +212,7 @@ impl App {
                 done.map_err(Error::from)
             }
             Action::StartService => self.start_service().await,
+            Action::StartUpdate => self.service.start_update().await.map_err(Error::from),
             // Com o serviço no ar, a saída vem com `Quitting`; sem ele, sai já.
             Action::Quit => return self.service.quit().await.is_ok(),
         };
@@ -289,6 +313,7 @@ async fn run() -> Result<(), Error> {
     }
     let service = ServiceProxy::new(&conn).await?;
     let mut changes = service.receive_status_changed().await?;
+    let mut update_changes = service.receive_update_changed().await?;
     let mut quitting = service.receive_quitting().await?;
     let mut prefs_changed = service.receive_preferences_changed().await?;
     // O serviço caiu: sem isto o ícone seguiria "em dia" até a próxima mudança de estado.
@@ -302,15 +327,17 @@ async fn run() -> Result<(), Error> {
         status: None,
         view,
         onboarding_checked: false,
+        restart: None,
     };
     app.refresh().await;
     let (mut retry, mut frames) = (ticker(RETRY), ticker(FRAME));
     let mut terminate = signal(SignalKind::terminate())?;
     let mut interrupt = signal(SignalKind::interrupt())?;
-    loop {
+    while app.restart.is_none() {
         tokio::select! {
             _ = retry.tick(), if app.status.is_none() => app.refresh().await,
             Some(_) = changes.next() => app.refresh().await,
+            Some(_) = update_changes.next() => app.refresh().await,
             Some(_) = lost.next() => app.refresh().await,
             Some(_) = quitting.next() => break,
             Some(_) = prefs_changed.next() => {
@@ -340,11 +367,17 @@ async fn run() -> Result<(), Error> {
     drop(trigger);
     let _ = tokio::time::timeout(Duration::from_secs(2), hotkey).await;
     app.handle.shutdown().await;
+    if let Some(version) = app.restart {
+        let error = exec_startup_exe(Some(&version));
+        tracing::error!(erro = %error, "não deu para reiniciar a bandeja");
+    }
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // Antes de qualquer troca do pacote: depois dela, `/proc/self/exe` aponta o arquivo apagado.
+    startup_exe();
     gdl_common::crash::install(gdl_common::brand::TRAY_PROGRAM);
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)

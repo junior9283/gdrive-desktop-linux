@@ -9,6 +9,7 @@ use std::sync::Arc;
 use gdl_common::fs::{remove_dir_if_exists, write_atomic};
 use gdl_common::links::release_notes;
 use gdl_common::paths::create_private_dir;
+use gdl_ipc::update_step;
 use serde::{Deserialize, Serialize};
 
 use super::{Daemon, Exit, ServiceError};
@@ -34,10 +35,10 @@ impl UpdateStep {
     /// O nome no D-Bus.
     pub fn as_str(self) -> &'static str {
         match self {
-            UpdateStep::Available => "available",
-            UpdateStep::Downloading => "downloading",
-            UpdateStep::WaitingPassword => "waiting-password",
-            UpdateStep::Installing => "installing",
+            UpdateStep::Available => update_step::AVAILABLE,
+            UpdateStep::Downloading => update_step::DOWNLOADING,
+            UpdateStep::WaitingPassword => update_step::WAITING_PASSWORD,
+            UpdateStep::Installing => update_step::INSTALLING,
         }
     }
 }

@@ -69,10 +69,7 @@ async fn serve() -> ExitCode {
             // O programa no disco é o da versão nova: ele toma o lugar deste processo, com os
             // mesmos argumentos (o systemd e o D-Bus seguem com o mesmo PID).
             Ok(Exit::Upgrade) => {
-                use std::os::unix::process::CommandExt;
-                let error = std::process::Command::new(gdl_common::paths::startup_exe())
-                    .args(std::env::args_os().skip(1))
-                    .exec();
+                let error = gdl_common::relaunch::exec_startup_exe(None);
                 tracing::error!(erro = %error, "não deu para rodar a versão nova; reiniciando esta");
             }
             Ok(Exit::Quit) => return ExitCode::SUCCESS,

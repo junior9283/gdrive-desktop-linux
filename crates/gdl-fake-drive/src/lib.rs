@@ -209,7 +209,13 @@ impl FakeDrive {
 
     /// A *tag* da última release do projeto em `releases/latest`; `None` responde 404.
     pub fn set_latest_release(&self, tag: Option<&str>) {
-        self.shared.state().latest_release = tag.map(String::from);
+        self.set_release(tag, vec![]);
+    }
+
+    /// A última release com os arquivos `files` (nome, conteúdo): eles aparecem em `assets` e
+    /// são servidos em `download/<nome>`.
+    pub fn set_release(&self, tag: Option<&str>, files: Vec<(String, Vec<u8>)>) {
+        self.shared.state().latest_release = tag.map(|tag| (tag.into(), files));
     }
 
     /// Endereço da última release (no lugar da API do GitHub).

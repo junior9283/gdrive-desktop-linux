@@ -4,7 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
+use gdl_common::brand::PACKAGE;
 use gdl_common::install::{Install, detect};
+
+use crate::updates::{Version, text};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallKind {
@@ -16,6 +19,25 @@ pub enum InstallKind {
         prefix: PathBuf,
     },
     Source,
+}
+
+impl InstallKind {
+    /// O nome do pacote desta variante neste formato, no release `version` (os nomes que o
+    /// `scripts/package.sh` gera); `None` quando não há pacote para esta instalação (os releases
+    /// só trazem x86_64).
+    pub fn package_name(&self, version: Version) -> Option<String> {
+        if !cfg!(target_arch = "x86_64") {
+            return None;
+        }
+        let (p, v) = (PACKAGE, text(version));
+        Some(match self {
+            InstallKind::Deb => format!("{p}_{v}_amd64.deb"),
+            InstallKind::Rpm => format!("{p}-{v}-1.x86_64.rpm"),
+            InstallKind::Arch => format!("{p}-{v}-1-x86_64.pkg.tar.zst"),
+            InstallKind::Tar { .. } => format!("{p}-{v}-x86_64.tar.gz"),
+            InstallKind::Source => return None,
+        })
+    }
 }
 
 /// O formato da instalação dos programas da pasta `bin` (a de `paths::startup_exe`).
@@ -49,6 +71,30 @@ mod tests {
             std::fs::write(share.join(name), body).unwrap();
         }
         root.join("bin")
+    }
+
+    /// Os nomes do `scripts/package.sh` (os do release 1.3.2, com outra versão).
+    #[test]
+    fn package_names_match_package_sh() {
+        let (v, p) = ((1, 4, 0), PACKAGE);
+        let tar = InstallKind::Tar {
+            prefix: "/home/x/.local".into(),
+        };
+        let name = |kind: &InstallKind| kind.package_name(v);
+        assert_eq!(
+            name(&InstallKind::Deb),
+            Some(format!("{p}_1.4.0_amd64.deb"))
+        );
+        assert_eq!(
+            name(&InstallKind::Rpm),
+            Some(format!("{p}-1.4.0-1.x86_64.rpm"))
+        );
+        assert_eq!(
+            name(&InstallKind::Arch),
+            Some(format!("{p}-1.4.0-1-x86_64.pkg.tar.zst"))
+        );
+        assert_eq!(name(&tar), Some(format!("{p}-1.4.0-x86_64.tar.gz")));
+        assert_eq!(name(&InstallKind::Source), None);
     }
 
     #[test]

@@ -51,6 +51,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
         .route("/token", post(token))
         .route("/photo.png", get(photo))
         .route("/releases/latest", get(latest_release))
+        .route("/download/{name}", get(release_file))
         .route("/o/oauth2/auth", get(authorize))
         .layer(middleware::from_fn_with_state(shared.clone(), log_request))
         .with_state(shared)
@@ -205,8 +206,26 @@ pub(crate) fn bad_json() -> Response {
 
 /// A última release do projeto, como a API do GitHub responde (`tag_name`); sem release, 404.
 async fn latest_release(State(shared): Shr) -> Response {
-    match shared.state().latest_release.clone() {
-        Some(tag) => Json(json!({ "tag_name": tag, "draft": false })).into_response(),
+    let state = shared.state();
+    let Some((tag, files)) = &state.latest_release else {
+        return api_error(404, "notFound", "Not Found");
+    };
+    let assets: Vec<Value> = files
+        .iter()
+        .map(|(name, _)| {
+            let url = shared.origin.join(&format!("download/{name}")).unwrap();
+            json!({ "name": name, "browser_download_url": url.to_string() })
+        })
+        .collect();
+    Json(json!({ "tag_name": tag, "draft": false, "assets": assets })).into_response()
+}
+
+/// Um arquivo da release (`FakeDrive::set_release`); outro nome, 404.
+async fn release_file(State(shared): Shr, Path(name): Path<String>) -> Response {
+    let state = shared.state();
+    let files = state.latest_release.iter().flat_map(|(_, files)| files);
+    match files.into_iter().find(|(n, _)| *n == name) {
+        Some((_, body)) => body.clone().into_response(),
         None => api_error(404, "notFound", "Not Found"),
     }
 }

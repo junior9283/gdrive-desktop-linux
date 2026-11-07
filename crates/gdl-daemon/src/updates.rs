@@ -44,14 +44,45 @@ pub fn text(version: Version) -> String {
     format!("{}.{}.{}", version.0, version.1, version.2)
 }
 
-/// A versão da última release em `url`; `None` quando a *tag* não é uma versão.
-pub async fn latest(url: &Url) -> Result<Option<Version>, gdl_drive::HttpError> {
+/// Um arquivo do release.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asset {
+    pub name: String,
+    pub url: Url,
+}
+
+/// A última release: a versão e os arquivos dela.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Release {
+    pub version: Version,
+    pub assets: Vec<Asset>,
+}
+
+/// A última release em `url`; `None` quando a *tag* não é uma versão.
+pub async fn latest(url: &Url) -> Result<Option<Release>, gdl_drive::HttpError> {
     #[derive(serde::Deserialize)]
-    struct Release {
+    struct Json {
         tag_name: String,
+        #[serde(default)]
+        assets: Vec<JsonAsset>,
     }
-    let release: Release = gdl_drive::fetch_json(url).await?;
-    Ok(version(&release.tag_name))
+    #[derive(serde::Deserialize)]
+    struct JsonAsset {
+        name: String,
+        browser_download_url: String,
+    }
+    let release: Json = gdl_drive::fetch_json(url).await?;
+    Ok(version(&release.tag_name).map(|version| Release {
+        version,
+        assets: release
+            .assets
+            .into_iter()
+            .filter_map(|a| {
+                let url = Url::parse(&a.browser_download_url).ok()?;
+                Some(Asset { name: a.name, url })
+            })
+            .collect(),
+    }))
 }
 
 #[cfg(test)]
@@ -76,6 +107,21 @@ mod tests {
             version("v0.10.0") > version("v0.9.9"),
             "numérico, não texto"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn latest_reads_the_release_files() {
+        let h = Harness::new().await;
+        h.fake
+            .set_release(Some("v1.4.0"), vec![("SHA256SUMS".into(), b"x".to_vec())]);
+        let release = latest(&h.fake.releases_url()).await.unwrap().unwrap();
+        assert_eq!(release.version, (1, 4, 0));
+        assert_eq!(release.assets.len(), 1);
+        assert_eq!(release.assets[0].name, "SHA256SUMS");
+        let body = gdl_drive::fetch_bytes(&release.assets[0].url)
+            .await
+            .unwrap();
+        assert_eq!(body, b"x");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

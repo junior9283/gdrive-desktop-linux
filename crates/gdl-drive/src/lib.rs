@@ -8,6 +8,7 @@ pub mod throttle;
 pub mod token_store;
 
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 /// Como os clientes HTTP saem para a internet (`DirectConnection`, `ProxyServer`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -84,21 +85,32 @@ pub use reqwest::Error as HttpError;
 /// GET de um JSON fora do Drive (a última release do projeto), com a rede e o TLS do app e um
 /// prazo de 30 s.
 pub async fn fetch_json<T: serde::de::DeserializeOwned>(url: &url::Url) -> Result<T, HttpError> {
-    http_builder()
-        .user_agent(format!(
-            "{}/{}",
-            gdl_common::brand::PACKAGE,
-            env!("CARGO_PKG_VERSION")
-        ))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()?
-        .get(url.clone())
+    public_get(url, Duration::from_secs(30))?
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await?
         .error_for_status()?
         .json()
         .await
+}
+
+/// O corpo de `url` (um arquivo de release), com até 10 min para chegar.
+pub async fn fetch_bytes(url: &url::Url) -> Result<Vec<u8>, HttpError> {
+    let response = public_get(url, Duration::from_secs(600))?.send().await?;
+    Ok(Vec::from(response.error_for_status()?.bytes().await?))
+}
+
+/// Um GET sem login (a API do GitHub e os arquivos dos releases), com o app no `User-Agent`.
+fn public_get(url: &url::Url, timeout: Duration) -> Result<reqwest::RequestBuilder, HttpError> {
+    let client = http_builder()
+        .user_agent(format!(
+            "{}/{}",
+            gdl_common::brand::PACKAGE,
+            env!("CARGO_PKG_VERSION")
+        ))
+        .timeout(timeout)
+        .build()?;
+    Ok(client.get(url.clone()))
 }
 
 fn with_tls(builder: reqwest::ClientBuilder, tls: &Tls) -> reqwest::ClientBuilder {

@@ -32,7 +32,7 @@ impl Daemon {
     /// release ou com resposta estranha, nada acontece (só o log detalhado registra).
     pub async fn check_release(&self) {
         let latest = match updates::latest(&self.config.updates.url).await {
-            Ok(Some(latest)) => latest,
+            Ok(Some(release)) => release.version,
             Ok(None) => return,
             Err(e) => {
                 tracing::debug!(erro = %e, "não deu para consultar a última versão");

@@ -4,7 +4,7 @@
 
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-1.3.2-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-1.4.0-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-est%C3%A1vel-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
@@ -51,6 +51,7 @@ Este projeto quer preencher essa lacuna com um app **nativo de Linux**, feito do
 | **Drives compartilhados** | ✅ Na pasta de cada conta e numa visão própria da janela principal, com a janela "Gerenciar drives compartilhados" para escolher quais aparecem e criar um novo. |
 | **Proteção e recuperação** | ✅ Arquivos regravados com cara de cifrados por um vírus, ou renomeados em massa para extensões de cifrado, pausam os envios e pedem confirmação; dados locais danificados são refeitos a partir do Drive, com as edições pendentes guardadas no Lost and Found, que pode ser levado inteiro para uma pasta escolhida. |
 | **Avisos** | ✅ Sem permissão, conta bloqueada, armazenamento quase cheio, disco cheio, envios parados há dias, itens recuperados, limites do Drive, login bloqueado pela organização, itens movidos para onde outras pessoas veem, nova versão do app e os demais, cada tipo podendo ser desligado nas preferências de notificação. |
+| **Atualizações** | ✅ Achando uma versão nova, o app oferece **Atualizar agora** ou **Depois** (na notificação, na bandeja e na tela Sobre) e se instala sozinho, conferindo a assinatura do projeto. |
 | **Diagnóstico e feedback** | ✅ Registro detalhado, pacote de informações de diagnóstico sem tokens nem e-mails, Enviar feedback (issue já preenchida) e relatório de falhas, enviado só por você. |
 | **Assistentes de IA** | ✅ Servidor MCP: estado e link de um caminho, pastas acompanhadas, janela Compartilhar com o e-mail já digitado e adicionar pastas à sincronização. |
 

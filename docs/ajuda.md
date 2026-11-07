@@ -125,6 +125,15 @@ com um e-mail já digitado e adicionar uma pasta à sincronização. Ele só ace
 dentro da sua pasta pessoal e nunca compartilha nada sem você confirmar. O README mostra como
 registrar o servidor no seu cliente.
 
+## Atualizações
+
+Uma vez por dia o app procura uma versão nova. Achando, a notificação, o menu da bandeja e a tela
+**Sobre** oferecem **Atualizar agora** ou **Depois** (que volta a oferecer no dia seguinte). O
+Atualizar agora baixa o pacote do formato que você instalou, confere a assinatura do projeto e
+instala; nos pacotes `.deb`, `.rpm` e do Arch, o sistema pede a senha de administrador (cancelar
+não muda nada). No fim, o serviço, a bandeja e a janela voltam já na versão nova, com o aviso
+"Atualizado". Instalações compiladas do código só recebem o aviso e o link da versão.
+
 ## Algo deu errado
 
 Em **Mais opções**:

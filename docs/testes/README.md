@@ -108,6 +108,11 @@ baixado e um "navegador" que anota em `$GDL_E2E_OPENED` o que pediram para abrir
 o armazenamento (`QuotaExceeded`) e `SIGUSR2` desfaz; a confirmação vem em `$GDL_E2E_QUOTA`
 (`full`/`free`), e o teste espera por ela antes de seguir.
 
+Para testar a atualização à mão, `GDL_RELEASES_URL` aponta a consulta da última versão para um
+release servido na máquina (o JSON de `/releases/latest` com os pacotes, o `SHA256SUMS` e o
+`.minisig` assinados pela chave do projeto): `systemctl --user set-environment
+GDL_RELEASES_URL=http://127.0.0.1:PORTA/latest` e reinicie o serviço.
+
 ## Armadilhas conhecidas
 
 - **Clique em botão desabilitado no e2e se perde em silêncio:** espere o estado que habilita o

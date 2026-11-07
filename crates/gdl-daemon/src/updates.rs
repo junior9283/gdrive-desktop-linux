@@ -19,10 +19,29 @@ pub struct UpdateCheck {
     pub public_key: String,
 }
 
+/// Só para testar em desenvolvimento (um release servido na máquina); não abre brecha, porque o
+/// pacote só é instalado se conferir com a chave embutida (`RELEASE_PUBLIC_KEY`).
+const RELEASES_URL_VAR: &str = "GDL_RELEASES_URL";
+
+/// O endereço da consulta: `custom` se for um endereço, senão o do GitHub.
+fn releases_url(custom: Option<String>) -> Url {
+    custom
+        .and_then(|url| {
+            Url::parse(&url)
+                .inspect_err(
+                    |e| tracing::warn!(erro = %e, "{RELEASES_URL_VAR} inválido; uso o GitHub"),
+                )
+                .ok()
+        })
+        .unwrap_or_else(|| {
+            Url::parse(gdl_common::links::LATEST_RELEASE_API).expect("endereço fixo")
+        })
+}
+
 impl UpdateCheck {
     pub fn github() -> UpdateCheck {
         UpdateCheck {
-            url: Url::parse(gdl_common::links::LATEST_RELEASE_API).expect("endereço fixo"),
+            url: releases_url(std::env::var(RELEASES_URL_VAR).ok()),
             first: Duration::from_secs(60),
             every: Duration::from_secs(24 * 60 * 60),
             public_key: gdl_common::links::RELEASE_PUBLIC_KEY.into(),
@@ -98,6 +117,21 @@ mod tests {
 
     fn announced(h: &Harness) -> Vec<crate::testutil::Note> {
         h.notes().into_iter().filter(|n| n.summary == NEW).collect()
+    }
+
+    #[test]
+    fn releases_url_can_be_pointed_elsewhere_for_development() {
+        assert_eq!(
+            releases_url(None).as_str(),
+            gdl_common::links::LATEST_RELEASE_API
+        );
+        let local = releases_url(Some("http://127.0.0.1:8099/latest".into()));
+        assert_eq!(local.as_str(), "http://127.0.0.1:8099/latest");
+        // Um valor que não é endereço fica com o do GitHub.
+        assert_eq!(
+            releases_url(Some("nada".into())).as_str(),
+            gdl_common::links::LATEST_RELEASE_API
+        );
     }
 
     #[test]

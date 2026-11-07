@@ -7,6 +7,23 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.4.0] - 2026-11-07
+
+Atualização automática: achando uma versão nova, o app se atualiza sozinho com um clique.
+
+### Adicionado
+
+- Atualizar agora: quando sai uma versão nova, a notificação, o menu da bandeja e a tela Sobre
+  oferecem **Atualizar agora** (baixa o pacote do seu formato, confere a assinatura do projeto,
+  instala e reinicia o app na versão nova) ou **Depois** (volta a oferecer no dia seguinte).
+- Releases assinados: cada release traz o `SHA256SUMS.minisig`, que confere o `SHA256SUMS` com a
+  chave pública do projeto (`minisign -Vm SHA256SUMS -P <chave>`, a chave está no README).
+
+### Observação
+
+- Quem está na 1.3.2 ou antes instala esta versão à mão uma vez (como sempre); daqui em diante, as
+  próximas chegam pelo **Atualizar agora**.
+
 ## [1.3.2] - 2026-11-06
 
 O site do GeraSync em domínio próprio e correções na página Arquivos off-line.

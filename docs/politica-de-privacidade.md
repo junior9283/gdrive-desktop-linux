@@ -19,6 +19,9 @@ não tem ligação com o Google nem é aprovado por ele.
 - Uma vez por dia, com a API pública do GitHub, só para saber qual é a última versão do app
   (`api.github.com/repos/junior9283/gdrive-desktop-linux/releases/latest`). O pedido leva apenas a
   versão instalada, no cabeçalho de identificação; nenhum dado seu nem dos seus arquivos.
+- Quando você escolhe **Atualizar agora**, com o GitHub de novo, para baixar da página da versão
+  o pacote do app, o `SHA256SUMS` e a assinatura dele. Nada seu vai junto; o pacote só é
+  instalado se a assinatura do projeto e a soma conferirem.
 
 O projeto não tem servidores próprios e não recebe nenhum dado seu.
 

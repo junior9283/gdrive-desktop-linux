@@ -169,6 +169,9 @@ pub(crate) struct Session {
 
 pub(crate) type SessionRef = Arc<tokio::sync::Mutex<Session>>;
 
+/// Um arquivo de release falso: nome e conteúdo.
+pub type ReleaseFile = (String, Vec<u8>);
+
 pub(crate) struct State {
     /// Origem do servidor, para montar os endereços absolutos (miniaturas).
     origin: Url,
@@ -197,7 +200,7 @@ pub(crate) struct State {
     pub(crate) quota_limit: u64,
     /// A última release do projeto: a *tag* e os arquivos (nome, conteúdo)
     /// (`FakeDrive::set_release`).
-    pub(crate) latest_release: Option<(String, Vec<(String, Vec<u8>)>)>,
+    pub(crate) latest_release: Option<(String, Vec<ReleaseFile>)>,
     pub(crate) files: BTreeMap<String, FileRec>,
     pub(crate) drives: Vec<DriveRec>,
     /// A conta principal (a dos auxiliares do `FakeDrive` e do `TEST_ACCESS_TOKEN`).

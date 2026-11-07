@@ -1,5 +1,9 @@
 //! A instalação do pacote conferido: o gerenciador de pacotes de cada formato, com a senha
 //! pedida pelo polkit (`pkexec`), ou o `install.sh` do `.tar.gz`, sem root.
+//!
+//! O pacote baixado fica numa pasta do usuário, que outro programa dele poderia trocar entre a
+//! conferência e a instalação. Por isso o passo como root (`ROOT_SCRIPT`) copia o pacote para
+//! uma pasta só dele, confere de novo a soma da cópia e instala a cópia.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -20,23 +24,39 @@ pub trait Installer: Send + Sync {
         &self,
         kind: &InstallKind,
         package: &Path,
+        sha256: &str,
     ) -> Result<InstallOutcome, UpgradeError>;
 }
 
-/// A linha de comando que instala `package` (caminho absoluto, já conferido) numa instalação
-/// `kind`; `has(programa)` diz se o programa está no `PATH`. No `.tar.gz`, `package` já foi
-/// extraído ao lado dele. `None`: não há como instalar sozinho.
+/// O passo como root: `sh -c ROOT_SCRIPT sh <pacote> <sha256> <gerenciador e argumentos>`.
+/// Copia o pacote para uma pasta temporária do root, confere a soma da cópia e roda o
+/// gerenciador com ela no fim; a pasta some na saída.
+pub const ROOT_SCRIPT: &str = r#"set -eu
+src=$1 sum=$2
+shift 2
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+file="$dir/${src##*/}"
+cp -- "$src" "$file"
+echo "$sum  $file" | sha256sum -c --status -
+"$@" "$file"
+"#;
+
+/// A linha de comando que instala `package` (caminho absoluto, já conferido, com a soma
+/// `sha256`) numa instalação `kind`; `has(programa)` diz se o programa está no `PATH`. No
+/// `.tar.gz` (sem root), `package` já foi extraído ao lado dele. `None`: não há como instalar
+/// sozinho.
 pub fn command_for(
     kind: &InstallKind,
     package: &Path,
+    sha256: &str,
     has: impl Fn(&str) -> bool,
 ) -> Option<Vec<OsString>> {
-    let path = package.as_os_str().to_owned();
-    let pkexec = |words: &[&str]| {
-        let mut command: Vec<OsString> =
-            ["pkexec"].iter().chain(words).map(OsString::from).collect();
-        command.push(path.clone());
-        command
+    let pkexec = |manager: &[&str]| {
+        let head = ["pkexec", "sh", "-c", ROOT_SCRIPT, "sh"].map(OsString::from);
+        let args = [package.as_os_str().to_owned(), sha256.into()];
+        let manager = manager.iter().map(OsString::from);
+        head.into_iter().chain(args).chain(manager).collect()
     };
     Some(match kind {
         InstallKind::Deb => pkexec(&["apt-get", "install", "-y"]),
@@ -99,6 +119,7 @@ impl Installer for SystemInstaller {
         &self,
         kind: &InstallKind,
         package: &Path,
+        sha256: &str,
     ) -> Result<InstallOutcome, UpgradeError> {
         let failed = |e: std::io::Error| UpgradeError::Install(e.to_string());
         if matches!(kind, InstallKind::Tar { .. }) {
@@ -108,7 +129,7 @@ impl Installer for SystemInstaller {
                 .map_err(|e| UpgradeError::Install(e.to_string()))?
                 .map_err(failed)?;
         }
-        let command = command_for(kind, package, in_path)
+        let command = command_for(kind, package, sha256, in_path)
             .ok_or_else(|| UpgradeError::Install("sem instalador para este formato".into()))?;
         let output = tokio::process::Command::new(&command[0])
             .args(&command[1..])
@@ -136,37 +157,91 @@ mod tests {
         command.map(|c| c.into_iter().map(|w| w.into_string().unwrap()).collect())
     }
 
+    const SUM: &str = "abc123";
+
     fn cmd(kind: &InstallKind, package: &str, has: &[&str]) -> Option<Vec<String>> {
-        words(command_for(kind, Path::new(package), |p| has.contains(&p)))
+        words(command_for(kind, Path::new(package), SUM, |p| {
+            has.contains(&p)
+        }))
+    }
+
+    /// O comando como root: o `ROOT_SCRIPT` com o pacote, a soma e o gerenciador.
+    fn as_root(package: &str, manager: &[&str]) -> Vec<String> {
+        ["pkexec", "sh", "-c", ROOT_SCRIPT, "sh", package, SUM]
+            .iter()
+            .chain(manager)
+            .map(|w| w.to_string())
+            .collect()
     }
 
     #[test]
     fn package_formats_use_their_manager_through_pkexec() {
         assert_eq!(
             cmd(&InstallKind::Deb, "/c/a.deb", &[]).unwrap(),
-            ["pkexec", "apt-get", "install", "-y", "/c/a.deb"]
+            as_root("/c/a.deb", &["apt-get", "install", "-y"])
         );
         assert_eq!(
             cmd(&InstallKind::Rpm, "/c/a.rpm", &["dnf", "zypper"]).unwrap(),
-            ["pkexec", "dnf", "install", "-y", "/c/a.rpm"]
+            as_root("/c/a.rpm", &["dnf", "install", "-y"])
         );
         assert_eq!(
             cmd(&InstallKind::Rpm, "/c/a.rpm", &["zypper"]).unwrap(),
-            [
-                "pkexec",
-                "zypper",
-                "--non-interactive",
-                "install",
-                "--allow-unsigned-rpm",
-                "/c/a.rpm"
-            ]
+            as_root(
+                "/c/a.rpm",
+                &[
+                    "zypper",
+                    "--non-interactive",
+                    "install",
+                    "--allow-unsigned-rpm"
+                ]
+            )
         );
         assert_eq!(cmd(&InstallKind::Rpm, "/c/a.rpm", &[]), None);
         assert_eq!(
             cmd(&InstallKind::Arch, "/c/a.pkg.tar.zst", &[]).unwrap(),
-            ["pkexec", "pacman", "-U", "--noconfirm", "/c/a.pkg.tar.zst"]
+            as_root("/c/a.pkg.tar.zst", &["pacman", "-U", "--noconfirm"])
         );
         assert_eq!(cmd(&InstallKind::Source, "/c/a.deb", &[]), None);
+    }
+
+    /// O `ROOT_SCRIPT` rodado sem root, com um "gerenciador" que grava o que recebeu: a soma
+    /// `sum` do pacote com conteúdo `body`. Devolve a saída e o que o gerenciador recebeu.
+    fn run_root_script(body: &[u8], sum: &str) -> (std::process::ExitStatus, Option<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("app_1.4.0_amd64.deb");
+        std::fs::write(&package, body).unwrap();
+        let log = dir.path().join("recebido");
+        let manager = format!(
+            "{{ cat \"$1\"; echo; echo \"$1\"; }} > '{}'",
+            log.display()
+        );
+        let status = std::process::Command::new("sh")
+            .args(["-c", ROOT_SCRIPT, "sh"])
+            .arg(&package)
+            .args([sum, "sh", "-c", &manager, "gerenciador"])
+            .status()
+            .unwrap();
+        (status, std::fs::read_to_string(log).ok())
+    }
+
+    /// O pacote que o root instala é uma cópia dele, conferida de novo: trocar o arquivo da
+    /// pasta do usuário depois do download não passa.
+    #[test]
+    fn root_step_installs_a_rechecked_copy() {
+        let sum = crate::upgrade::verify::sha256_hex(b"pacote");
+
+        let (status, got) = run_root_script(b"pacote", &sum);
+
+        assert!(status.success(), "{status}");
+        let got = got.unwrap();
+        let (body, path) = got.trim_end().split_once('\n').unwrap();
+        assert_eq!(body, "pacote");
+        assert!(path.ends_with("/app_1.4.0_amd64.deb"), "{path}");
+        assert!(!Path::new(path).exists(), "a cópia some no fim");
+
+        let (status, got) = run_root_script(b"trocado", &sum);
+        assert!(!status.success());
+        assert_eq!(got, None, "o gerenciador não roda");
     }
 
     #[test]
@@ -239,7 +314,7 @@ mod tests {
             prefix: "/pfx".into(),
         };
         let got = SystemInstaller
-            .install(&tar, &tarball(dir.path(), code))
+            .install(&tar, &tarball(dir.path(), code), "")
             .await;
         (dir, got)
     }

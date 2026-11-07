@@ -54,13 +54,20 @@ pub fn expected_sha256(
         .ok_or(VerifyError::NotListed)
 }
 
-/// Baixa os arquivos de `files` para `dir` (criado, privado), confere e devolve o caminho do
-/// pacote; em qualquer erro, `dir` é apagada.
+/// O pacote baixado e conferido, com a soma que o instalador confere de novo como root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Downloaded {
+    pub path: PathBuf,
+    pub sha256: String,
+}
+
+/// Baixa os arquivos de `files` para `dir` (criado, privado) e confere; em qualquer erro, `dir`
+/// é apagada.
 pub async fn download(
     files: &ReleaseFiles,
     dir: &Path,
     public_key: &str,
-) -> Result<PathBuf, UpgradeError> {
+) -> Result<Downloaded, UpgradeError> {
     let got = fetch_checked(files, dir, public_key).await;
     if got.is_err() {
         let _ = std::fs::remove_dir_all(dir);
@@ -72,7 +79,7 @@ async fn fetch_checked(
     files: &ReleaseFiles,
     dir: &Path,
     public_key: &str,
-) -> Result<PathBuf, UpgradeError> {
+) -> Result<Downloaded, UpgradeError> {
     let fetch = |url| async move {
         gdl_drive::fetch_bytes(url).await.map_err(|e| {
             tracing::debug!(erro = %e, "não deu para baixar um arquivo do release");
@@ -85,9 +92,9 @@ async fn fetch_checked(
     let package = fetch(&files.package.url).await?;
     // Dezenas de MB: a soma e a gravação ficam fora das threads do runtime.
     let path = dir.join(&files.package.name);
-    let (dir, target) = (dir.to_path_buf(), path.clone());
+    let (dir, target, sum) = (dir.to_path_buf(), path.clone(), expected.clone());
     tokio::task::spawn_blocking(move || {
-        if sha256_hex(&package) != expected {
+        if sha256_hex(&package) != sum {
             return Err(UpgradeError::Verify(VerifyError::Mismatch));
         }
         create_private_dir(&dir)
@@ -99,7 +106,10 @@ async fn fetch_checked(
     })
     .await
     .map_err(|e| UpgradeError::Install(e.to_string()))??;
-    Ok(path)
+    Ok(Downloaded {
+        path,
+        sha256: expected,
+    })
 }
 
 #[cfg(test)]
@@ -242,10 +252,11 @@ pub(crate) mod tests {
             files, key, target, ..
         } = &served(b"pacote", b"pacote").await;
 
-        let package = download(files, target, key).await.unwrap();
+        let got = download(files, target, key).await.unwrap();
 
-        assert_eq!(package, target.join(deb()));
-        assert_eq!(std::fs::read(&package).unwrap(), b"pacote");
+        assert_eq!(got.path, target.join(deb()));
+        assert_eq!(got.sha256, sha256_hex(b"pacote"));
+        assert_eq!(std::fs::read(&got.path).unwrap(), b"pacote");
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(target).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);

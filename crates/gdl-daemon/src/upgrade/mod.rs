@@ -8,6 +8,7 @@ pub mod verify;
 
 pub use kind::{InstallKind, install_kind};
 pub use offer::{Offer, ReleaseFiles, offer};
+pub use verify::Downloaded;
 
 /// Por que a atualização não aconteceu.
 #[derive(Debug, Clone, PartialEq, Eq)]

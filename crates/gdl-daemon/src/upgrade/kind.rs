@@ -21,6 +21,9 @@ pub enum InstallKind {
     Source,
 }
 
+/// O fim do nome do `.tar.gz` do release, depois de `<nome>-<versão>` (a pasta que ele cria).
+pub const TAR_SUFFIX: &str = "-x86_64.tar.gz";
+
 impl InstallKind {
     /// O nome do pacote desta variante neste formato, no release `version` (os nomes que o
     /// `scripts/package.sh` gera); `None` quando não há pacote para esta instalação (os releases
@@ -34,7 +37,7 @@ impl InstallKind {
             InstallKind::Deb => format!("{p}_{v}_amd64.deb"),
             InstallKind::Rpm => format!("{p}-{v}-1.x86_64.rpm"),
             InstallKind::Arch => format!("{p}-{v}-1-x86_64.pkg.tar.zst"),
-            InstallKind::Tar { .. } => format!("{p}-{v}-x86_64.tar.gz"),
+            InstallKind::Tar { .. } => format!("{p}-{v}{TAR_SUFFIX}"),
             InstallKind::Source => return None,
         })
     }

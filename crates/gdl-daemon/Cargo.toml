@@ -26,6 +26,7 @@ rustix = { workspace = true, features = ["fs", "process", "system"] }
 ron.workspace = true
 sha2.workspace = true
 minisign-verify.workspace = true
+async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

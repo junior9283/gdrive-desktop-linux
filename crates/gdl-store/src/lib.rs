@@ -198,6 +198,20 @@ impl Store {
                -- Não `OR IGNORE`: num upsert, valeria a política de conflito do comando de fora.
                INSERT INTO temp.state_changes VALUES (NEW.id) ON CONFLICT DO NOTHING;
              END;
+             -- O que está no cache também aparece no estado (`cached`): só a virada importa, o
+             -- arquivo ficar inteiro ou deixar de estar (não cada trecho que entra ou sai).
+             CREATE TEMP TRIGGER ranges_added AFTER INSERT ON main.ranges
+             WHEN (SELECT COALESCE(SUM(end - start), 0) FROM main.ranges WHERE item_id = NEW.item_id)
+                  >= (SELECT size FROM main.items WHERE id = NEW.item_id)
+             BEGIN
+               INSERT INTO temp.state_changes VALUES (NEW.item_id) ON CONFLICT DO NOTHING;
+             END;
+             CREATE TEMP TRIGGER ranges_gone AFTER DELETE ON main.ranges
+             WHEN (SELECT COALESCE(SUM(end - start), 0) FROM main.ranges WHERE item_id = OLD.item_id)
+                  + (OLD.end - OLD.start) >= (SELECT size FROM main.items WHERE id = OLD.item_id)
+             BEGIN
+               INSERT INTO temp.state_changes VALUES (OLD.item_id) ON CONFLICT DO NOTHING;
+             END;
              -- O erro de envio também é estado (`has_upload_error`): entrar e sair da lista.
              CREATE TEMP TRIGGER upload_error_set AFTER UPDATE OF error_category ON main.upload_queue
              WHEN (OLD.error_category IS NULL) IS NOT (NEW.error_category IS NULL)

@@ -1,4 +1,4 @@
-// Os emblemas de estado nos arquivos do Meu Drive no Dolphin: na nuvem, off-line, sincronizando,
+// Os emblemas de estado nos arquivos do Meu Drive no Dolphin: na nuvem, baixado (no cache), off-line, sincronizando,
 // em conflito ou com erro. O estado vem do atributo `user.gdl.state` que a montagem dá a cada
 // item; nas pastas do computador sincronizadas (que não têm o atributo), do método `FolderStates` do
 // serviço, perguntado só abaixo das raízes que `FolderRoots` dá (um filtro: quem decide é o
@@ -26,7 +26,7 @@ namespace
 {
 // Os valores de `user.gdl.state` (crates/gdl-fs/src/layout.rs); cada um tem o emblema
 // `gdl-emblem-<valor>` em assets/icons/hicolor/scalable/emblems.
-const QList<QByteArray> STATES = {"cloud", "offline", "syncing", "conflict", "error"};
+const QList<QByteArray> STATES = {"cloud", "cached", "offline", "syncing", "conflict", "error"};
 // Só ao carregar o plugin a lista de raízes é esperada (o serviço responde do banco local).
 constexpr int ROOTS_TIMEOUT_MS = 200;
 }

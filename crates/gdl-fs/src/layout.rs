@@ -120,7 +120,7 @@ pub(crate) fn item_perm(item: &Item) -> u16 {
 }
 
 /// `user.gdl.state`: `conflict`, `error` (na lista de erros), `syncing` (edição local a enviar),
-/// `offline` (fixado ou só local) ou `cloud`.
+/// `offline` (fixado ou só local), `cached` (arquivo inteiro no cache, baixado pelo uso) ou `cloud`.
 pub fn item_state(item: &Item, store: &Store) -> gdl_store::Result<&'static str> {
     Ok(match item.local_state {
         LocalState::Conflict => "conflict",
@@ -128,8 +128,16 @@ pub fn item_state(item: &Item, store: &Store) -> gdl_store::Result<&'static str>
         LocalState::Dirty | LocalState::Uploading => "syncing",
         LocalState::LocalOnly => "offline",
         LocalState::Clean if item.pin != PinState::None => "offline",
+        LocalState::Clean if is_cached(item, store)? => "cached",
         LocalState::Clean => "cloud",
     })
+}
+
+/// Arquivo com conteúdo, todo no cache (os Documentos Google e as pastas não têm bytes locais).
+fn is_cached(item: &Item, store: &Store) -> gdl_store::Result<bool> {
+    Ok(matches!(item.kind, ItemKind::File)
+        && item.size > 0
+        && store.is_complete(&item.id, item.size)?)
 }
 
 pub(crate) fn xattr_value(item: &Item, store: &Store, name: &OsStr) -> Option<String> {

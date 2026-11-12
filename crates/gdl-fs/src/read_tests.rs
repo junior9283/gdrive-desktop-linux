@@ -71,8 +71,9 @@ async fn shared_drive_folder_lists_enabled_drives() {
     assert_eq!(names(&shared), ["Equipe"]);
     assert_eq!(names(&shared.join("Equipe")), ["Planos"]);
     let file = shared.join("Equipe/Planos/plano.txt");
-    assert_eq!(std::fs::read(&file).unwrap(), b"plano");
     assert_eq!(xattr(&file, "user.gdl.state"), "cloud");
+    assert_eq!(std::fs::read(&file).unwrap(), b"plano");
+    assert_eq!(xattr(&file, "user.gdl.state"), "cached");
     assert_eq!(mode(&shared), 0o555);
 
     // Desligado, o drive some da pasta (e os itens dele do banco).
@@ -310,7 +311,7 @@ async fn offline_unread_file_gives_eio_but_dirs_still_list() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn xattr_state_reports_cloud_then_offline_after_pin() {
+async fn xattr_state_reports_cloud_then_cached_then_offline_after_pin() {
     let fake = FakeDrive::start().await;
     let id = fake.add_file(&fake.root_id(), "nota.txt", b"texto".to_vec());
     let m = Mounted::new(fake).await;
@@ -322,6 +323,9 @@ async fn xattr_state_reports_cloud_then_offline_after_pin() {
         xattr(&path, "user.gdl.web_url"),
         format!("https://drive.google.com/file/d/{id}/view")
     );
+    // Lido pelo uso, o arquivo inteiro fica no cache: emblema próprio, sem estar fixado.
+    assert_eq!(std::fs::read(&path).unwrap(), b"texto");
+    assert_eq!(xattr(&path, "user.gdl.state"), "cached");
     m.engine.pins().pin(&ItemId(id)).unwrap();
     // O TTL de 1 s vale para atributos, não para xattrs: o kernel sempre pergunta.
     assert_eq!(xattr(&path, "user.gdl.state"), "offline");

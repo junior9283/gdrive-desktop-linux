@@ -21,7 +21,8 @@ impl Daemon {
         let (engine, state, item_id) = if let Ok((engine, id)) = self.item_at(path).await {
             let item = live_item(&engine, &id.0)?;
             let state = match gdl_fs::item_state(&item, engine.store()).map_err(super::failed)? {
-                "cloud" => "online",
+                // No cache, mas sem garantia: o cache pode ser limpo, só o fixado fica.
+                "cloud" | "cached" => "online",
                 state => state,
             };
             (engine, state, id.0)

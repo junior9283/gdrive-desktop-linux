@@ -66,10 +66,12 @@ state() { python3 -I -c 'import os, sys; os.setxattr(sys.argv[1], "user.gdl.stat
 state "$d/a.txt" offline
 state "$d/pasta" cloud
 touch "$d/falhou.txt" && state "$d/falhou.txt" error
+touch "$d/baixado.txt" && state "$d/baixado.txt" cached
 expect "um emblema para cada estado" "a.txt: gdl-emblem-offline
 pasta: gdl-emblem-cloud
 falhou.txt: gdl-emblem-error
-b.txt: " "$("$overlay" "$d/a.txt" "$d/pasta" "$d/falhou.txt" "$work/fora/b.txt")"
+baixado.txt: gdl-emblem-cached
+b.txt: " "$("$overlay" "$d/a.txt" "$d/pasta" "$d/falhou.txt" "$d/baixado.txt" "$work/fora/b.txt")"
 expect "pasta sincronizada: o estado vem do serviço, sem esperar" "Documentos: 
 c.txt: 
 mudou Documentos: gdl-emblem-offline

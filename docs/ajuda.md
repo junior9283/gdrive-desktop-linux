@@ -93,7 +93,7 @@ navegador, copiar o link (o aviso diz quem pode abrir), disponível off-line ou 
 **Compartilhar** (pessoas, papéis e acesso geral), **Gerenciar versões** (baixar, restaurar ou
 manter para sempre), **Adicionar atalho ao Drive** (escolhendo a pasta) e, nos arquivos do Office,
 abrir no Documentos, Planilhas ou Apresentações. No
-Dolphin, cada arquivo mostra também um emblema: na nuvem, off-line, sincronizando, em conflito ou
+Dolphin, cada arquivo mostra também um emblema: na nuvem, baixado (no cache, por ter sido aberto), off-line (fixado), sincronizando, em conflito ou
 com erro (o "!" some quando o envio dá certo).
 
 No KDE, o app tira a pasta do Drive do indexador de arquivos (Baloo), que baixaria tudo para ler o

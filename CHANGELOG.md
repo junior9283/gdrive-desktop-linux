@@ -7,6 +7,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+### Adicionado
+
+- Emblema próprio no gerenciador de arquivos para o que está baixado no cache (aberto pelo uso), diferente
+  do off-line fixado e do só-na-nuvem.
+
 ## [1.4.0] - 2026-11-07
 
 Atualização automática: achando uma versão nova, o app se atualiza sozinho com um clique.

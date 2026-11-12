@@ -46,6 +46,14 @@ O que já foi feito no Google, com data, para retomar sem refazer. Os passos est
   os dois termos aceitos, inclusive o de que escopo restrito exige a avaliação **CASA**, renovada
   todo ano. Status: "Your app's data access is under review".
 
+## 2026-11-12
+
+- Verification Center: marca **verificada**; acesso aos dados **em análise**. Progresso: requisitos
+  da página inicial e diretrizes da marca aprovados (06/11); requisitos da política de privacidade
+  em análise; funcionalidade, acesso aos dados, escopos mínimos e outros ainda não começaram. O
+  Google diz que a revisão leva de 4 a 6 semanas, com o primeiro e-mail em 3 a 5 dias. Nada pedido
+  ao usuário até agora.
+
 ## Próximo passo
 
 - Acompanhar o e-mail `gerasync@googlegroups.com` e Verification Center → View verification

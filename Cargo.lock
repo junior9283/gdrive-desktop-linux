@@ -1608,7 +1608,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-cli"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "clap",
  "futures-util",
@@ -1623,7 +1623,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-common"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "chrono",
  "fluent-bundle",
@@ -1639,7 +1639,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-daemon"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "flate2",
@@ -1676,7 +1676,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-drive"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -1702,7 +1702,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-engine"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1726,7 +1726,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-fake-drive"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1745,7 +1745,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-folders"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1768,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-fs"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1791,7 +1791,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-ipc"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "futures-util",
  "gdl-common",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-mcp"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "gdl-common",
  "gdl-ipc",
@@ -1815,7 +1815,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-store"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "gdl-common",
  "rusqlite",
@@ -1825,7 +1825,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-tray"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "ashpd",
  "futures-util",
@@ -1842,7 +1842,7 @@ dependencies = [
 
 [[package]]
 name = "gdl-ui"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "ashpd",
  "base64 0.22.1",

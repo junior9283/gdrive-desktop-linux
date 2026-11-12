@@ -7,6 +7,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.4.1] - 2026-11-12
+
 ### Adicionado
 
 - Emblema próprio no gerenciador de arquivos para o que está baixado no cache (aberto pelo uso), diferente

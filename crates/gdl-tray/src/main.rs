@@ -1,7 +1,7 @@
 //! `gdrive-desktop-linux-tray`: o ícone na bandeja. Só conversa com o serviço e com a janela
 //! (nunca com o Google).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -35,6 +35,8 @@ struct Tray {
     frame: usize,
     title: String,
     theme_path: String,
+    /// O painel ignora o `IconThemePath`: o `IconName` leva o arquivo do ícone.
+    icon_files: bool,
     actions: mpsc::UnboundedSender<Action>,
 }
 
@@ -48,7 +50,11 @@ impl ksni::Tray for Tray {
     }
 
     fn icon_name(&self) -> String {
-        self.view.icon_at(self.frame).into()
+        icon_for(
+            self.view.icon_at(self.frame),
+            &self.theme_path,
+            self.icon_files,
+        )
     }
 
     fn icon_theme_path(&self) -> String {
@@ -92,6 +98,30 @@ impl ksni::Tray for Tray {
                 }
             })
             .collect()
+    }
+}
+
+/// O painel do Cinnamon (pelo `xapp-sn-watcher`) repassa só o nome do ícone, sem o
+/// `IconThemePath`: o nome `gdl-*` não existe no tema do sistema e o painel mostra o ícone de
+/// "imagem ausente", que parece um erro, em qualquer estado. `desktop` é o `XDG_CURRENT_DESKTOP`.
+fn host_ignores_theme_path(desktop: &str) -> bool {
+    desktop
+        .split(':')
+        .any(|d| d.eq_ignore_ascii_case("x-cinnamon") || d.eq_ignore_ascii_case("cinnamon"))
+}
+
+/// O que vai no `IconName`: o nome (o painel acha o ícone no `IconThemePath`) ou, com
+/// `as_file`, o arquivo dele em `theme_path`; sem o arquivo, o nome.
+fn icon_for(name: &str, theme_path: &str, as_file: bool) -> String {
+    if !as_file || theme_path.is_empty() {
+        return name.into();
+    }
+    let file = Path::new(theme_path)
+        .join("hicolor/scalable/status")
+        .join(format!("{name}.svg"));
+    match file.canonicalize() {
+        Ok(file) => file.display().to_string(),
+        Err(_) => name.into(),
     }
 }
 
@@ -301,6 +331,9 @@ async fn run() -> Result<(), Error> {
         frame: 0,
         title: i18n.tr("notify-title", &[]),
         theme_path: theme_path(),
+        icon_files: host_ignores_theme_path(
+            &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+        ),
         actions,
     }
     // Na partida da sessão, a bandeja pode subir antes do Plasma: espera o painel aparecer em
@@ -429,6 +462,26 @@ mod tests {
         for name in STILL_ICONS.iter().chain(&SYNC_ICONS) {
             assert!(dir.join(format!("{name}.svg")).is_file(), "{name}");
         }
+    }
+
+    /// No Cinnamon o `IconName` é o arquivo do ícone; nos outros painéis, o nome de sempre.
+    #[test]
+    fn cinnamon_gets_the_icon_file() {
+        assert!(host_ignores_theme_path("X-Cinnamon"));
+        assert!(host_ignores_theme_path("ubuntu:cinnamon"));
+        assert!(!host_ignores_theme_path("KDE"));
+        assert!(!host_ignores_theme_path("ubuntu:GNOME"));
+        assert!(!host_ignores_theme_path(""));
+
+        let theme = theme_path();
+        assert_eq!(icon_for("gdl-synced", &theme, false), "gdl-synced");
+        let file = icon_for("gdl-synced", &theme, true);
+        assert!(
+            file.ends_with("hicolor/scalable/status/gdl-synced.svg") && Path::new(&file).is_file(),
+            "{file}"
+        );
+        assert_eq!(icon_for("gdl-nao-existe", &theme, true), "gdl-nao-existe");
+        assert_eq!(icon_for("gdl-synced", "", true), "gdl-synced");
     }
 
     #[test]

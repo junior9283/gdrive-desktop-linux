@@ -457,6 +457,14 @@ impl Engine {
         !self.is_suspicious_paused()
     }
 
+    /// Confere o envio de um arquivo que ainda não existe no Drive: ele não substitui versão
+    /// nenhuma, então não conta na vigia (o primeiro envio de uma pasta de instaladores não é
+    /// um ataque), mas espera enquanto a conta está pausada por ela. Devolve se o envio pode
+    /// seguir.
+    pub fn screen_new_file(&self) -> bool {
+        !self.is_suspicious_paused()
+    }
+
     /// Confere um renomear de `old` para `new`: ganhar extensão de arquivo cifrado conta como
     /// um arquivo suspeito, no mesmo detector das gravações.
     pub(crate) fn screen_rename(&self, old: &str, new: &str, now: i64) {

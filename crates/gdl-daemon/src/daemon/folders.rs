@@ -207,14 +207,16 @@ impl Daemon {
                 shortcut_targets: mount.join(&self.layout.shortcut_targets),
             });
         }
-        // A vigia de atividade suspeita da conta confere cada arquivo antes de ele subir.
+        // A vigia de atividade suspeita da conta confere cada arquivo antes de ele subir: só o
+        // que substitui uma versão do Drive conta; o arquivo novo só espera a pausa.
         let screen = {
             let engine = Arc::downgrade(engine);
-            move |name: &str, path: &Path| {
+            move |name: &str, path: &Path, rewrite: bool| {
                 let now = gdl_common::time::now_ms();
-                engine
-                    .upgrade()
-                    .is_none_or(|e| e.screen_write(name, path, now))
+                engine.upgrade().is_none_or(|e| match rewrite {
+                    true => e.screen_write(name, path, now),
+                    false => e.screen_new_file(),
+                })
             }
         };
         let sync = Arc::new(sync.with_screen(Arc::new(screen)));

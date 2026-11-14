@@ -40,6 +40,9 @@ pub enum SyncError {
     Symlink,
     #[error("envio segurado: atividade suspeita nos arquivos")]
     Held,
+    /// Uma pasta de dentro do par (`rel`, relativo a ele) não se deixa ler.
+    #[error("sem permissão para ler {rel}: {source}")]
+    Unreadable { rel: String, source: io::Error },
 }
 
 pub type Result<T> = std::result::Result<T, SyncError>;
@@ -58,6 +61,8 @@ pub struct Report {
     pub failed: Vec<Failure>,
     /// Itens locais que foram para a lixeira do sistema porque saíram do Drive.
     pub trashed: usize,
+    /// Quantos dos `failed` são envios segurados pela vigia de atividade suspeita.
+    pub held: usize,
 }
 
 /// Um caminho do par que não sincronizou.
@@ -77,9 +82,10 @@ pub struct Links {
     pub shortcut_targets: PathBuf,
 }
 
-/// Confere cada arquivo antes de ele subir (`nome`, caminho): `false` segura o envio até a
-/// próxima comparação (a vigia de atividade suspeita do motor, `Engine::screen_write`).
-pub type Screen = Arc<dyn Fn(&str, &Path) -> bool + Send + Sync>;
+/// Confere cada arquivo antes de ele subir (`nome`, caminho, se substitui uma versão que já
+/// está no Drive): `false` segura o envio até a próxima comparação (a vigia de atividade
+/// suspeita do motor, `Engine::screen_write`; o arquivo novo, `Engine::screen_new_file`).
+pub type Screen = Arc<dyn Fn(&str, &Path, bool) -> bool + Send + Sync>;
 
 /// O `md5` da base de um ponteiro ou link gravado pelo app: ele nunca sobe, e vai para a lixeira
 /// quando o item sai do Drive.
@@ -293,10 +299,22 @@ impl FolderSync {
         let mut report = Report::default();
         for _ in 0..MAX_PASSES {
             report.failed.clear();
+            report.held = 0;
             match self.pass(&mut report).await {
                 Ok(true) => {}
                 Ok(false) => break,
-                // Algo lá dentro não se deixa ler: sem ver tudo, nada é comparado.
+                // Uma pasta lá dentro não se deixa ler: sem ver tudo, nada é comparado. O
+                // caminho dela vai para a lista de erros, para o usuário saber qual é.
+                Err(SyncError::Unreadable { rel, source }) => {
+                    tracing::warn!(pair = self.pair.id, rel, "pasta ilegível no par: {source}");
+                    self.set_state(PairState::Stopped(StopReason::NoPermission))?;
+                    report.failed.push(Failure {
+                        rel,
+                        category: folder_category(ErrorCategory::NoPermission),
+                        message: source.to_string(),
+                    });
+                    break;
+                }
                 Err(SyncError::Io(e)) if e.kind() == io::ErrorKind::PermissionDenied => {
                     tracing::warn!(pair = self.pair.id, "pasta ilegível no par: {e}");
                     self.set_state(PairState::Stopped(StopReason::NoPermission))?;
@@ -312,6 +330,14 @@ impl FolderSync {
         }
         if report.trashed > 0 {
             self.trashed.send_modify(|total| *total += report.trashed);
+        }
+        if report.held > 0 {
+            // Um aviso por comparação, não um por arquivo: a pausa pode durar horas.
+            tracing::warn!(
+                pair = self.pair.id,
+                arquivos = report.held,
+                "envios segurados: atividade suspeita nos arquivos"
+            );
         }
         self.remember_failed(&report);
         Ok(report)
@@ -367,7 +393,12 @@ impl FolderSync {
     }
 
     fn failed(&self, report: &mut Report, rel: String, e: SyncError) {
-        tracing::warn!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
+        if matches!(e, SyncError::Held) {
+            report.held += 1;
+            tracing::debug!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
+        } else {
+            tracing::warn!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
+        }
         let category = folder_category(match &e {
             SyncError::Drive(e) => ErrorCategory::of(e),
             SyncError::Engine(e) => ErrorCategory::of_engine(e),
@@ -638,7 +669,7 @@ impl FolderSync {
         if self
             .screen
             .as_ref()
-            .is_some_and(|screen| !screen(last(rel), &path))
+            .is_some_and(|screen| !screen(last(rel), &path, existing.is_some()))
         {
             return Err(SyncError::Held);
         }
@@ -1047,14 +1078,14 @@ impl SessionSlot for KvSession<'_> {
 
 /// Arquivos e pastas sob `root` (sem atalhos simbólicos nem arquivos especiais), pelo caminho
 /// relativo. Uma pasta ilegível falha a varredura: ausente, ela iria para a lixeira do Drive.
-fn scan(root: &Path) -> io::Result<BTreeMap<String, Local>> {
+fn scan(root: &Path) -> Result<BTreeMap<String, Local>> {
     let mut out = BTreeMap::new();
     let walker = walkdir::WalkDir::new(root)
         .min_depth(1)
         .into_iter()
         .filter_entry(|e| e.file_name().to_str().is_some_and(|n| !ignored(n)));
     for entry in walker {
-        let entry = entry?;
+        let entry = entry.map_err(|e| unreadable(root, e))?;
         let kind = entry.file_type();
         if !kind.is_dir() && !kind.is_file() {
             continue;
@@ -1062,9 +1093,28 @@ fn scan(root: &Path) -> io::Result<BTreeMap<String, Local>> {
         let Some(rel) = entry.path().strip_prefix(root).ok().and_then(Path::to_str) else {
             continue;
         };
-        out.insert(rel.to_owned(), Local::of(&entry.metadata()?));
+        let meta = entry.metadata().map_err(io::Error::from)?;
+        out.insert(rel.to_owned(), Local::of(&meta));
     }
     Ok(out)
+}
+
+/// O erro de uma varredura: a pasta de dentro do par que negou a leitura vira `Unreadable`,
+/// com o caminho relativo; o resto segue como erro de arquivo.
+fn unreadable(root: &Path, e: walkdir::Error) -> SyncError {
+    let rel = e
+        .path()
+        .and_then(|p| p.strip_prefix(root).ok())
+        .and_then(Path::to_str)
+        .filter(|rel| !rel.is_empty())
+        .map(str::to_owned);
+    let source = io::Error::from(e);
+    match rel {
+        Some(rel) if source.kind() == io::ErrorKind::PermissionDenied => {
+            SyncError::Unreadable { rel, source }
+        }
+        _ => SyncError::Io(source),
+    }
 }
 
 /// O que um par tem no Drive, pelo caminho relativo: tudo abaixo de `root` menos os nomes que
@@ -1451,7 +1501,7 @@ mod tests {
         let screened = Arc::new(Mutex::new(vec![]));
         let screen = {
             let (allowed, screened) = (allowed.clone(), screened.clone());
-            move |name: &str, path: &Path| {
+            move |name: &str, path: &Path, _rewrite: bool| {
                 screened
                     .lock()
                     .unwrap()
@@ -1462,16 +1512,46 @@ mod tests {
         let sync = w.sync_with(8).with_screen(Arc::new(screen));
 
         w.refresh().await;
-        sync.reconcile().await.unwrap();
+        let report = sync.reconcile().await.unwrap();
         assert!(
             w.fake.find_live("a.txt").is_empty(),
             "a vigia segurou o envio"
         );
         assert_eq!(*screened.lock().unwrap(), [("a.txt".to_owned(), true)]);
+        assert_eq!((report.held, report.failed.len()), (1, 1));
 
         allowed.store(true, std::sync::atomic::Ordering::SeqCst);
-        sync.reconcile().await.unwrap();
+        let report = sync.reconcile().await.unwrap();
         assert_eq!(w.fake.find_live("a.txt").len(), 1);
+        assert_eq!((report.held, report.failed.len()), (0, 0));
+    }
+
+    /// A vigia sabe se o envio substitui uma versão do Drive: o arquivo novo não (o primeiro
+    /// envio de uma pasta não conta como atividade suspeita), a edição de um já enviado sim.
+    #[tokio::test]
+    async fn screen_tells_new_files_from_rewrites() {
+        let w = World::new().await;
+        w.write("a.txt", b"um");
+        let rewrites = Arc::new(Mutex::new(vec![]));
+        let screen = {
+            let rewrites = rewrites.clone();
+            move |name: &str, _path: &Path, rewrite: bool| {
+                rewrites.lock().unwrap().push((name.to_owned(), rewrite));
+                true
+            }
+        };
+        let sync = w.sync_with(8).with_screen(Arc::new(screen));
+
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+        w.write("a.txt", b"dois, editado");
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+
+        assert_eq!(
+            *rewrites.lock().unwrap(),
+            [("a.txt".to_owned(), false), ("a.txt".to_owned(), true)]
+        );
     }
 
     #[tokio::test]
@@ -1701,7 +1781,9 @@ mod tests {
             state(&w),
             PairState::Stopped(gdl_store::folders::StopReason::NoPermission)
         );
-        assert!(!report.failed.is_empty());
+        // A falha diz qual pasta negou a leitura (antes vinha sem caminho e sumia da lista).
+        let rels: Vec<&str> = report.failed.iter().map(|f| f.rel.as_str()).collect();
+        assert_eq!(rels, ["fechada"]);
         assert_eq!(w.fake.meta(&id)["trashed"], false);
         w.reconcile().await;
         assert_eq!(state(&w), PairState::Active, "legível de novo, o par volta");

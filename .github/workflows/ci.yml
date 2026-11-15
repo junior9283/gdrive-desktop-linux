@@ -56,9 +56,10 @@ jobs:
       - name: Testes da interface (JS)
         run: node --test 'crates/gdl-ui/ui/tests/*.test.js'
 
-  # A janela de verdade num Xvfb próprio, comandada pelo tauri-driver (scripts/e2e.sh).
+  # A janela de verdade num Xvfb próprio, comandada pelo tauri-driver (scripts/e2e.sh). Fixo no 24.04:
+  # no Ubuntu 26 do `ubuntu-latest` o pacote webkit2gtk-driver não existe.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Dependências do sistema

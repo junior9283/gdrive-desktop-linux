@@ -40,6 +40,8 @@ export async function render(root, { api, official, t }) {
   const update = el('div', { class: 'about-update' });
   drawUpdate(update, info, { api, t });
   Object.assign(screen, { update, ctx: { api, t } });
+  // Acha a versão publicada depois da última consulta; a faixa se refaz pelo `update-changed`.
+  api.call('check_update').catch(() => {});
   screen.listening ??= api.on('update-changed', async () => {
     const latest = await updateInfo(screen.ctx.api);
     drawUpdate(screen.update, latest, screen.ctx);

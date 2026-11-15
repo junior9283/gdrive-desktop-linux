@@ -4366,6 +4366,39 @@ async fn update_info_reports_offer() {
     assert_eq!(info.step, "available");
 }
 
+/// A tela Sobre acha a versão publicada depois da última consulta automática, e uma segunda
+/// pergunta logo em seguida não consulta de novo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_update_finds_a_release_published_after_the_last_check() {
+    let h = Harness::new().await;
+    assert_eq!(h.proxy.update_info().await.unwrap().version, "");
+
+    h.publish_release("v99.0.0", b"p", b"p");
+    h.proxy.check_update().await.unwrap();
+    assert_eq!(h.proxy.update_info().await.unwrap().version, "99.0.0");
+
+    h.publish_release("v99.1.0", b"p", b"p");
+    h.proxy.check_update().await.unwrap();
+    assert_eq!(
+        h.proxy.update_info().await.unwrap().version,
+        "99.0.0",
+        "dentro do intervalo, sem nova consulta"
+    );
+}
+
+/// Com uma atualização andando, a tela Sobre não troca a oferta por baixo dela.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_update_waits_while_an_update_runs() {
+    use crate::daemon::releases::UpdateStep;
+    let h = Harness::new().await;
+    h.daemon.set_step(UpdateStep::Downloading).await;
+    h.publish_release("v99.0.0", b"p", b"p");
+
+    h.proxy.check_update().await.unwrap();
+
+    assert_eq!(h.proxy.update_info().await.unwrap().version, "");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn start_update_over_dbus_runs_installer() {
     let h = Harness::new().await;

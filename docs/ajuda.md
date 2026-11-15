@@ -127,7 +127,7 @@ registrar o servidor no seu cliente.
 
 ## Atualizações
 
-Uma vez por dia o app procura uma versão nova. Achando, a notificação, o menu da bandeja e a tela
+Uma vez por dia o app procura uma versão nova, e também ao abrir a tela **Sobre**. Achando, a notificação, o menu da bandeja e a tela
 **Sobre** oferecem **Atualizar agora** ou **Depois** (que volta a oferecer no dia seguinte). O
 Atualizar agora baixa o pacote do formato que você instalou, confere a assinatura do projeto e
 instala; nos pacotes `.deb`, `.rpm` e do Arch, o sistema pede a senha de administrador (cancelar

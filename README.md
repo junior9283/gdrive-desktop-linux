@@ -4,7 +4,7 @@
 
 # gdrive-desktop-linux
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-1.4.2-blue)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-1.4.3-blue)
 ![Situação](https://img.shields.io/badge/situa%C3%A7%C3%A3o-est%C3%A1vel-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-green)
 ![Linguagem](https://img.shields.io/badge/Rust-%E2%9C%93-b7410e)
@@ -174,7 +174,7 @@ usa antes de se atualizar sozinho):
 minisign -Vm SHA256SUMS -P RWRno1ThiriVL29Enbhi5Bip6NzWREAS8tnXWHAd9jx7bS1JF1V5okTK
 ```
 
-**Atualizações.** Uma vez por dia o app procura uma versão nova no GitHub. Achando, oferece
+**Atualizações.** Uma vez por dia (e ao abrir a tela Sobre) o app procura uma versão nova no GitHub. Achando, oferece
 **Atualizar agora** ou **Depois** (na notificação, no menu da bandeja e na tela Sobre): ele baixa o
 pacote do seu formato, confere a assinatura e instala (os pacotes do sistema pedem a senha de
 administrador; o `.tar.gz` não). Quem compilou o código recebe só o aviso e o link da versão.

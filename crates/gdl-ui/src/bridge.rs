@@ -255,6 +255,7 @@ impl Bridge {
             "generate_diagnostics" => j!(s.generate_diagnostics()),
             "service_version" => j!(s.service_version()),
             "update_info" => j!(s.update_info()),
+            "check_update" => j!(s.check_update()),
             "start_update" => j!(s.start_update()),
             "open_release" => j!(s.open_release()),
             "restart" => j!(s.restart()),

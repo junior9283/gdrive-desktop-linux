@@ -496,6 +496,11 @@ impl Service {
         }
     }
 
+    /// Consulta a última versão (no máximo uma a cada poucos minutos).
+    async fn check_update(&self) {
+        self.daemon.refresh_release().await;
+    }
+
     /// "Atualizar agora": começa e volta logo.
     fn start_update(&self) -> Result<(), ServiceError> {
         self.daemon.start_update()

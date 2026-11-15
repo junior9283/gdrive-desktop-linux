@@ -719,6 +719,9 @@ pub trait Service {
     fn service_version(&self) -> Result<String, ServiceError>;
     /// A versão nova oferecida e o passo da atualização.
     fn update_info(&self) -> Result<UpdateInfo, ServiceError>;
+    /// Consulta a última versão agora (a tela Sobre pede ao abrir); no máximo uma a cada poucos
+    /// minutos. Volta ao fim da consulta; uma versão nova sai em `UpdateChanged`.
+    fn check_update(&self) -> Result<(), ServiceError>;
     /// "Atualizar agora": começa e volta logo (o andamento vem em `UpdateChanged`); sem versão
     /// nova, `NotFound`; já atualizando, `Refused`.
     fn start_update(&self) -> Result<(), ServiceError>;

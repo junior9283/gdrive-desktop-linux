@@ -7,6 +7,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.4.3] - 2026-11-15
+
+### Corrigido
+
+- A tela **Sobre** não achava uma versão publicada depois da última consulta automática (feita 1 minuto
+  depois de o serviço subir e a cada 24 h): ela só mostrava o que a consulta anterior tinha guardado.
+  Agora, ao abrir o Sobre, o serviço consulta o GitHub (no máximo uma vez a cada 5 minutos) e a faixa
+  com **Atualizar agora** aparece na hora.
+
 ## [1.4.2] - 2026-11-15
 
 ### Corrigido

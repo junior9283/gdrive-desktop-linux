@@ -48,7 +48,12 @@ impl UpdateStep {
 pub(crate) struct UpdateState {
     offer: Option<Offer>,
     step: UpdateStep,
+    /// Quando foi a última consulta (ms desde 1970; 0: nenhuma).
+    checked_ms: i64,
 }
+
+/// Entre duas consultas pedidas pela tela Sobre (`Daemon::refresh_release`).
+const ASK_GAP_MS: i64 = 5 * 60 * 1000;
 
 /// `<state_dir>/atualizacao.json`.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -89,6 +94,7 @@ impl Daemon {
     /// foi avisada há menos de `every`. Sem rede, sem release ou com resposta estranha, nada
     /// acontece (só o log detalhado registra).
     pub async fn check_release(&self) {
+        self.update.lock().unwrap().checked_ms = gdl_common::time::now_ms();
         let release = match updates::latest(&self.config.updates.url).await {
             Ok(Some(release)) => release,
             Ok(None) => return,
@@ -119,6 +125,18 @@ impl Daemon {
         self.save_update(&saved);
         let note = notify::new_version(&saved.version, can_install, &self.i18n);
         self.notify(&note).await;
+    }
+
+    /// A consulta pedida pela tela Sobre: vale se a última foi há mais de `ASK_GAP_MS` e se
+    /// nenhuma atualização está andando (a oferta não muda por baixo dela).
+    pub async fn refresh_release(&self) {
+        let (step, checked) = {
+            let state = self.update.lock().unwrap();
+            (state.step, state.checked_ms)
+        };
+        if step == UpdateStep::Available && gdl_common::time::now_ms() - checked >= ASK_GAP_MS {
+            self.check_release().await;
+        }
     }
 
     /// A oferta atual e o passo da atualização.
@@ -260,7 +278,7 @@ impl Daemon {
         }
     }
 
-    async fn set_step(&self, step: UpdateStep) {
+    pub(crate) async fn set_step(&self, step: UpdateStep) {
         self.update.lock().unwrap().step = step;
         self.emit_update_changed().await;
     }

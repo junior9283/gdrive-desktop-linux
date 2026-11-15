@@ -14,6 +14,9 @@
 #include <QDBusServiceWatcher>
 #include <QHash>
 #include <QFile>
+#include <QPointer>
+#include <QSet>
+#include <QThreadPool>
 #include <QUrl>
 
 #include <sys/xattr.h>
@@ -29,6 +32,24 @@ namespace
 const QList<QByteArray> STATES = {"cloud", "cached", "offline", "syncing", "conflict", "error"};
 // Só ao carregar o plugin a lista de raízes é esperada (o serviço responde do banco local).
 constexpr int ROOTS_TIMEOUT_MS = 200;
+// Quantos emblemas voltam para a thread principal de uma vez.
+constexpr int REDRAW_BATCH = 100;
+
+// O que `user.gdl.state` diz de um caminho; `attribute` é falso fora da montagem (sem o atributo).
+struct Read
+{
+    QString path;
+    bool attribute = false;
+    QByteArray state;
+};
+
+// Bloqueia enquanto o serviço responde (a montagem é dele): nunca na thread principal em lote.
+Read readState(const QString &path)
+{
+    char value[16];
+    const ssize_t size = getxattr(QFile::encodeName(path).constData(), "user.gdl.state", value, sizeof value);
+    return {path, size >= 0, QByteArray(value, qMax<ssize_t>(size, 0))};
+}
 }
 
 class GDriveOverlay : public KOverlayIconPlugin
@@ -54,14 +75,25 @@ public:
     QStringList getOverlays(const QUrl &url) override
     {
         if (!url.isLocalFile()) return {};
-        const QByteArray path = QFile::encodeName(url.toLocalFile());
-        char value[16];
-        const ssize_t size = getxattr(path.constData(), "user.gdl.state", value, sizeof value);
-        QByteArray state(value, qMax<ssize_t>(size, 0));
-        if (size < 0) {
-            const QString local = url.toLocalFile();
-            if (!inFolder(local)) return {};
-            const auto found = known.constFind(local);
+        const QString local = url.toLocalFile();
+        seen.insert(local);
+        return overlays(url, readState(local));
+    }
+
+private:
+    QStringList roots;
+    // O estado de cada caminho das pastas, como o serviço respondeu (vazio enquanto pergunta).
+    QHash<QString, QByteArray> known;
+    // Os caminhos que o Dolphin já pediu (os que ele mostra): só esses precisam de aviso de mudança.
+    QSet<QString> seen;
+
+    // Os emblemas de `url` a partir do que o atributo disse (`read`); só na thread principal.
+    QStringList overlays(const QUrl &url, const Read &read)
+    {
+        QByteArray state = read.state;
+        if (!read.attribute) {
+            if (!inFolder(read.path)) return {};
+            const auto found = known.constFind(read.path);
             if (found == known.constEnd()) {
                 askState(url);
                 return {};
@@ -71,11 +103,6 @@ public:
         if (!STATES.contains(state)) return {};
         return {QStringLiteral("gdl-emblem-") + QString::fromLatin1(state)};
     }
-
-private:
-    QStringList roots;
-    // O estado de cada caminho das pastas, como o serviço respondeu (vazio enquanto pergunta).
-    QHash<QString, QByteArray> known;
 
     void askState(const QUrl &url)
     {
@@ -89,6 +116,34 @@ private:
             if (reply.isError() || !known.contains(path)) return;
             known.insert(path, reply.value().value(0).toLatin1());
             Q_EMIT overlaysChanged(url, getOverlays(url));
+        });
+    }
+
+    // Lê o atributo dos `paths` fora da thread principal e devolve os emblemas em lotes. Depois de
+    // limpar o cache, milhares de caminhos mudam de uma vez; lê-los aqui travava o Dolphin.
+    void refresh(const QStringList &paths)
+    {
+        QPointer<GDriveOverlay> self(this);
+        QThreadPool::globalInstance()->start([self, paths] {
+            QList<Read> batch;
+            const auto redraw = [&self](const QList<Read> &reads) {
+                if (!self) return;
+                QMetaObject::invokeMethod(self.data(), [self, reads] {
+                    if (!self) return;
+                    for (const Read &read : reads) {
+                        const QUrl url = QUrl::fromLocalFile(read.path);
+                        Q_EMIT self->overlaysChanged(url, self->overlays(url, read));
+                    }
+                }, Qt::QueuedConnection);
+            };
+            for (const QString &path : paths) {
+                batch << readState(path);
+                if (batch.size() == REDRAW_BATCH) {
+                    redraw(batch);
+                    batch.clear();
+                }
+            }
+            if (!batch.isEmpty()) redraw(batch);
         });
     }
 
@@ -119,11 +174,13 @@ private Q_SLOTS:
 
     void statesChanged(const QStringList &paths)
     {
+        // Só os que o Dolphin já pediu; os outros leem o estado novo quando ele pedir.
+        QStringList shown;
         for (const QString &path : paths) {
             known.remove(path);
-            const QUrl url = QUrl::fromLocalFile(path);
-            Q_EMIT overlaysChanged(url, getOverlays(url));
+            if (seen.contains(path)) shown << path;
         }
+        if (!shown.isEmpty()) refresh(shown);
     }
 };
 

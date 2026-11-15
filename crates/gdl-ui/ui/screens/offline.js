@@ -108,12 +108,14 @@ function drawItems(items) {
   screen.items.replaceChildren(el('ul', { class: 'list offline-items' }, rows));
 }
 
-function clearCache() {
+// Com muito cache a limpeza leva segundos: o botão fica desligado até acabar.
+function clearCache({ currentTarget: button }) {
   const { api, t, locale } = screen.ctx;
+  button.disabled = true;
   attempt(api.call('clear_cache'), (freed) => {
     toast(t('offline-cache-cleared', { size: formatSize(freed, locale) }));
     return load();
-  });
+  }).finally(() => { button.disabled = false; });
 }
 
 async function clearOffline() {

@@ -85,7 +85,10 @@ import sys
 from gi.repository import Gio, GLib
 name = "io.github.junior9283.GDriveDesktopLinux1"
 Gio.bus_get_sync(Gio.BusType.SESSION).call_sync(name, "/io/github/junior9283/GDriveDesktopLinux1",
-    name + ".Service", "EmitStates", GLib.Variant("(as)", (sys.argv[1:],)), None, 0, -1)' "$d/a.txt"
+    name + ".Service", "EmitStates", GLib.Variant("(as)", (sys.argv[1:],)), None, 0, -1)' "$d/pasta" "$d/a.txt"
 wait "$waiting" || true
 expect "StatesChanged redesenha o emblema" "mudou a.txt: gdl-emblem-syncing" "$(tail -1 "$work/overlay")"
+# `pasta` mudou junto, mas o Dolphin nunca a pediu: sem leitura nem redesenho (depois de limpar o
+# cache, milhares de caminhos mudam de uma vez).
+expect "StatesChanged ignora o que o Dolphin não pediu" "0" "$(grep -c 'mudou pasta' "$work/overlay" || true)"
 exit $failed

@@ -7,6 +7,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ## [Não lançado]
 
+## [1.4.2] - 2026-11-15
+
+### Corrigido
+
+- **Limpar cache** travava o gerenciador de arquivos (Dolphin): o plugin de emblemas lia o estado de cada
+  arquivo que saía do cache na thread principal dele, milhares de leituras seguidas na montagem. Agora só
+  os arquivos que o Dolphin está mostrando são atualizados, e a leitura roda em segundo plano. O botão
+  também fica desligado enquanto a limpeza roda, para não disparar outra por cima.
+
 ## [1.4.1] - 2026-11-12
 
 ### Adicionado

@@ -1654,6 +1654,8 @@ impl Daemon {
         for (email, mount_point, engine, folders) in listed {
             let mut summary = engine.summary().map_err(failed)?;
             summary.errors += folders.failure_count();
+            // As pastas do computador também sincronizam: o que falta nelas conta.
+            summary.syncing += folders.pending();
             accounts.push(AccountSummary {
                 email,
                 mount_point: mount_point.display().to_string(),

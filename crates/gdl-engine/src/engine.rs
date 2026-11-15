@@ -402,6 +402,12 @@ impl Engine {
     }
 
     /// Muda a cada registro novo na atividade.
+    /// O registro da atividade da conta, para quem sincroniza por fora da montagem (as pastas
+    /// do computador) pôr os próprios envios e downloads na mesma lista.
+    pub fn activity_log(&self) -> Arc<ActivityLog> {
+        self.activity.clone()
+    }
+
     pub fn activity_changes(&self) -> watch::Receiver<u64> {
         self.activity.subscribe()
     }
@@ -454,6 +460,14 @@ impl Engine {
         if head.is_ok_and(|head| entropy(&head) > MIN_ENTROPY) {
             self.observe_suspicious(now);
         }
+        !self.is_suspicious_paused()
+    }
+
+    /// Confere o envio de um arquivo que ainda não existe no Drive: ele não substitui versão
+    /// nenhuma, então não conta na vigia (o primeiro envio de uma pasta de instaladores não é
+    /// um ataque), mas espera enquanto a conta está pausada por ela. Devolve se o envio pode
+    /// seguir.
+    pub fn screen_new_file(&self) -> bool {
         !self.is_suspicious_paused()
     }
 

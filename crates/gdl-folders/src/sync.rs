@@ -13,6 +13,7 @@ use gdl_common::names::{fit, split_ext, to_remote};
 use gdl_common::temp_files::is_local_only;
 use gdl_drive::client::{DriveClient, RemoteFile, SessionSlot};
 use gdl_drive::model::Change;
+use gdl_engine::activity::{ActivityLog, ActivityState};
 use gdl_engine::errors::ErrorCategory;
 use gdl_store::folders::{Pair, PairKind, PairState, StopReason, Synced};
 use gdl_store::{Item, ItemId, ItemKind, Store};
@@ -40,6 +41,9 @@ pub enum SyncError {
     Symlink,
     #[error("envio segurado: atividade suspeita nos arquivos")]
     Held,
+    /// Uma pasta de dentro do par (`rel`, relativo a ele) não se deixa ler.
+    #[error("sem permissão para ler {rel}: {source}")]
+    Unreadable { rel: String, source: io::Error },
 }
 
 pub type Result<T> = std::result::Result<T, SyncError>;
@@ -58,6 +62,8 @@ pub struct Report {
     pub failed: Vec<Failure>,
     /// Itens locais que foram para a lixeira do sistema porque saíram do Drive.
     pub trashed: usize,
+    /// Quantos dos `failed` são envios segurados pela vigia de atividade suspeita.
+    pub held: usize,
 }
 
 /// Um caminho do par que não sincronizou.
@@ -77,9 +83,10 @@ pub struct Links {
     pub shortcut_targets: PathBuf,
 }
 
-/// Confere cada arquivo antes de ele subir (`nome`, caminho): `false` segura o envio até a
-/// próxima comparação (a vigia de atividade suspeita do motor, `Engine::screen_write`).
-pub type Screen = Arc<dyn Fn(&str, &Path) -> bool + Send + Sync>;
+/// Confere cada arquivo antes de ele subir (`nome`, caminho, se substitui uma versão que já
+/// está no Drive): `false` segura o envio até a próxima comparação (a vigia de atividade
+/// suspeita do motor, `Engine::screen_write`; o arquivo novo, `Engine::screen_new_file`).
+pub type Screen = Arc<dyn Fn(&str, &Path, bool) -> bool + Send + Sync>;
 
 /// O `md5` da base de um ponteiro ou link gravado pelo app: ele nunca sobe, e vai para a lixeira
 /// quando o item sai do Drive.
@@ -101,6 +108,10 @@ pub struct FolderSync {
     /// Quantos itens as comparações já mandaram para a lixeira do sistema (para o aviso: quem
     /// ouve avisa a diferença, e duas comparações seguidas não se perdem).
     trashed: tokio::sync::watch::Sender<usize>,
+    /// Quantas ações da comparação em curso ainda faltam aplicar (envios, downloads, pastas a
+    /// criar, itens para a lixeira); zero fora de uma comparação. É o que a bandeja e a janela
+    /// somam ao "sincronizando".
+    pending: tokio::sync::watch::Sender<usize>,
     /// Os caminhos relativos cujo emblema mudou desde `take_synced`: ficaram sincronizados ou
     /// entraram ou saíram da lista de falhas (para os emblemas;
     /// um caminho que some ou muda de nome o gerenciador de arquivos já redesenha sozinho).
@@ -113,6 +124,8 @@ pub struct FolderSync {
     /// A raiz é um ponto de montagem agora (injetável nos testes).
     is_mount_point: fn(&Path) -> bool,
     screen: Option<Screen>,
+    /// A lista de atividade da conta: o que o par envia e baixa aparece nela.
+    activity: Option<Arc<ActivityLog>>,
 }
 
 impl FolderSync {
@@ -134,12 +147,14 @@ impl FolderSync {
             wake: tokio::sync::Notify::new(),
             state_changed: tokio::sync::watch::Sender::new(state),
             trashed: tokio::sync::watch::Sender::new(0),
+            pending: tokio::sync::watch::Sender::new(0),
             newly_synced: Mutex::default(),
             failed: Mutex::default(),
             synced_notify: tokio::sync::Notify::new(),
             links: None,
             is_mount_point: guard::is_mount_point,
             screen: None,
+            activity: None,
         }
     }
 
@@ -153,6 +168,22 @@ impl FolderSync {
     pub fn with_screen(mut self, screen: Screen) -> FolderSync {
         self.screen = Some(screen);
         self
+    }
+
+    /// Registra os envios e os downloads do par na atividade da conta (a janela principal).
+    pub fn with_activity(mut self, activity: Arc<ActivityLog>) -> FolderSync {
+        self.activity = Some(activity);
+        self
+    }
+
+    /// Registra o estado do item `id` na atividade, se ele está no banco (a linha é por item).
+    fn note(&self, id: &str, state: ActivityState) {
+        let Some(activity) = &self.activity else {
+            return;
+        };
+        if let Ok(Some(item)) = self.store.get(&ItemId(id.into())) {
+            activity.note(&self.store, &item, state, None);
+        }
     }
 
     /// Grava também os documentos Google e os atalhos (o Espelho).
@@ -187,6 +218,24 @@ impl FolderSync {
     /// Avisa a cada comparação que mandou itens para a lixeira do sistema, com o total até aqui.
     pub fn trashed_changes(&self) -> tokio::sync::watch::Receiver<usize> {
         self.trashed.subscribe()
+    }
+
+    /// Quantas ações a comparação em curso ainda tem por aplicar (zero fora de uma comparação).
+    pub fn pending(&self) -> usize {
+        *self.pending.borrow()
+    }
+
+    /// Avisa a cada mudança de `pending`.
+    pub fn pending_changes(&self) -> tokio::sync::watch::Receiver<usize> {
+        self.pending.subscribe()
+    }
+
+    /// Grava `pending`, avisando só se mudou.
+    fn set_pending(&self, change: impl FnOnce(usize) -> usize) {
+        self.pending.send_if_modified(|pending| {
+            let new = change(*pending);
+            std::mem::replace(pending, new) != new
+        });
     }
 
     /// Quantos caminhos do computador ainda não foram para o Drive como estão aqui (novos ou
@@ -285,6 +334,14 @@ impl FolderSync {
     /// Compara os dois lados e aplica o que mudou. Com a pasta do computador inacessível, o par
     /// para (`PairState::Stopped`) sem tocar em nada: nunca é tratado como "tudo excluído".
     pub async fn reconcile(&self) -> Result<Report> {
+        // Saia como sair, a comparação termina sem nada pendente.
+        struct Idle<'a>(&'a FolderSync);
+        impl Drop for Idle<'_> {
+            fn drop(&mut self) {
+                self.0.set_pending(|_| 0);
+            }
+        }
+        let _idle = Idle(self);
         if let Some(reason) = guard::root_problem(&self.pair.local).or(self.unmounted()?) {
             tracing::warn!(pair = self.pair.id, ?reason, "pasta do par inacessível");
             self.set_state(PairState::Stopped(reason))?;
@@ -293,10 +350,22 @@ impl FolderSync {
         let mut report = Report::default();
         for _ in 0..MAX_PASSES {
             report.failed.clear();
+            report.held = 0;
             match self.pass(&mut report).await {
                 Ok(true) => {}
                 Ok(false) => break,
-                // Algo lá dentro não se deixa ler: sem ver tudo, nada é comparado.
+                // Uma pasta lá dentro não se deixa ler: sem ver tudo, nada é comparado. O
+                // caminho dela vai para a lista de erros, para o usuário saber qual é.
+                Err(SyncError::Unreadable { rel, source }) => {
+                    tracing::warn!(pair = self.pair.id, rel, "pasta ilegível no par: {source}");
+                    self.set_state(PairState::Stopped(StopReason::NoPermission))?;
+                    report.failed.push(Failure {
+                        rel,
+                        category: folder_category(ErrorCategory::NoPermission),
+                        message: source.to_string(),
+                    });
+                    break;
+                }
                 Err(SyncError::Io(e)) if e.kind() == io::ErrorKind::PermissionDenied => {
                     tracing::warn!(pair = self.pair.id, "pasta ilegível no par: {e}");
                     self.set_state(PairState::Stopped(StopReason::NoPermission))?;
@@ -312,6 +381,14 @@ impl FolderSync {
         }
         if report.trashed > 0 {
             self.trashed.send_modify(|total| *total += report.trashed);
+        }
+        if report.held > 0 {
+            // Um aviso por comparação, não um por arquivo: a pausa pode durar horas.
+            tracing::warn!(
+                pair = self.pair.id,
+                arquivos = report.held,
+                "envios segurados: atividade suspeita nos arquivos"
+            );
         }
         self.remember_failed(&report);
         Ok(report)
@@ -352,14 +429,15 @@ impl FolderSync {
             true => PairState::ConfirmDeletes(deletes as u64),
             false => PairState::Active,
         })?;
+        self.set_pending(|_| plan.len());
         for (rel, action) in plan {
-            if v.gone.as_deref().is_some_and(|g| inside(&rel, g)) {
-                continue;
+            if !v.gone.as_deref().is_some_and(|g| inside(&rel, g)) {
+                match self.apply(&mut v, &rel, action).await {
+                    Ok(()) => report.applied += 1,
+                    Err(e) => self.failed(report, rel, e),
+                }
             }
-            match self.apply(&mut v, &rel, action).await {
-                Ok(()) => report.applied += 1,
-                Err(e) => self.failed(report, rel, e),
-            }
+            self.set_pending(|pending| pending.saturating_sub(1));
         }
         self.write_links(&v, report);
         report.trashed += v.trashed;
@@ -367,7 +445,12 @@ impl FolderSync {
     }
 
     fn failed(&self, report: &mut Report, rel: String, e: SyncError) {
-        tracing::warn!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
+        if matches!(e, SyncError::Held) {
+            report.held += 1;
+            tracing::debug!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
+        } else {
+            tracing::warn!(pair = self.pair.id, rel, "falha ao sincronizar: {e}");
+        }
         let category = folder_category(match &e {
             SyncError::Drive(e) => ErrorCategory::of(e),
             SyncError::Engine(e) => ErrorCategory::of_engine(e),
@@ -581,7 +664,10 @@ impl FolderSync {
             Action::Download => {
                 let r = remote.expect("lado do Drive");
                 match self.download(&path, &r, local).await? {
-                    Some(l) => self.put(rel, &r.id.0, l, r.md5)?,
+                    Some(l) => {
+                        self.put(rel, &r.id.0, l, r.md5)?;
+                        self.note(&r.id.0, ActivityState::Downloaded);
+                    }
                     // O arquivo mudou durante o download: a próxima passada decide de novo.
                     None => v.again = true,
                 }
@@ -638,7 +724,7 @@ impl FolderSync {
         if self
             .screen
             .as_ref()
-            .is_some_and(|screen| !screen(last(rel), &path))
+            .is_some_and(|screen| !screen(last(rel), &path, existing.is_some()))
         {
             return Err(SyncError::Held);
         }
@@ -649,11 +735,19 @@ impl FolderSync {
             stamp: format!("{}:{}", sent.size, sent.mtime_ns),
         };
         let modified_ms = sent.mtime_ns / 1_000_000;
+        // O arquivo novo só ganha linha na atividade depois de subir: antes disso ele não é um
+        // item do Drive.
         let r = match existing {
             Some(id) => {
-                self.client
+                self.note(id, ActivityState::Uploading);
+                let sent = self
+                    .client
                     .upload_update(id, &path, modified_ms, &session)
-                    .await?
+                    .await;
+                if sent.is_err() {
+                    self.note(id, ActivityState::UploadFailed);
+                }
+                sent?
             }
             None => {
                 self.client
@@ -662,6 +756,7 @@ impl FolderSync {
             }
         };
         self.remember(r.clone())?;
+        self.note(&r.id, ActivityState::Uploaded);
         Ok((r, sent))
     }
 
@@ -1047,14 +1142,14 @@ impl SessionSlot for KvSession<'_> {
 
 /// Arquivos e pastas sob `root` (sem atalhos simbólicos nem arquivos especiais), pelo caminho
 /// relativo. Uma pasta ilegível falha a varredura: ausente, ela iria para a lixeira do Drive.
-fn scan(root: &Path) -> io::Result<BTreeMap<String, Local>> {
+fn scan(root: &Path) -> Result<BTreeMap<String, Local>> {
     let mut out = BTreeMap::new();
     let walker = walkdir::WalkDir::new(root)
         .min_depth(1)
         .into_iter()
         .filter_entry(|e| e.file_name().to_str().is_some_and(|n| !ignored(n)));
     for entry in walker {
-        let entry = entry?;
+        let entry = entry.map_err(|e| unreadable(root, e))?;
         let kind = entry.file_type();
         if !kind.is_dir() && !kind.is_file() {
             continue;
@@ -1062,9 +1157,28 @@ fn scan(root: &Path) -> io::Result<BTreeMap<String, Local>> {
         let Some(rel) = entry.path().strip_prefix(root).ok().and_then(Path::to_str) else {
             continue;
         };
-        out.insert(rel.to_owned(), Local::of(&entry.metadata()?));
+        let meta = entry.metadata().map_err(io::Error::from)?;
+        out.insert(rel.to_owned(), Local::of(&meta));
     }
     Ok(out)
+}
+
+/// O erro de uma varredura: a pasta de dentro do par que negou a leitura vira `Unreadable`,
+/// com o caminho relativo; o resto segue como erro de arquivo.
+fn unreadable(root: &Path, e: walkdir::Error) -> SyncError {
+    let rel = e
+        .path()
+        .and_then(|p| p.strip_prefix(root).ok())
+        .and_then(Path::to_str)
+        .filter(|rel| !rel.is_empty())
+        .map(str::to_owned);
+    let source = io::Error::from(e);
+    match rel {
+        Some(rel) if source.kind() == io::ErrorKind::PermissionDenied => {
+            SyncError::Unreadable { rel, source }
+        }
+        _ => SyncError::Io(source),
+    }
 }
 
 /// O que um par tem no Drive, pelo caminho relativo: tudo abaixo de `root` menos os nomes que
@@ -1451,7 +1565,7 @@ mod tests {
         let screened = Arc::new(Mutex::new(vec![]));
         let screen = {
             let (allowed, screened) = (allowed.clone(), screened.clone());
-            move |name: &str, path: &Path| {
+            move |name: &str, path: &Path, _rewrite: bool| {
                 screened
                     .lock()
                     .unwrap()
@@ -1462,16 +1576,112 @@ mod tests {
         let sync = w.sync_with(8).with_screen(Arc::new(screen));
 
         w.refresh().await;
-        sync.reconcile().await.unwrap();
+        let report = sync.reconcile().await.unwrap();
         assert!(
             w.fake.find_live("a.txt").is_empty(),
             "a vigia segurou o envio"
         );
         assert_eq!(*screened.lock().unwrap(), [("a.txt".to_owned(), true)]);
+        assert_eq!((report.held, report.failed.len()), (1, 1));
 
         allowed.store(true, std::sync::atomic::Ordering::SeqCst);
-        sync.reconcile().await.unwrap();
+        let report = sync.reconcile().await.unwrap();
         assert_eq!(w.fake.find_live("a.txt").len(), 1);
+        assert_eq!((report.held, report.failed.len()), (0, 0));
+    }
+
+    /// O que o par envia e baixa aparece na atividade da conta, o mais recente primeiro.
+    #[tokio::test]
+    async fn transfers_show_in_the_activity() {
+        let w = World::new().await;
+        w.write("sobe.txt", b"daqui");
+        let log = Arc::new(ActivityLog::default());
+        let sync = w.sync_with(8).with_activity(log.clone());
+        let rows = || -> Vec<(String, ActivityState)> {
+            log.rows()
+                .into_iter()
+                .map(|r| (r.name.clone(), r.state))
+                .collect()
+        };
+
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+        assert_eq!(rows(), [("sobe.txt".to_owned(), ActivityState::Uploaded)]);
+
+        w.fake
+            .add_file(&w.pair.remote_id.0, "desce.txt", b"de la".to_vec());
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+        assert_eq!(
+            rows(),
+            [
+                ("desce.txt".to_owned(), ActivityState::Downloaded),
+                ("sobe.txt".to_owned(), ActivityState::Uploaded),
+            ]
+        );
+
+        w.write("sobe.txt", b"daqui, editado");
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+        assert_eq!(rows()[0], ("sobe.txt".to_owned(), ActivityState::Uploaded));
+        assert_eq!(rows().len(), 2, "uma linha por item");
+    }
+
+    /// Durante a comparação, `pending` diz quantas ações faltam (a bandeja mostra
+    /// "sincronizando" por ele); ao fim, zero.
+    #[tokio::test]
+    async fn pending_counts_down_during_a_pass() {
+        let w = World::new().await;
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            w.write(name, b"x");
+        }
+        let seen = Arc::new(Mutex::new(vec![]));
+        let pending = Arc::new(std::sync::OnceLock::new());
+        let screen = {
+            let (seen, pending) = (seen.clone(), pending.clone());
+            move |_name: &str, _path: &Path, _rewrite: bool| {
+                let pending: &tokio::sync::watch::Receiver<usize> = pending.get().unwrap();
+                seen.lock().unwrap().push(*pending.borrow());
+                true
+            }
+        };
+        let sync = w.sync_with(8).with_screen(Arc::new(screen));
+        pending.set(sync.pending_changes()).unwrap();
+
+        w.refresh().await;
+        assert_eq!(sync.pending(), 0);
+        sync.reconcile().await.unwrap();
+
+        assert_eq!(*seen.lock().unwrap(), [3, 2, 1]);
+        assert_eq!(sync.pending(), 0);
+    }
+
+    /// A vigia sabe se o envio substitui uma versão do Drive: o arquivo novo não (o primeiro
+    /// envio de uma pasta não conta como atividade suspeita), a edição de um já enviado sim.
+    #[tokio::test]
+    async fn screen_tells_new_files_from_rewrites() {
+        let w = World::new().await;
+        w.write("a.txt", b"um");
+        let rewrites = Arc::new(Mutex::new(vec![]));
+        let screen = {
+            let rewrites = rewrites.clone();
+            move |name: &str, _path: &Path, rewrite: bool| {
+                rewrites.lock().unwrap().push((name.to_owned(), rewrite));
+                true
+            }
+        };
+        let sync = w.sync_with(8).with_screen(Arc::new(screen));
+
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+        w.write("a.txt", b"dois, editado");
+        w.refresh().await;
+        sync.reconcile().await.unwrap();
+
+        assert_eq!(
+            *rewrites.lock().unwrap(),
+            [("a.txt".to_owned(), false), ("a.txt".to_owned(), true)]
+        );
     }
 
     #[tokio::test]
@@ -1701,7 +1911,9 @@ mod tests {
             state(&w),
             PairState::Stopped(gdl_store::folders::StopReason::NoPermission)
         );
-        assert!(!report.failed.is_empty());
+        // A falha diz qual pasta negou a leitura (antes vinha sem caminho e sumia da lista).
+        let rels: Vec<&str> = report.failed.iter().map(|f| f.rel.as_str()).collect();
+        assert_eq!(rels, ["fechada"]);
         assert_eq!(w.fake.meta(&id)["trashed"], false);
         w.reconcile().await;
         assert_eq!(state(&w), PairState::Active, "legível de novo, o par volta");

@@ -160,6 +160,14 @@ impl Runners {
             .sum()
     }
 
+    /// Quantas ações as comparações em curso ainda têm por aplicar, somando os pares.
+    pub(super) fn pending(&self) -> u32 {
+        self.lock()
+            .values()
+            .map(|(sync, ..)| sync.pending() as u32)
+            .sum()
+    }
+
     /// "Tentar de novo" num caminho do par `id`: o laço compara agora; falso sem o laço.
     pub(super) fn retry(&self, id: i64) -> bool {
         self.get(id).inspect(|sync| sync.retry()).is_some()
@@ -207,17 +215,22 @@ impl Daemon {
                 shortcut_targets: mount.join(&self.layout.shortcut_targets),
             });
         }
-        // A vigia de atividade suspeita da conta confere cada arquivo antes de ele subir.
+        // A vigia de atividade suspeita da conta confere cada arquivo antes de ele subir: só o
+        // que substitui uma versão do Drive conta; o arquivo novo só espera a pausa.
         let screen = {
             let engine = Arc::downgrade(engine);
-            move |name: &str, path: &Path| {
+            move |name: &str, path: &Path, rewrite: bool| {
                 let now = gdl_common::time::now_ms();
-                engine
-                    .upgrade()
-                    .is_none_or(|e| e.screen_write(name, path, now))
+                engine.upgrade().is_none_or(|e| match rewrite {
+                    true => e.screen_write(name, path, now),
+                    false => e.screen_new_file(),
+                })
             }
         };
-        let sync = Arc::new(sync.with_screen(Arc::new(screen)));
+        let sync = sync
+            .with_screen(Arc::new(screen))
+            .with_activity(engine.activity_log());
+        let sync = Arc::new(sync);
         let stop = shutdown.child_token();
         let running = tokio::spawn({
             let (sync, stop, events) = (sync.clone(), stop.clone(), engine.subscribe());
@@ -275,11 +288,39 @@ impl Daemon {
             }
         });
         self.forward_folder_states(sync.clone(), stop.clone());
+        self.forward_folder_pending(&sync, stop.clone());
         // Um laço por par: um que ainda estivesse ali não pode seguir rodando sem dono.
         if let Some((_, orphan, _)) = runners.lock().insert(id, (sync, stop, running)) {
             tracing::warn!(par = id, "um laço já rodava neste par; parado");
             orphan.cancel();
         }
+    }
+
+    /// O trabalho pendente do par entra no estado da conta (`status`): a bandeja e a janela só
+    /// releem o estado com `StatusChanged`. No máximo um sinal por `PENDING_SIGNAL_GAP`: uma
+    /// comparação com milhares de arquivos muda a contagem a cada um.
+    fn forward_folder_pending(self: &Arc<Self>, sync: &FolderSync, stop: CancellationToken) {
+        const PENDING_SIGNAL_GAP: std::time::Duration = std::time::Duration::from_secs(1);
+        let daemon = Arc::downgrade(self);
+        let mut pending = sync.pending_changes();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    () = stop.cancelled() => break,
+                    changed = pending.changed() => if changed.is_err() { break },
+                }
+                let Some(daemon) = daemon.upgrade() else {
+                    break;
+                };
+                pending.borrow_and_update();
+                daemon.emit_status_changed().await;
+                drop(daemon);
+                tokio::select! {
+                    () = stop.cancelled() => break,
+                    () = tokio::time::sleep(PENDING_SIGNAL_GAP) => {}
+                }
+            }
+        });
     }
 
     pub async fn local_folders(&self) -> Result<Vec<LocalFolder>, ServiceError> {
